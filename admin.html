@@ -149,7 +149,7 @@ async function loadTab(tab, silent) {
   currentTab = tab;
   if (tab === 'overview') { render(); return; }
   if (!silent) render(); // show loading state
-  const map = { messages:'/admin/api/messages', memory:'/admin/api/memory', queue:'/admin/api/queue', webhooks:'/admin/api/webhooks', schedules:'/admin/api/schedules', shared:'/admin/api/shared-memory' };
+  const map = { messages:'/admin/api/messages', memory:'/admin/api/memory', queue:'/admin/api/queue', webhooks:'/admin/api/webhooks', schedules:'/admin/api/schedules', shared:'/admin/api/shared-memory', sla:'/admin/api/sla' };
   let url = map[tab] + `?limit=100&offset=${pageOffsets[tab]||0}`;
   if (S.filterAgent) url += `&agent_id=${S.filterAgent}`;
   if (tab==='queue' && S.filterStatus) url += `&status=${S.filterStatus}`;
@@ -169,14 +169,17 @@ function render() {
     ${sc('Agents',s.total_agents)}${sc('Public',s.public_agents)}${sc('Jobs',s.total_jobs,'blue')}${sc('Pending',s.pending_jobs,'yellow')}
     ${sc('Memory',s.memory_keys)}${sc('Shared',s.shared_memory_keys)}${sc('Messages',s.messages_relayed,'blue')}${sc('WS',s.websocket_connections)}
     ${sc('Webhooks',s.active_webhooks)}${sc('Schedules',s.active_schedules)}
+  </div>
+  <div style="display:flex;gap:0.75rem;margin-bottom:1.5rem;flex-wrap:wrap">
+    <span class="badge ${d.encryption_enabled?'badge-green':'badge-dim'}" style="font-size:0.7rem;padding:4px 12px">${d.encryption_enabled?'AES Encrypted':'Unencrypted'}</span>
   </div>`;
 
-  const tabs = [['overview','Overview'],['messages','Messages',s.messages_relayed],['memory','Memory',s.memory_keys],['queue','Queue',s.total_jobs],['webhooks','Webhooks',s.active_webhooks],['schedules','Schedules',s.active_schedules],['shared','Shared Memory',s.shared_memory_keys]];
+  const tabs = [['overview','Overview'],['messages','Messages',s.messages_relayed],['memory','Memory',s.memory_keys],['queue','Queue',s.total_jobs],['webhooks','Webhooks',s.active_webhooks],['schedules','Schedules',s.active_schedules],['shared','Shared Memory',s.shared_memory_keys],['sla','SLA']];
   h += '<div class="tabs">';
   for (const [id,label,cnt] of tabs) h += `<button class="tab ${currentTab===id?'active':''}" onclick="loadTab('${id}')">${label}${cnt!==undefined?`<span class="tab-count">${cnt}</span>`:''}</button>`;
   h += '</div>';
 
-  const renderers = { overview:renderOverview, messages:renderMessages, memory:renderMemory, queue:renderQueue, webhooks:renderWebhooks, schedules:renderSchedules, shared:renderShared };
+  const renderers = { overview:renderOverview, messages:renderMessages, memory:renderMemory, queue:renderQueue, webhooks:renderWebhooks, schedules:renderSchedules, shared:renderShared, sla:renderSLA };
   h += (renderers[currentTab] || renderOverview)(S.dashboard);
   h += '<div class="refresh-info">Auto-refresh every <span>15s</span></div>';
   document.getElementById('dashboard').innerHTML = h;
@@ -329,6 +332,58 @@ function renderShared() {
     </tr>`;
   });
   return h+'</tbody></table></div>'+pager(data,'shared');
+}
+
+function renderSLA() {
+  const data = S.sla;
+  if(!data) return '<div class="loading"><div class="spinner"></div>Loading SLA data...</div>';
+  const w = data.windows;
+  const pctColor = p => p >= 99.9 ? 'accent' : p >= 99 ? 'yellow' : '';
+
+  let h = '<div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:2rem">';
+  for (const [label, d] of [['24 Hours', w['24h']], ['7 Days', w['7d']], ['30 Days', w['30d']]]) {
+    const pct = d.uptime_pct;
+    const col = pctColor(pct);
+    h += `<div class="stat-card" style="text-align:center">
+      <div class="stat-label">${label} Uptime</div>
+      <div class="stat-value" style="font-size:2rem;${col==='accent'?'color:var(--accent)':col==='yellow'?'color:var(--yellow)':'color:var(--red)'}">${pct.toFixed(3)}%</div>
+      <div style="font-size:0.7rem;color:var(--text-dim);font-family:'JetBrains Mono',monospace;margin-top:0.5rem">
+        ${d.successful_checks}/${d.total_checks} checks passed<br>
+        Avg response: ${d.avg_response_ms.toFixed(1)}ms
+      </div>
+    </div>`;
+  }
+  h += '</div>';
+
+  h += `<div class="detail-field full" style="margin-bottom:1.5rem;text-align:center">
+    <div class="detail-label">SLA Target</div>
+    <div class="detail-value accent" style="font-size:1.2rem">${e(data.sla_target)}</div>
+    <div style="font-size:0.7rem;color:var(--text-dim);margin-top:0.25rem">Checks every 60 seconds</div>
+  </div>`;
+
+  h += `<div class="detail-field full" style="margin-bottom:1.5rem;text-align:center">
+    <div class="detail-label">Storage Encryption</div>
+    <div class="detail-value ${data.encryption_enabled?'accent':''}" style="font-size:1rem">${data.encryption_enabled?'AES-128 (Fernet) Enabled':'Not Configured'}</div>
+  </div>`;
+
+  if (data.recent_checks && data.recent_checks.length) {
+    h += '<div style="margin-top:1rem"><div class="detail-label" style="margin-bottom:0.75rem">RECENT CHECKS</div>';
+    h += '<div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:1rem">';
+    for (const c of data.recent_checks.slice(0,60)) {
+      const col = c.status==='up' ? 'var(--accent)' : 'var(--red)';
+      h += `<div title="${c.checked_at} - ${c.status} (${c.response_ms}ms)" style="width:8px;height:24px;background:${col};border-radius:2px;opacity:0.8"></div>`;
+    }
+    h += '</div>';
+    h += '<div class="table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Status</th><th>Response</th></tr></thead><tbody>';
+    for (const c of data.recent_checks.slice(0,20)) {
+      h += `<tr><td class="mono" style="color:var(--text-dim)">${ago(c.checked_at)}</td>
+        <td>${c.status==='up'?'<span class="badge badge-green">UP</span>':'<span class="badge" style="color:var(--red);background:rgba(255,68,68,0.1)">DOWN</span>'}</td>
+        <td class="mono">${c.response_ms.toFixed(1)}ms</td></tr>`;
+    }
+    h += '</tbody></table></div>';
+    h += '</div>';
+  }
+  return h;
 }
 
 // ── Detail modals ──

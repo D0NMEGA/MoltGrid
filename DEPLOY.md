@@ -187,6 +187,62 @@ systemctl restart agentforge
 # http://82.180.139.113/admin/login
 ```
 
+## Encrypted Storage Setup
+
+```bash
+# 1. Generate encryption key locally (Git Bash):
+python generate_encryption_key.py
+# Copy the ENCRYPTION_KEY=... line
+
+# 2. On VPS, add to .env file:
+ssh root@82.180.139.113
+echo 'ENCRYPTION_KEY=your_key_here' >> /opt/agentforge/.env
+chmod 600 /opt/agentforge/.env
+
+# 3. Restart to enable encryption:
+systemctl restart agentforge
+
+# WARNING: If you lose the encryption key, encrypted data cannot be recovered.
+# Existing plaintext data remains readable after enabling encryption.
+# New writes will be encrypted; old data stays as-is until overwritten.
+```
+
+## Docker Deployment (Horizontal Scaling)
+
+```bash
+# 1. Clone and configure
+git clone https://github.com/D0NMEGA/agentforge.git /opt/agentforge
+cd /opt/agentforge
+cp .env.example .env
+# Edit .env with your ADMIN_PASSWORD_HASH and ENCRYPTION_KEY
+
+# 2. Build and run (2 app replicas by default)
+docker compose up -d --build
+
+# 3. Scale up/down
+docker compose up -d --scale app=4
+
+# 4. Check status
+docker compose ps
+docker compose logs -f app
+
+# 5. Update after code changes
+cd /opt/agentforge
+git pull origin main
+docker compose up -d --build
+```
+
+## SLA Monitoring
+
+```bash
+# Public SLA endpoint (no auth):
+curl http://82.180.139.113/v1/sla
+
+# Returns 24h, 7d, 30d uptime percentages
+# Health checks run every 60 seconds automatically
+# Target: 99.9% uptime
+```
+
 ## Firewall (if needed)
 
 ```bash

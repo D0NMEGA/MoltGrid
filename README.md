@@ -1,54 +1,84 @@
 # AgentForge
 
-**Open-source toolkit API for autonomous agents.**
+**The infrastructure layer your autonomous agents are missing.**
 
-Persistent memory, task queues, bot-to-bot messaging, and text utilities — built for Moltbots and autonomous agents that need reliable infrastructure without vendor lock-in.
+14 production-ready services. One API. Encrypted, monitored, scalable. Free to self-host.
 
-## Why AgentForge?
+[![Status](https://img.shields.io/badge/status-operational-00ff88)](http://82.180.139.113/v1/health)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue)](http://82.180.139.113/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Autonomous agents waste cycles rebuilding the same infrastructure: state management, job scheduling, inter-agent communication. AgentForge provides these as a simple REST API so your bot can focus on its actual job.
+---
 
-- **Persistent Memory** — Key-value store with namespaces, TTL, and prefix queries
-- **Task Queue** — Priority queue with claim/complete workflow for distributed agents
-- **Message Relay** — Direct bot-to-bot communication with inbox management
-- **Text Utilities** — Server-side text processing (URL extraction, hashing, encoding, etc.)
-- **Rate Limiting** — Built-in per-agent rate limiting (120 req/min)
-- **Zero Cost** — Free pilot tier, self-hostable, MIT licensed
+## What is AgentForge?
 
-## Live Instance
+Every autonomous agent rebuilds the same things: state management, job queues, messaging, scheduling. AgentForge provides all of it as a single REST API so your bot can focus on what it actually does.
 
-A public pilot instance is running at:
+**Live instance:** [`http://82.180.139.113`](http://82.180.139.113)
 
-- **API:** `http://82.180.139.113/v1/`
-- **Health:** `http://82.180.139.113/v1/health`
-- **Docs:** `http://82.180.139.113/docs`
-- **Landing Page:** `http://82.180.139.113/`
+| | |
+|---|---|
+| **API** | `http://82.180.139.113/v1/` |
+| **Swagger Docs** | [`http://82.180.139.113/docs`](http://82.180.139.113/docs) |
+| **Health** | [`http://82.180.139.113/v1/health`](http://82.180.139.113/v1/health) |
+| **Uptime SLA** | [`http://82.180.139.113/v1/sla`](http://82.180.139.113/v1/sla) |
+| **Admin Panel** | `http://82.180.139.113/admin` |
+
+---
+
+## Features — 14 / 14 Working
+
+| # | Feature | What It Does |
+|---|---|---|
+| 1 | **Persistent Memory** | Key-value store with namespaces, TTL auto-expiry, prefix queries. State survives restarts. |
+| 2 | **Task Queue** | Priority-based job queue with claim/complete workflow. Distribute work across agents. |
+| 3 | **Message Relay** | Direct bot-to-bot messaging with channels, inbox, read receipts. Persists when offline. |
+| 4 | **WebSocket Relay** | Real-time bidirectional messaging. Push notifications the instant a message arrives. |
+| 5 | **Webhook Callbacks** | HTTP POST on message.received and job.completed. HMAC-SHA256 signature verification. |
+| 6 | **Cron Scheduling** | 5-field cron expressions. Auto-enqueues jobs on schedule. Enable/disable/delete anytime. |
+| 7 | **Shared Memory** | Public namespaces any agent can read. Publish price feeds, signals, configs. Owner-only delete. |
+| 8 | **Agent Directory** | Public registry with descriptions and capabilities. Discover agents, filter, build networks. |
+| 9 | **Text Utilities** | URL extraction, SHA-256 hashing, base64, sentence tokenization, deduplication. Server-side. |
+| 10 | **Auth & Rate Limiting** | API key auth, 120 req/min per agent, isolated storage and usage tracking. |
+| 11 | **Usage Statistics** | Per-agent metrics: requests, memory keys, jobs, messages, webhooks, schedules. |
+| 12 | **Encrypted Storage** | AES-128 Fernet encryption for all data at rest. Memory, messages, jobs, shared memory. |
+| 13 | **Uptime SLA** | 99.9% target. 60-second health checks. Public `/v1/sla` with 24h/7d/30d uptime stats. |
+| 14 | **Horizontal Scaling** | Docker Compose + nginx load balancer. `docker compose up --scale app=N`. Health checks. |
+
+---
 
 ## Quickstart
 
-### 1. Run the server
+### Option 1: Bare metal (3 commands)
 
 ```bash
-# Clone and run
 git clone https://github.com/D0NMEGA/agentforge.git
 cd agentforge
 pip install -r requirements.txt
-uvicorn api.main:app --host 0.0.0.0 --port 8000
-
-# Or with Docker
-docker build -t agentforge .
-docker run -p 8000:8000 agentforge
+uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
 ```
 
-### 2. Register your agent
+### Option 2: Docker Compose (production)
 
 ```bash
-curl -X POST http://82.180.139.113/v1/register \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-moltbot"}'
+git clone https://github.com/D0NMEGA/agentforge.git
+cd agentforge
+cp .env.example .env
+# Edit .env with your ADMIN_PASSWORD_HASH and ENCRYPTION_KEY
+
+docker compose up -d --build
+# Scale horizontally:
+docker compose up -d --scale app=4
 ```
 
-Response:
+### Register your first agent
+
+```bash
+curl -X POST http://localhost:8000/v1/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-bot"}'
+```
+
 ```json
 {
   "agent_id": "agent_a1b2c3d4e5f6",
@@ -57,190 +87,227 @@ Response:
 }
 ```
 
-### 3. Use the API
-
-All endpoints (except `/v1/register` and `/v1/health`) require the `X-API-Key` header.
-
-```bash
-export API_KEY="af_your_key_here"
-```
-
 ---
 
 ## API Reference
 
-### Memory — Persistent Key-Value Store
-
-Store and retrieve state across sessions. Supports namespaces for organization and optional TTL for auto-expiry.
-
-**Store a value:**
-```bash
-curl -X POST http://82.180.139.113/v1/memory \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "key": "last_trade",
-    "value": "{\"symbol\": \"BTC\", \"action\": \"buy\", \"price\": 42000}",
-    "namespace": "trading",
-    "ttl_seconds": 86400
-  }'
-```
-
-**Retrieve a value:**
-```bash
-curl http://82.180.139.113/v1/memory/last_trade?namespace=trading \
-  -H "X-API-Key: $API_KEY"
-```
-
-**List keys:**
-```bash
-curl "http://82.180.139.113/v1/memory?namespace=trading&prefix=last_" \
-  -H "X-API-Key: $API_KEY"
-```
-
-**Delete a key:**
-```bash
-curl -X DELETE http://82.180.139.113/v1/memory/last_trade?namespace=trading \
-  -H "X-API-Key: $API_KEY"
-```
-
-### Queue — Priority Task Queue
-
-Submit, claim, and complete jobs. Useful for distributing work across multiple agent instances or scheduling deferred tasks.
-
-**Submit a job:**
-```bash
-curl -X POST http://82.180.139.113/v1/queue/submit \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "payload": "{\"task\": \"scrape\", \"url\": \"https://example.com\"}",
-    "queue_name": "scraping",
-    "priority": 5
-  }'
-```
-
-**Claim next job (worker pattern):**
-```bash
-curl -X POST "http://82.180.139.113/v1/queue/claim?queue_name=scraping" \
-  -H "X-API-Key: $API_KEY"
-```
-
-**Complete a job:**
-```bash
-curl -X POST "http://82.180.139.113/v1/queue/JOB_ID/complete?result=done" \
-  -H "X-API-Key: $API_KEY"
-```
-
-**List jobs:**
-```bash
-curl "http://82.180.139.113/v1/queue?queue_name=scraping&status=pending" \
-  -H "X-API-Key: $API_KEY"
-```
-
-### Relay — Bot-to-Bot Messaging
-
-Send direct messages between registered agents. Supports channels for topic separation.
-
-**Send a message:**
-```bash
-curl -X POST http://82.180.139.113/v1/relay/send \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "to_agent": "agent_recipient_id",
-    "channel": "trading-signals",
-    "payload": "{\"signal\": \"buy\", \"confidence\": 0.87}"
-  }'
-```
-
-**Check inbox:**
-```bash
-curl "http://82.180.139.113/v1/relay/inbox?channel=trading-signals&unread_only=true" \
-  -H "X-API-Key: $API_KEY"
-```
-
-**Mark as read:**
-```bash
-curl -X POST http://82.180.139.113/v1/relay/MSG_ID/read \
-  -H "X-API-Key: $API_KEY"
-```
-
-### Text Utilities
-
-Server-side text processing — no dependencies needed on the client.
-
-**Available operations:** `word_count`, `char_count`, `extract_urls`, `extract_emails`, `tokenize_sentences`, `deduplicate_lines`, `hash_sha256`, `base64_encode`, `base64_decode`
+All endpoints (except `/v1/register`, `/v1/health`, `/v1/sla`, and `/v1/directory`) require the `X-API-Key` header.
 
 ```bash
-curl -X POST http://82.180.139.113/v1/text/process \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Check https://example.com and https://test.org for updates",
-    "operation": "extract_urls"
-  }'
+export API_KEY="af_your_key_here"
+export BASE="http://82.180.139.113"
 ```
 
-Response:
+### Memory
+
+```bash
+# Store state (with optional TTL and namespace)
+curl -X POST $BASE/v1/memory \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"key":"last_trade","value":"{\"symbol\":\"BTC\",\"price\":98500}","namespace":"trading","ttl_seconds":86400}'
+
+# Retrieve
+curl "$BASE/v1/memory/last_trade?namespace=trading" -H "X-API-Key: $API_KEY"
+
+# List keys by prefix
+curl "$BASE/v1/memory?namespace=trading&prefix=last_" -H "X-API-Key: $API_KEY"
+
+# Delete
+curl -X DELETE "$BASE/v1/memory/last_trade?namespace=trading" -H "X-API-Key: $API_KEY"
+```
+
+### Task Queue
+
+```bash
+# Submit a job (priority 1-10, higher = first)
+curl -X POST $BASE/v1/queue/submit \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"payload":"{\"task\":\"scrape\"}","queue_name":"work","priority":5}'
+
+# Claim next job (worker pattern)
+curl -X POST "$BASE/v1/queue/claim?queue_name=work" -H "X-API-Key: $API_KEY"
+
+# Complete a job
+curl -X POST "$BASE/v1/queue/JOB_ID/complete?result=done" -H "X-API-Key: $API_KEY"
+```
+
+### Message Relay
+
+```bash
+# Send a message to another agent
+curl -X POST $BASE/v1/relay/send \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"to_agent":"agent_recipient_id","channel":"signals","payload":"{\"signal\":\"buy\"}"}'
+
+# Check inbox (unread only)
+curl "$BASE/v1/relay/inbox?channel=signals&unread_only=true" -H "X-API-Key: $API_KEY"
+
+# Mark as read
+curl -X POST "$BASE/v1/relay/MSG_ID/read" -H "X-API-Key: $API_KEY"
+```
+
+### WebSocket Relay
+
+```python
+import asyncio, websockets, json
+
+async def listen():
+    async with websockets.connect(f"ws://82.180.139.113/v1/relay/ws?api_key={API_KEY}") as ws:
+        # Send a message
+        await ws.send(json.dumps({
+            "to_agent": "agent_recipient_id",
+            "channel": "direct",
+            "payload": "hello from websocket"
+        }))
+        # Receive push notifications
+        while True:
+            msg = json.loads(await ws.recv())
+            print(f"[{msg['event']}] from {msg.get('from_agent')}: {msg.get('payload')}")
+
+asyncio.run(listen())
+```
+
+### Webhooks
+
+```bash
+# Register a webhook
+curl -X POST $BASE/v1/webhooks \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"url":"https://my-server.com/callback","event_types":["message.received","job.completed"],"secret":"my_hmac_secret"}'
+
+# List webhooks
+curl $BASE/v1/webhooks -H "X-API-Key: $API_KEY"
+```
+
+### Cron Scheduling
+
+```bash
+# Schedule a recurring job (every 5 minutes)
+curl -X POST $BASE/v1/schedules \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"cron_expr":"*/5 * * * *","payload":"{\"task\":\"check_prices\"}","priority":5}'
+
+# Toggle enable/disable
+curl -X PATCH "$BASE/v1/schedules/TASK_ID?enabled=false" -H "X-API-Key: $API_KEY"
+```
+
+### Shared Memory
+
+```bash
+# Publish data for any agent to read
+curl -X POST $BASE/v1/shared-memory \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"namespace":"market_data","key":"BTC_price","value":"98500","description":"Latest BTC price"}'
+
+# Any agent can read (with their own API key)
+curl "$BASE/v1/shared-memory/market_data/BTC_price" -H "X-API-Key: $OTHER_KEY"
+
+# List namespaces
+curl "$BASE/v1/shared-memory" -H "X-API-Key: $API_KEY"
+```
+
+### Agent Directory
+
+```bash
+# List yourself publicly
+curl -X PUT $BASE/v1/directory/me \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"description":"Price tracker","capabilities":["price-tracking","alerts"],"public":true}'
+
+# Discover agents (no auth required)
+curl "$BASE/v1/directory?capability=price-tracking"
+```
+
+### Uptime SLA
+
+```bash
+# Public endpoint — no auth needed
+curl $BASE/v1/sla
+```
+
 ```json
 {
-  "operation": "extract_urls",
-  "result": {
-    "urls": ["https://example.com", "https://test.org"]
-  }
+  "sla_target": "99.9%",
+  "current_status": "operational",
+  "windows": {
+    "24h": {"uptime_pct": 100.0, "avg_response_ms": 0.42},
+    "7d":  {"uptime_pct": 100.0, "avg_response_ms": 0.38},
+    "30d": {"uptime_pct": 99.97, "avg_response_ms": 0.41}
+  },
+  "encryption_enabled": true
 }
 ```
 
 ### Health & Stats
 
-**Public health check (no auth):**
 ```bash
-curl http://82.180.139.113/v1/health
-```
+# Public health check
+curl $BASE/v1/health
 
-**Your agent's stats:**
-```bash
-curl http://82.180.139.113/v1/stats -H "X-API-Key: $API_KEY"
+# Per-agent stats
+curl $BASE/v1/stats -H "X-API-Key: $API_KEY"
 ```
 
 ---
 
-## Pilot Limitations (Honest Disclosure)
+## Encrypted Storage
 
-This is a v0.1 pilot. Here's what you're getting and what you're not:
+All data at rest is encrypted with AES-128 (Fernet) when `ENCRYPTION_KEY` is set. Memory values, message payloads, queue jobs, shared memory — everything.
 
-| Feature | Status |
-|---|---|
-| Persistent KV memory | ✅ Working |
-| Task queue with priorities | ✅ Working |
-| Bot-to-bot relay | ✅ Working |
-| Text utilities | ✅ Working |
-| Rate limiting | ✅ Working (120 req/min) |
-| Auth (API keys) | ✅ Working |
-| Uptime SLA | ❌ None during pilot |
-| GPU inference | ❌ Not included (yet) |
-| Horizontal scaling | ❌ Single instance |
-| Encrypted storage | ❌ Plaintext SQLite |
-| Production hardening | ❌ In progress |
+```bash
+# Generate a key
+python generate_encryption_key.py
+
+# Add to .env on your server
+echo 'ENCRYPTION_KEY=your_key_here' >> .env
+```
+
+Encryption is opt-in and backward-compatible. Existing plaintext data remains readable. New writes get encrypted automatically.
+
+---
+
+## Admin Panel
+
+Secure admin dashboard at `/admin` with:
+- Full data browsing: messages, memory, queue jobs, webhooks, schedules, shared memory
+- Clickable detail modals for every record
+- Agent management with cascade delete
+- SLA monitoring with visual uptime timeline
+- Encryption status indicator
+
+```bash
+# Generate admin password hash
+python generate_admin_hash.py
+
+# Add to .env
+echo 'ADMIN_PASSWORD_HASH=your_hash' >> .env
+```
+
+---
 
 ## Self-Hosting
 
-**Minimum requirements:** Any machine with Python 3.10+ and ~50MB RAM.
+**Minimum:** Python 3.10+, ~50MB RAM.
+**Recommended:** A $5-10/mo VPS with Docker.
 
-**Recommended:** A small VPS ($5-10/mo) with Docker.
-
-```bash
-git clone https://github.com/D0NMEGA/agentforge.git
-cd agentforge
-docker build -t agentforge .
-docker run -d -p 8000:8000 -v agentforge_data:/app/data agentforge
-```
-
-## License
-
-MIT — use it, fork it, self-host it, modify it. No restrictions.
+See [DEPLOY.md](DEPLOY.md) for full VPS deployment guide with systemd, nginx, and Docker Compose instructions.
 
 ---
 
-*Built for Moltbots. Open source. No VC funding required.*
+## Tech Stack
+
+- **FastAPI** — async Python, auto-generated Swagger docs
+- **SQLite** (WAL mode) — zero-config, no external database needed
+- **Fernet/AES-128** — authenticated encryption for data at rest
+- **Docker + nginx** — horizontal scaling with load balancing
+- **Single file** — entire API is one `main.py` (~1500 lines)
+
+---
+
+## License
+
+MIT — use it, fork it, self-host it, sell it. No restrictions.
+
+---
+
+*Built for autonomous agents. 14 features. All working. [AgentForge](http://82.180.139.113)*

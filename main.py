@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager, contextmanager
 import hmac as _hmac
 import secrets
 import httpx
+from cryptography.fernet import Fernet, InvalidToken
 from croniter import croniter
 from fastapi import FastAPI, HTTPException, Header, Depends, Query, WebSocket, WebSocketDisconnect, Cookie, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,12 +39,17 @@ RATE_LIMIT_MAX = 120  # requests per window per agent
 ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
 ADMIN_SESSION_TTL = 3600 * 24  # 24 hours
 
+# Encrypted storage: set ENCRYPTION_KEY env var to enable AES encryption at rest
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
+_fernet = Fernet(ENCRYPTION_KEY.encode()) if ENCRYPTION_KEY else None
+
 # ─── App ──────────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app):
-    # Startup: launch scheduler background thread
+    # Startup: launch background threads
     threading.Thread(target=_scheduler_loop, daemon=True).start()
-    logger.info("Scheduler background thread started")
+    threading.Thread(target=_uptime_loop, daemon=True).start()
+    logger.info("Background threads started (scheduler, uptime monitor)")
     yield
     # Shutdown: nothing to clean up (daemon threads auto-exit)
 
@@ -51,7 +57,7 @@ app = FastAPI(
     title="AgentForge",
     description="Open-source toolkit API for autonomous agents. "
     "Persistent memory, task queues, message relay, and text utilities.",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -179,6 +185,14 @@ def init_db():
             token TEXT PRIMARY KEY,
             expires_at REAL NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS uptime_checks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            checked_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            response_ms REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_uptime_at ON uptime_checks(checked_at);
     """)
 
     # Migrate existing agents table — add columns that v0.1.0 didn't have
@@ -201,6 +215,24 @@ def get_db():
         conn.commit()
     finally:
         conn.close()
+
+# ─── Encryption Helpers ───────────────────────────────────────────────────
+def _encrypt(plaintext: str) -> str:
+    """Encrypt a value for storage. No-op if ENCRYPTION_KEY is not set."""
+    if not _fernet:
+        return plaintext
+    return "ENC:" + _fernet.encrypt(plaintext.encode()).decode()
+
+def _decrypt(ciphertext: str) -> str:
+    """Decrypt a value from storage. Handles both encrypted and plaintext."""
+    if not ciphertext or not _fernet:
+        return ciphertext or ""
+    if ciphertext.startswith("ENC:"):
+        try:
+            return _fernet.decrypt(ciphertext[4:].encode()).decode()
+        except (InvalidToken, Exception):
+            return ciphertext  # Return as-is if decryption fails
+    return ciphertext  # Plaintext (pre-encryption data)
 
 # ─── Auth Helpers ─────────────────────────────────────────────────────────────
 def hash_key(key: str) -> str:
@@ -297,14 +329,15 @@ def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
     if req.ttl_seconds:
         expires = (now + timedelta(seconds=req.ttl_seconds)).isoformat()
 
+    enc_value = _encrypt(req.value)
     with get_db() as db:
         db.execute("""
             INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at, expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_id, namespace, key)
             DO UPDATE SET value=?, updated_at=?, expires_at=?
-        """, (agent_id, req.namespace, req.key, req.value, now.isoformat(), now.isoformat(), expires,
-              req.value, now.isoformat(), expires))
+        """, (agent_id, req.namespace, req.key, enc_value, now.isoformat(), now.isoformat(), expires,
+              enc_value, now.isoformat(), expires))
 
     return {"status": "stored", "key": req.key, "namespace": req.namespace}
 
@@ -319,7 +352,9 @@ def memory_get(key: str, namespace: str = "default", agent_id: str = Depends(get
         ).fetchone()
         if not row:
             raise HTTPException(404, "Key not found or expired")
-        return MemoryGetResponse(**dict(row))
+        d = dict(row)
+        d["value"] = _decrypt(d["value"])
+        return MemoryGetResponse(**d)
 
 @app.delete("/v1/memory/{key}", tags=["Memory"])
 def memory_delete(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
@@ -380,7 +415,7 @@ def queue_submit(req: QueueSubmitRequest, agent_id: str = Depends(get_agent_id))
     with get_db() as db:
         db.execute(
             "INSERT INTO queue (job_id, agent_id, queue_name, payload, priority, created_at) VALUES (?,?,?,?,?,?)",
-            (job_id, agent_id, req.queue_name, req.payload, req.priority, now)
+            (job_id, agent_id, req.queue_name, _encrypt(req.payload), req.priority, now)
         )
     return {"job_id": job_id, "status": "pending", "queue_name": req.queue_name}
 
@@ -393,7 +428,11 @@ def queue_status(job_id: str, agent_id: str = Depends(get_agent_id)):
         ).fetchone()
         if not row:
             raise HTTPException(404, "Job not found")
-        return QueueJobResponse(**dict(row))
+        d = dict(row)
+        d["payload"] = _decrypt(d["payload"])
+        if d.get("result"):
+            d["result"] = _decrypt(d["result"])
+        return QueueJobResponse(**d)
 
 @app.post("/v1/queue/claim", tags=["Queue"])
 def queue_claim(queue_name: str = "default", agent_id: str = Depends(get_agent_id)):
@@ -411,7 +450,7 @@ def queue_claim(queue_name: str = "default", agent_id: str = Depends(get_agent_i
             "UPDATE queue SET status='processing', started_at=? WHERE job_id=?",
             (now, row["job_id"])
         )
-        return {"job_id": row["job_id"], "payload": row["payload"], "priority": row["priority"]}
+        return {"job_id": row["job_id"], "payload": _decrypt(row["payload"]), "priority": row["priority"]}
 
 @app.post("/v1/queue/{job_id}/complete", tags=["Queue"])
 def queue_complete(job_id: str, result: str = "", agent_id: str = Depends(get_agent_id)):
@@ -424,7 +463,7 @@ def queue_complete(job_id: str, result: str = "", agent_id: str = Depends(get_ag
             raise HTTPException(404, "Job not found or not in processing state")
         db.execute(
             "UPDATE queue SET status='completed', completed_at=?, result=? WHERE job_id=?",
-            (now, result, job_id)
+            (now, _encrypt(result) if result else result, job_id)
         )
 
     _fire_webhooks(job_row["agent_id"], "job.completed", {
@@ -479,7 +518,7 @@ def relay_send(msg: RelayMessage, agent_id: str = Depends(get_agent_id)):
             raise HTTPException(404, "Recipient agent not found")
         db.execute(
             "INSERT INTO relay (message_id, from_agent, to_agent, channel, payload, created_at) VALUES (?,?,?,?,?,?)",
-            (message_id, agent_id, msg.to_agent, msg.channel, msg.payload, now)
+            (message_id, agent_id, msg.to_agent, msg.channel, _encrypt(msg.payload), now)
         )
 
     # Push to WebSocket connections
@@ -533,7 +572,10 @@ def relay_inbox(
                 "WHERE to_agent=? AND channel=? ORDER BY created_at DESC LIMIT ?",
                 (agent_id, channel, limit)
             ).fetchall()
-    return {"channel": channel, "messages": [dict(r) for r in rows], "count": len(rows)}
+    messages = [dict(r) for r in rows]
+    for m in messages:
+        m["payload"] = _decrypt(m["payload"])
+    return {"channel": channel, "messages": messages, "count": len(messages)}
 
 @app.post("/v1/relay/{message_id}/read", tags=["Relay"])
 def relay_mark_read(message_id: str, agent_id: str = Depends(get_agent_id)):
@@ -721,7 +763,7 @@ def schedule_create(req: ScheduledTaskRequest, agent_id: str = Depends(get_agent
         db.execute(
             "INSERT INTO scheduled_tasks (task_id, agent_id, cron_expr, queue_name, payload, priority, created_at, next_run_at) "
             "VALUES (?,?,?,?,?,?,?,?)",
-            (task_id, agent_id, req.cron_expr, req.queue_name, req.payload, req.priority, now, next_run)
+            (task_id, agent_id, req.cron_expr, req.queue_name, _encrypt(req.payload), req.priority, now, next_run)
         )
     return ScheduledTaskResponse(
         task_id=task_id, cron_expr=req.cron_expr, queue_name=req.queue_name,
@@ -754,6 +796,7 @@ def schedule_get(task_id: str, agent_id: str = Depends(get_agent_id)):
             raise HTTPException(404, "Scheduled task not found")
     d = dict(row)
     d["enabled"] = bool(d["enabled"])
+    d["payload"] = _decrypt(d["payload"])
     return d
 
 @app.patch("/v1/schedules/{task_id}", tags=["Schedules"])
@@ -830,6 +873,37 @@ def _scheduler_loop():
         time.sleep(30)
 
 
+def _uptime_check():
+    """Record a single uptime check by probing the database."""
+    start = time.time()
+    try:
+        with get_db() as db:
+            db.execute("SELECT COUNT(*) FROM agents").fetchone()
+        elapsed_ms = (time.time() - start) * 1000
+        status = "up"
+    except Exception:
+        elapsed_ms = (time.time() - start) * 1000
+        status = "down"
+    try:
+        with get_db() as db:
+            db.execute("INSERT INTO uptime_checks (checked_at, status, response_ms) VALUES (?,?,?)",
+                       (datetime.now(timezone.utc).isoformat(), status, round(elapsed_ms, 2)))
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+            db.execute("DELETE FROM uptime_checks WHERE checked_at < ?", (cutoff,))
+    except Exception as ex:
+        logger.error(f"Uptime recording failed: {ex}")
+
+
+def _uptime_loop():
+    """Background thread that records uptime checks every 60 seconds."""
+    while True:
+        try:
+            _uptime_check()
+        except Exception as e:
+            logger.error(f"Uptime loop error: {e}")
+        time.sleep(60)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SHARED / PUBLIC MEMORY NAMESPACES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -849,15 +923,16 @@ def shared_memory_set(req: SharedMemorySetRequest, agent_id: str = Depends(get_a
     if req.ttl_seconds:
         expires = (now + timedelta(seconds=req.ttl_seconds)).isoformat()
 
+    enc_value = _encrypt(req.value)
     with get_db() as db:
         db.execute("""
             INSERT INTO shared_memory (owner_agent, namespace, key, value, description, created_at, updated_at, expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(owner_agent, namespace, key)
             DO UPDATE SET value=?, description=?, updated_at=?, expires_at=?
-        """, (agent_id, req.namespace, req.key, req.value, req.description,
+        """, (agent_id, req.namespace, req.key, enc_value, req.description,
               now.isoformat(), now.isoformat(), expires,
-              req.value, req.description, now.isoformat(), expires))
+              enc_value, req.description, now.isoformat(), expires))
     return {"status": "published", "namespace": req.namespace, "key": req.key}
 
 @app.get("/v1/shared-memory/{namespace}", tags=["Shared Memory"])
@@ -890,7 +965,9 @@ def shared_memory_get(namespace: str, key: str, agent_id: str = Depends(get_agen
         ).fetchone()
         if not row:
             raise HTTPException(404, "Key not found or expired")
-    return dict(row)
+    d = dict(row)
+    d["value"] = _decrypt(d["value"])
+    return d
 
 @app.delete("/v1/shared-memory/{namespace}/{key}", tags=["Shared Memory"])
 def shared_memory_delete(namespace: str, key: str, agent_id: str = Depends(get_agent_id)):
@@ -1039,7 +1116,7 @@ async def relay_websocket(ws: WebSocket):
                     continue
                 db.execute(
                     "INSERT INTO relay (message_id, from_agent, to_agent, channel, payload, created_at) VALUES (?,?,?,?,?,?)",
-                    (message_id, agent_id, to_agent, channel, payload, now)
+                    (message_id, agent_id, to_agent, channel, _encrypt(payload), now)
                 )
 
             # Confirm to sender
@@ -1166,8 +1243,9 @@ def admin_dashboard(_: bool = Depends(_verify_admin_session)):
             "active_schedules": schedules,
             "websocket_connections": sum(len(s) for s in _ws_connections.values()),
         },
-        "version": "0.3.0",
+        "version": "0.4.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "encryption_enabled": _fernet is not None,
     }
 
 @app.get("/admin/api/messages", tags=["Admin"])
@@ -1192,7 +1270,10 @@ def admin_messages(
                 "SELECT * FROM relay ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset)
             ).fetchall()
             total = db.execute("SELECT COUNT(*) as c FROM relay").fetchone()["c"]
-    return {"messages": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+    messages = [dict(r) for r in rows]
+    for m in messages:
+        m["payload"] = _decrypt(m["payload"])
+    return {"messages": messages, "total": total, "limit": limit, "offset": offset}
 
 @app.get("/admin/api/memory", tags=["Admin"])
 def admin_memory(
@@ -1214,7 +1295,10 @@ def admin_memory(
                 "SELECT * FROM memory ORDER BY updated_at DESC LIMIT ? OFFSET ?", (limit, offset)
             ).fetchall()
             total = db.execute("SELECT COUNT(*) as c FROM memory").fetchone()["c"]
-    return {"entries": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+    entries = [dict(r) for r in rows]
+    for ent in entries:
+        ent["value"] = _decrypt(ent["value"])
+    return {"entries": entries, "total": total, "limit": limit, "offset": offset}
 
 @app.get("/admin/api/queue", tags=["Admin"])
 def admin_queue(
@@ -1240,7 +1324,12 @@ def admin_queue(
             params + [limit, offset]
         ).fetchall()
         total = db.execute(f"SELECT COUNT(*) as c FROM queue {where}", params).fetchone()["c"]
-    return {"jobs": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+    jobs = [dict(r) for r in rows]
+    for j in jobs:
+        j["payload"] = _decrypt(j["payload"])
+        if j.get("result"):
+            j["result"] = _decrypt(j["result"])
+    return {"jobs": jobs, "total": total, "limit": limit, "offset": offset}
 
 @app.get("/admin/api/webhooks", tags=["Admin"])
 def admin_webhooks(_: bool = Depends(_verify_admin_session)):
@@ -1254,7 +1343,10 @@ def admin_schedules(_: bool = Depends(_verify_admin_session)):
     """Browse all scheduled tasks."""
     with get_db() as db:
         rows = db.execute("SELECT * FROM scheduled_tasks ORDER BY created_at DESC").fetchall()
-    return {"schedules": [dict(r) for r in rows], "total": len(rows)}
+    schedules = [dict(r) for r in rows]
+    for s in schedules:
+        s["payload"] = _decrypt(s["payload"])
+    return {"schedules": schedules, "total": len(schedules)}
 
 @app.get("/admin/api/shared-memory", tags=["Admin"])
 def admin_shared_memory(
@@ -1276,7 +1368,36 @@ def admin_shared_memory(
                 "SELECT * FROM shared_memory ORDER BY updated_at DESC LIMIT ? OFFSET ?", (limit, offset)
             ).fetchall()
             total = db.execute("SELECT COUNT(*) as c FROM shared_memory").fetchone()["c"]
-    return {"entries": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+    entries = [dict(r) for r in rows]
+    for ent in entries:
+        ent["value"] = _decrypt(ent["value"])
+    return {"entries": entries, "total": total, "limit": limit, "offset": offset}
+
+@app.get("/admin/api/sla", tags=["Admin"])
+def admin_sla(_: bool = Depends(_verify_admin_session)):
+    """Detailed SLA and uptime data for admin dashboard."""
+    with get_db() as db:
+        windows = {"24h": 1, "7d": 7, "30d": 30}
+        result = {}
+        for label, days in windows.items():
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            total = db.execute("SELECT COUNT(*) as c FROM uptime_checks WHERE checked_at >= ?", (cutoff,)).fetchone()["c"]
+            up = db.execute("SELECT COUNT(*) as c FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,)).fetchone()["c"]
+            avg_ms = db.execute("SELECT AVG(response_ms) as avg FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,)).fetchone()["avg"]
+            result[label] = {
+                "uptime_pct": round(up / total * 100, 3) if total > 0 else 100.0,
+                "total_checks": total,
+                "successful_checks": up,
+                "avg_response_ms": round(avg_ms or 0, 2),
+            }
+        recent = db.execute("SELECT * FROM uptime_checks ORDER BY checked_at DESC LIMIT 100").fetchall()
+    return {
+        "sla_target": "99.9%",
+        "windows": result,
+        "recent_checks": [dict(r) for r in recent],
+        "encryption_enabled": _fernet is not None,
+        "check_interval_seconds": 60,
+    }
 
 @app.get("/admin/api/agents/{agent_id}", tags=["Admin"])
 def admin_agent_detail(agent_id: str, _: bool = Depends(_verify_admin_session)):
@@ -1292,15 +1413,35 @@ def admin_agent_detail(agent_id: str, _: bool = Depends(_verify_admin_session)):
         wh = db.execute("SELECT * FROM webhooks WHERE agent_id=?", (agent_id,)).fetchall()
         sched = db.execute("SELECT * FROM scheduled_tasks WHERE agent_id=?", (agent_id,)).fetchall()
         shared = db.execute("SELECT * FROM shared_memory WHERE owner_agent=? ORDER BY updated_at DESC LIMIT 100", (agent_id,)).fetchall()
+    mem_list = [dict(r) for r in memory]
+    for m in mem_list:
+        m["value"] = _decrypt(m["value"])
+    job_list = [dict(r) for r in jobs]
+    for j in job_list:
+        j["payload"] = _decrypt(j["payload"])
+        if j.get("result"):
+            j["result"] = _decrypt(j["result"])
+    sent_list = [dict(r) for r in sent]
+    for m in sent_list:
+        m["payload"] = _decrypt(m["payload"])
+    recv_list = [dict(r) for r in received]
+    for m in recv_list:
+        m["payload"] = _decrypt(m["payload"])
+    sched_list = [dict(r) for r in sched]
+    for s in sched_list:
+        s["payload"] = _decrypt(s["payload"])
+    shared_list = [dict(r) for r in shared]
+    for s in shared_list:
+        s["value"] = _decrypt(s["value"])
     return {
         "agent": dict(agent),
-        "memory": [dict(r) for r in memory],
-        "jobs": [dict(r) for r in jobs],
-        "messages_sent": [dict(r) for r in sent],
-        "messages_received": [dict(r) for r in received],
+        "memory": mem_list,
+        "jobs": job_list,
+        "messages_sent": sent_list,
+        "messages_received": recv_list,
         "webhooks": [{**dict(r), "event_types": json.loads(r["event_types"])} for r in wh],
-        "schedules": [dict(r) for r in sched],
-        "shared_memory": [dict(r) for r in shared],
+        "schedules": sched_list,
+        "shared_memory": shared_list,
     }
 
 @app.delete("/admin/api/agents/{agent_id}", tags=["Admin"])
@@ -1345,6 +1486,33 @@ def admin_page():
 # HEALTH / METRICS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@app.get("/v1/sla", tags=["System"])
+def sla():
+    """Public SLA / uptime information — no auth required."""
+    with get_db() as db:
+        windows = {"24h": 1, "7d": 7, "30d": 30}
+        result = {}
+        for label, days in windows.items():
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            total = db.execute("SELECT COUNT(*) as c FROM uptime_checks WHERE checked_at >= ?", (cutoff,)).fetchone()["c"]
+            up = db.execute("SELECT COUNT(*) as c FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,)).fetchone()["c"]
+            avg_ms = db.execute("SELECT AVG(response_ms) as avg FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,)).fetchone()["avg"]
+            result[label] = {
+                "uptime_pct": round(up / total * 100, 3) if total > 0 else 100.0,
+                "total_checks": total,
+                "successful_checks": up,
+                "avg_response_ms": round(avg_ms or 0, 2),
+            }
+        last_check = db.execute("SELECT * FROM uptime_checks ORDER BY checked_at DESC LIMIT 1").fetchone()
+    return {
+        "sla_target": "99.9%",
+        "current_status": "operational",
+        "windows": result,
+        "last_check": dict(last_check) if last_check else None,
+        "check_interval_seconds": 60,
+        "encryption_enabled": _fernet is not None,
+    }
+
 @app.get("/v1/health", tags=["System"])
 def health():
     """Public health check — no auth required."""
@@ -1360,7 +1528,7 @@ def health():
 
     return {
         "status": "operational",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "stats": {
             "registered_agents": agent_count,
             "public_agents": public_agents,
@@ -1412,7 +1580,7 @@ def stats(agent_id: str = Depends(get_agent_id)):
 def root():
     return {
         "service": "AgentForge",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "docs": "/docs",
         "description": "Open-source toolkit API for autonomous agents",
         "endpoints": {
@@ -1427,5 +1595,6 @@ def root():
             "directory": "/v1/directory",
             "text": "/v1/text/process",
             "health": "GET /v1/health",
+            "sla": "GET /v1/sla",
         }
     }

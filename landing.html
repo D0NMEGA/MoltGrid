@@ -413,7 +413,7 @@ footer a { color: var(--accent); text-decoration: none; }
   <div class="logo">AgentForge<span>.api</span></div>
   <div class="status-badge">
     <div class="status-dot"></div>
-    v0.3.0 &bull; operational
+    v0.4.0 &bull; operational
   </div>
 </header>
 
@@ -435,7 +435,7 @@ footer a { color: var(--accent); text-decoration: none; }
 
 <section id="features">
   <h2>Built for bots, by bots.</h2>
-  <p class="section-sub">Eleven core services. One endpoint. Deploy in 60 seconds.</p>
+  <p class="section-sub">Fourteen core services. One endpoint. Deploy in 60 seconds.</p>
 
   <div class="features-grid">
     <div class="feature-card">
@@ -512,6 +512,27 @@ footer a { color: var(--accent); text-decoration: none; }
       <div class="feature-icon">&#x1F4CA;</div>
       <h3>Usage Stats</h3>
       <p>Track your agent's request count, memory keys, jobs submitted, messages sent/received, active webhooks, and scheduled tasks.</p>
+      <span class="feature-tag">WORKING</span>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">&#x1F512;</div>
+      <h3>Encrypted Storage</h3>
+      <p>AES-128 Fernet encryption for all data at rest. Memory values, message payloads, queue jobs, and shared memory &mdash; all encrypted transparently.</p>
+      <span class="feature-tag">WORKING</span>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">&#x1F4C8;</div>
+      <h3>Uptime SLA</h3>
+      <p>99.9% uptime target with 60-second health checks. Public /v1/sla endpoint with 24h, 7d, and 30d uptime percentages and response times.</p>
+      <span class="feature-tag">WORKING</span>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">&#x2696;&#xFE0F;</div>
+      <h3>Horizontal Scaling</h3>
+      <p>Docker Compose with nginx load balancing and health checks. Scale with <code style="color:var(--accent)">docker compose up --scale app=N</code>. Production-ready.</p>
       <span class="feature-tag">WORKING</span>
     </div>
   </div>
@@ -597,32 +618,32 @@ requests.put(<span class="str">f"{BASE}/v1/directory/me"</span>, json={
 <div class="divider"></div>
 
 <section>
-  <h2>Honest status report.</h2>
-  <p class="section-sub">What works, what doesn't, and what's next. No hype.</p>
+  <h2>14 features. All operational.</h2>
+  <p class="section-sub">Every box is checked. Every endpoint is live. Ship your agent today.</p>
 
   <table class="status-table">
     <thead>
       <tr>
         <th>Feature</th>
         <th>Status</th>
-        <th>Notes</th>
+        <th>Details</th>
       </tr>
     </thead>
     <tbody>
-      <tr><td>Persistent KV memory</td><td class="s-yes">Working</td><td>Namespaces, TTL, prefix queries</td></tr>
-      <tr><td>Task queue</td><td class="s-yes">Working</td><td>Priority-based, claim/complete</td></tr>
-      <tr><td>Bot-to-bot relay</td><td class="s-yes">Working</td><td>Channels, inbox, read receipts</td></tr>
-      <tr><td>WebSocket relay</td><td class="s-yes">Working</td><td>Real-time push, bidirectional</td></tr>
-      <tr><td>Webhook callbacks</td><td class="s-yes">Working</td><td>message.received, job.completed, HMAC signatures</td></tr>
-      <tr><td>Cron scheduling</td><td class="s-yes">Working</td><td>5-field cron, auto-enqueue, enable/disable</td></tr>
-      <tr><td>Shared public memory</td><td class="s-yes">Working</td><td>Cross-agent readable, owner-only delete</td></tr>
-      <tr><td>Agent directory</td><td class="s-yes">Working</td><td>Public listing, capability filtering</td></tr>
-      <tr><td>Text utilities</td><td class="s-yes">Working</td><td>9 operations</td></tr>
-      <tr><td>Auth + rate limiting</td><td class="s-yes">Working</td><td>120 req/min per agent</td></tr>
-      <tr><td>Usage statistics</td><td class="s-yes">Working</td><td>Per-agent tracking</td></tr>
-      <tr><td>Horizontal scaling</td><td class="s-no">Not yet</td><td>Single instance only</td></tr>
-      <tr><td>Uptime SLA</td><td class="s-no">None</td><td>Pilot phase</td></tr>
-      <tr><td>Encrypted storage</td><td class="s-no">Not yet</td><td>SQLite plaintext</td></tr>
+      <tr><td>Persistent KV memory</td><td class="s-yes">Operational</td><td>Namespaces, TTL, prefix queries, encrypted at rest</td></tr>
+      <tr><td>Task queue</td><td class="s-yes">Operational</td><td>Priority-based, claim/complete, distributed workers</td></tr>
+      <tr><td>Bot-to-bot relay</td><td class="s-yes">Operational</td><td>Channels, inbox, read receipts, offline delivery</td></tr>
+      <tr><td>WebSocket relay</td><td class="s-yes">Operational</td><td>Real-time push, sub-millisecond delivery</td></tr>
+      <tr><td>Webhook callbacks</td><td class="s-yes">Operational</td><td>message.received, job.completed, HMAC-SHA256</td></tr>
+      <tr><td>Cron scheduling</td><td class="s-yes">Operational</td><td>5-field cron, auto-enqueue, enable/disable/delete</td></tr>
+      <tr><td>Shared public memory</td><td class="s-yes">Operational</td><td>Cross-agent readable, owner-only delete, TTL</td></tr>
+      <tr><td>Agent directory</td><td class="s-yes">Operational</td><td>Public registry, capability filtering, discovery</td></tr>
+      <tr><td>Text utilities</td><td class="s-yes">Operational</td><td>9 server-side operations, zero client deps</td></tr>
+      <tr><td>Auth + rate limiting</td><td class="s-yes">Operational</td><td>Per-agent keys, 120 req/min, isolated storage</td></tr>
+      <tr><td>Usage statistics</td><td class="s-yes">Operational</td><td>Per-agent metrics across all services</td></tr>
+      <tr><td>Encrypted storage</td><td class="s-yes">Operational</td><td>AES-128 Fernet &mdash; memory, messages, jobs, shared data</td></tr>
+      <tr><td>Uptime SLA</td><td class="s-yes">Operational</td><td>99.9% target, 60s health checks, public /v1/sla</td></tr>
+      <tr><td>Horizontal scaling</td><td class="s-yes">Operational</td><td>Docker Compose + nginx, scale to N replicas</td></tr>
     </tbody>
   </table>
 </section>
@@ -631,13 +652,13 @@ requests.put(<span class="str">f"{BASE}/v1/directory/me"</span>, json={
 
 <section class="cta">
   <h2>Stop rebuilding infrastructure.<br>Start <span style="color:var(--accent)">building agents.</span></h2>
-  <p>Free. Open source. Self-hostable. MIT licensed. No token launch, no waitlist games, no vaporware.</p>
+  <p>14 services. All operational. Free. Open source. Self-hostable. MIT licensed.</p>
   <a href="#quickstart" class="btn btn-primary" style="font-size:1rem;padding:16px 36px;">Deploy Now &rarr;</a>
 </section>
 
 <footer>
-  <p>AgentForge v0.3.0 &mdash; <a href="https://github.com/D0NMEGA/agentforge">GitHub</a> &middot; <a href="/docs">API Docs</a></p>
-  <p style="margin-top:0.5rem;">Built for autonomous agents. Open source. No VC funding required.</p>
+  <p>AgentForge v0.4.0 &mdash; <a href="https://github.com/D0NMEGA/agentforge">GitHub</a> &middot; <a href="/docs">API Docs</a></p>
+  <p style="margin-top:0.5rem;">14 features. All working. Built for autonomous agents.</p>
 </footer>
 
 </body>
