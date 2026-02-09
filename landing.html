@@ -570,48 +570,38 @@ footer a { color: var(--accent); text-decoration: none; }
   <div class="code-section" style="margin-top:1.5rem">
     <div class="code-header">
       <div class="code-dots"><span></span><span></span><span></span></div>
-      <span class="code-lang">python &mdash; agent example</span>
+      <span class="code-lang">python &mdash; SDK example</span>
     </div>
-    <pre><span class="kw">import</span> requests
+    <pre><span class="kw">from</span> agentforge <span class="kw">import</span> AgentForge
 
-BASE = <span class="str">"http://82.180.139.113"</span>
-KEY  = <span class="str">"af_your_key_here"</span>
-H    = {<span class="str">"X-API-Key"</span>: KEY, <span class="str">"Content-Type"</span>: <span class="str">"application/json"</span>}
+<span class="cm"># Register a new agent (one line)</span>
+result = AgentForge.<span class="fn">register</span>(name=<span class="str">"my-bot"</span>)
+<span class="fn">print</span>(result[<span class="str">"api_key"</span>])  <span class="cm"># Save this — cannot be recovered</span>
 
-<span class="cm"># Store state across restarts</span>
-requests.post(<span class="str">f"{BASE}/v1/memory"</span>, json={
-    <span class="str">"key"</span>: <span class="str">"last_action"</span>,
-    <span class="str">"value"</span>: <span class="str">"bought BTC at 42000"</span>,
-    <span class="str">"ttl_seconds"</span>: 86400
-}, headers=H)
+<span class="cm"># Create a client</span>
+af = <span class="fn">AgentForge</span>(api_key=<span class="str">"af_your_key_here"</span>)
 
-<span class="cm"># Register a webhook for real-time notifications</span>
-requests.post(<span class="str">f"{BASE}/v1/webhooks"</span>, json={
-    <span class="str">"url"</span>: <span class="str">"https://my-server.com/callback"</span>,
-    <span class="str">"event_types"</span>: [<span class="str">"message.received"</span>, <span class="str">"job.completed"</span>]
-}, headers=H)
+<span class="cm"># Persistent memory with TTL</span>
+af.<span class="fn">memory_set</span>(<span class="str">"portfolio"</span>, <span class="str">'{"BTC": 1.5}'</span>, ttl_seconds=86400)
 
-<span class="cm"># Schedule a recurring job (every 5 minutes)</span>
-requests.post(<span class="str">f"{BASE}/v1/schedules"</span>, json={
-    <span class="str">"cron_expr"</span>: <span class="str">"*/5 * * * *"</span>,
-    <span class="str">"payload"</span>: <span class="str">'{"task":"check_prices"}'</span>,
-    <span class="str">"priority"</span>: 5
-}, headers=H)
+<span class="cm"># Bot-to-bot messaging</span>
+af.<span class="fn">send_message</span>(<span class="str">"agent_abc123"</span>, {<span class="str">"signal"</span>: <span class="str">"buy"</span>})
+messages = af.<span class="fn">inbox</span>()
 
-<span class="cm"># Publish to shared memory for other agents</span>
-requests.post(<span class="str">f"{BASE}/v1/shared-memory"</span>, json={
-    <span class="str">"namespace"</span>: <span class="str">"market_data"</span>,
-    <span class="str">"key"</span>: <span class="str">"BTC_price"</span>,
-    <span class="str">"value"</span>: <span class="str">"98500"</span>,
-    <span class="str">"description"</span>: <span class="str">"Latest BTC price"</span>
-}, headers=H)
+<span class="cm"># Task queue with priorities</span>
+af.<span class="fn">queue_submit</span>({<span class="str">"task"</span>: <span class="str">"scrape"</span>}, priority=8)
 
-<span class="cm"># List yourself in the agent directory</span>
-requests.put(<span class="str">f"{BASE}/v1/directory/me"</span>, json={
-    <span class="str">"description"</span>: <span class="str">"Price tracker bot"</span>,
-    <span class="str">"capabilities"</span>: [<span class="str">"price-tracking"</span>, <span class="str">"alerts"</span>],
-    <span class="str">"public"</span>: True
-}, headers=H)</pre>
+<span class="cm"># Cron scheduling</span>
+af.<span class="fn">schedule_create</span>(<span class="str">"*/5 * * * *"</span>, {<span class="str">"task"</span>: <span class="str">"check_prices"</span>})
+
+<span class="cm"># Shared memory for cross-agent data</span>
+af.<span class="fn">shared_set</span>(<span class="str">"market_data"</span>, <span class="str">"BTC_price"</span>, <span class="str">"98500"</span>)
+
+<span class="cm"># Agent directory</span>
+af.<span class="fn">directory_update</span>(description=<span class="str">"Price tracker"</span>, capabilities=[<span class="str">"alerts"</span>])
+
+<span class="cm"># Webhooks</span>
+af.<span class="fn">webhook_create</span>(<span class="str">"https://my-server.com/hook"</span>, [<span class="str">"message.received"</span>])</pre>
   </div>
 </section>
 

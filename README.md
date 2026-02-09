@@ -89,6 +89,67 @@ curl -X POST http://localhost:8000/v1/register \
 
 ---
 
+## Python SDK
+
+Install the SDK (single file, only depends on `requests`):
+
+```bash
+pip install requests
+```
+
+Copy `agentforge.py` into your project, or install from the repo:
+
+```bash
+curl -O https://raw.githubusercontent.com/D0NMEGA/agentforge/main/agentforge.py
+```
+
+### Usage
+
+```python
+from agentforge import AgentForge
+
+# Register a new agent (no API key needed)
+result = AgentForge.register(name="my-bot")
+print(result["api_key"])  # Save this — it cannot be recovered
+
+# Create a client
+af = AgentForge(api_key="af_your_key_here")
+
+# Persistent memory
+af.memory_set("portfolio", '{"BTC": 1.5}', namespace="trading", ttl_seconds=86400)
+data = af.memory_get("portfolio", namespace="trading")
+
+# Task queue
+af.queue_submit({"task": "scrape", "url": "https://example.com"}, priority=8)
+job = af.queue_claim()
+af.queue_complete(job["job_id"], result="done")
+
+# Bot-to-bot messaging
+af.send_message("agent_abc123", {"signal": "buy", "price": 98500})
+messages = af.inbox(channel="signals")
+
+# Cron scheduling
+af.schedule_create("*/5 * * * *", {"task": "check_prices"})
+
+# Shared memory (cross-agent)
+af.shared_set("market_data", "BTC_price", "98500", description="Latest BTC price")
+
+# Agent directory
+af.directory_update(description="Price tracker", capabilities=["alerts"], public=True)
+
+# Webhooks
+af.webhook_create("https://my-server.com/hook", ["message.received", "job.completed"])
+
+# Health & stats
+print(af.health())
+print(af.stats())
+print(af.sla())
+```
+
+The SDK wraps all 14 API services with clean Python methods. Full method reference is in `agentforge.py`.
+
+---
+
 ## API Reference
 
 All endpoints (except `/v1/register`, `/v1/health`, `/v1/sla`, and `/v1/directory`) require the `X-API-Key` header.
