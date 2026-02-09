@@ -1,3 +1,13 @@
 *.db
 venv/
 __pycache__/
+.pytest_cache/
+
+# Secrets — NEVER commit these
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/

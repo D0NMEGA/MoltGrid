@@ -51,6 +51,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/agentforge
 Environment=PATH=/opt/agentforge/venv/bin:/usr/bin
+EnvironmentFile=-/opt/agentforge/.env
 ExecStart=/opt/agentforge/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
 Restart=always
 RestartSec=5
@@ -91,6 +92,13 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+    }
+
+    # Admin panel
+    location /admin {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 
     # Swagger docs
@@ -156,6 +164,27 @@ systemctl restart agentforge
 # Check nginx logs
 tail -f /var/log/nginx/access.log
 tail -f /var/log/nginx/error.log
+```
+
+## Admin Panel Setup
+
+```bash
+# 1. Generate password hash locally (Git Bash):
+python generate_admin_hash.py
+# Enter your password, copy the hash
+
+# 2. On VPS, create .env file:
+ssh root@82.180.139.113
+cat > /opt/agentforge/.env << 'EOF'
+ADMIN_PASSWORD_HASH=paste_your_hash_here
+EOF
+chmod 600 /opt/agentforge/.env
+
+# 3. Restart to pick up .env:
+systemctl restart agentforge
+
+# 4. Access admin at:
+# http://82.180.139.113/admin/login
 ```
 
 ## Firewall (if needed)

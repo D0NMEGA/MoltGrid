@@ -701,7 +701,7 @@ class TestHealthAndStats:
         r = client.get("/")
         assert r.status_code == 200
         d = r.json()
-        assert d["version"] == "0.2.0"
+        assert d["version"] == "0.3.0"
         assert "webhooks" in d["endpoints"]
         assert "schedules" in d["endpoints"]
         assert "shared_memory" in d["endpoints"]

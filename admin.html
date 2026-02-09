@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentForge — Admin Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --surface2: #1a1a26;
+  --border: #2a2a3a;
+  --text: #e4e4ef;
+  --text-dim: #7a7a92;
+  --accent: #00ff88;
+  --accent-dim: #00cc6a;
+  --accent-glow: rgba(0, 255, 136, 0.15);
+  --red: #ff4444;
+  --yellow: #ffcc00;
+  --blue: #4488ff;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Space Grotesk', sans-serif;
+  line-height: 1.6;
+}
+
+.noise {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 999;
+}
+
+.grid-bg {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image:
+    linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none;
+}
+
+/* Header */
+header {
+  position: fixed;
+  top: 0; width: 100%;
+  padding: 1rem 2rem;
+  background: rgba(10,10,15,0.9);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  z-index: 100;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.logo {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: var(--accent);
+  letter-spacing: -0.5px;
+  text-decoration: none;
+}
+
+.logo span { color: var(--text-dim); }
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--accent);
+  padding: 6px 14px;
+  border: 1px solid rgba(0,255,136,0.2);
+  border-radius: 20px;
+  background: var(--accent-glow);
+}
+
+.status-dot {
+  width: 6px; height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,136,0.4); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(0,255,136,0); }
+}
+
+.logout-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  padding: 6px 14px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.logout-btn:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* Main Layout */
+.dashboard {
+  position: relative;
+  z-index: 10;
+  padding: 6rem 2rem 3rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+h1 {
+  font-size: 1.8rem;
+  font-weight: 600;
+  letter-spacing: -1px;
+  margin-bottom: 0.25rem;
+}
+
+.dash-sub {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin-bottom: 2rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Stat Cards */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2.5rem;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: border-color 0.2s;
+}
+
+.stat-card:hover { border-color: rgba(0,255,136,0.3); }
+
+.stat-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.5rem;
+}
+
+.stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.stat-value.blue { color: var(--blue); }
+.stat-value.yellow { color: var(--yellow); }
+.stat-value.red { color: var(--red); }
+
+/* Section titles */
+.section-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.section-title .count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--accent);
+  background: var(--accent-glow);
+  padding: 2px 10px;
+  border-radius: 10px;
+}
+
+/* Agent Table */
+.table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 2.5rem;
+}
+
+.agent-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.agent-table th {
+  text-align: left;
+  padding: 1rem 1.25rem;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.agent-table td {
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.agent-table tr:last-child td { border-bottom: none; }
+.agent-table tr:hover { background: rgba(0,255,136,0.02); }
+
+.agent-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+.agent-name {
+  font-weight: 500;
+}
+
+.agent-name.unnamed { color: var(--text-dim); font-style: italic; }
+
+.badge {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.badge-public {
+  color: var(--accent);
+  background: var(--accent-glow);
+  border: 1px solid rgba(0,255,136,0.2);
+}
+
+.badge-private {
+  color: var(--text-dim);
+  background: rgba(122,122,146,0.1);
+  border: 1px solid rgba(122,122,146,0.2);
+}
+
+.requests-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+}
+
+.last-seen {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.delete-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  padding: 5px 12px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.delete-btn:hover {
+  border-color: var(--red);
+  color: var(--red);
+  background: rgba(255,68,68,0.1);
+}
+
+/* Connections panel */
+.connections-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2.5rem;
+}
+
+.conn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.conn-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.conn-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.conn-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 0.25rem;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 3rem;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+}
+
+/* Auto-refresh indicator */
+.refresh-indicator {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-top: 2rem;
+  text-align: center;
+}
+
+.refresh-indicator span {
+  color: var(--accent);
+}
+
+/* Loading overlay */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-dim);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  width: 20px; height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 0.75rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  header { padding: 1rem; }
+  .dashboard { padding: 5rem 1rem 2rem; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .agent-table { font-size: 0.75rem; }
+  .agent-table th, .agent-table td { padding: 0.6rem 0.75rem; }
+  .col-hide-mobile { display: none; }
+}
+
+/* Confirm modal */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-overlay.active { display: flex; }
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 400px;
+  width: 90%;
+}
+
+.modal h3 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+}
+
+.modal p {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+
+.modal-id {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.modal-cancel {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  padding: 8px 18px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.modal-confirm {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  padding: 8px 18px;
+  background: var(--red);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.modal-confirm:hover { opacity: 0.85; }
+</style>
+</head>
+<body>
+<div class="noise"></div>
+<div class="grid-bg"></div>
+
+<header>
+  <a href="/" class="logo">AgentForge<span>.admin</span></a>
+  <div class="header-right">
+    <div class="status-badge">
+      <div class="status-dot"></div>
+      <span id="versionBadge">loading...</span>
+    </div>
+    <button class="logout-btn" onclick="handleLogout()">Logout</button>
+  </div>
+</header>
+
+<div class="dashboard" id="dashboard">
+  <div class="loading" id="loadingState">
+    <div class="spinner"></div>
+    Loading dashboard...
+  </div>
+</div>
+
+<!-- Delete confirmation modal -->
+<div class="modal-overlay" id="deleteModal">
+  <div class="modal">
+    <h3>Delete Agent</h3>
+    <p>This will permanently delete agent <span class="modal-id" id="modalAgentId"></span> and all associated data (memory, jobs, messages, webhooks, schedules, shared memory).</p>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-confirm" id="modalConfirmBtn" onclick="confirmDelete()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let refreshTimer;
+let deleteTargetId = null;
+
+async function loadDashboard() {
+  try {
+    const res = await fetch('/admin/api/dashboard', {credentials: 'same-origin'});
+    if (res.status === 401) {
+      window.location.href = '/admin/login';
+      return;
+    }
+    const data = await res.json();
+    renderDashboard(data);
+  } catch (e) {
+    document.getElementById('dashboard').innerHTML =
+      '<div class="loading">Connection error. Retrying...</div>';
+  }
+}
+
+function renderDashboard(data) {
+  const s = data.stats;
+  document.getElementById('versionBadge').textContent = `v${data.version} \u2022 admin`;
+
+  const timeAgo = (iso) => {
+    if (!iso) return 'never';
+    const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60) return `${Math.floor(diff)}s ago`;
+    if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+    return `${Math.floor(diff/86400)}d ago`;
+  };
+
+  let html = `
+    <h1>Admin Dashboard</h1>
+    <p class="dash-sub">System overview &bull; ${new Date(data.timestamp).toLocaleString()}</p>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Agents</div>
+        <div class="stat-value">${s.total_agents}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Public</div>
+        <div class="stat-value">${s.public_agents}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Jobs</div>
+        <div class="stat-value blue">${s.total_jobs}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Pending</div>
+        <div class="stat-value yellow">${s.pending_jobs}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Memory Keys</div>
+        <div class="stat-value">${s.memory_keys}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Shared Keys</div>
+        <div class="stat-value">${s.shared_memory_keys}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Messages</div>
+        <div class="stat-value blue">${s.messages_relayed}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">WS Connections</div>
+        <div class="stat-value">${s.websocket_connections}</div>
+      </div>
+    </div>
+
+    <div class="connections-panel">
+      <div class="section-title">Live Connections</div>
+      <div class="conn-grid">
+        <div class="conn-card">
+          <div class="conn-label">WebSocket</div>
+          <div class="conn-value">${s.websocket_connections}</div>
+        </div>
+        <div class="conn-card">
+          <div class="conn-label">Active Webhooks</div>
+          <div class="conn-value">${s.active_webhooks}</div>
+        </div>
+        <div class="conn-card">
+          <div class="conn-label">Active Schedules</div>
+          <div class="conn-value">${s.active_schedules}</div>
+        </div>
+        <div class="conn-card">
+          <div class="conn-label">Processing Jobs</div>
+          <div class="conn-value">${s.processing_jobs}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Registered Agents <span class="count">${data.agents.length}</span></div>
+  `;
+
+  if (data.agents.length === 0) {
+    html += '<div class="table-wrap"><div class="empty-state">No agents registered yet</div></div>';
+  } else {
+    html += `
+      <div class="table-wrap">
+        <table class="agent-table">
+          <thead>
+            <tr>
+              <th>Agent ID</th>
+              <th>Name</th>
+              <th class="col-hide-mobile">Visibility</th>
+              <th>Requests</th>
+              <th class="col-hide-mobile">Last Seen</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+    for (const a of data.agents) {
+      const name = a.name
+        ? `<span class="agent-name">${esc(a.name)}</span>`
+        : `<span class="agent-name unnamed">unnamed</span>`;
+      const vis = a.public
+        ? '<span class="badge badge-public">PUBLIC</span>'
+        : '<span class="badge badge-private">PRIVATE</span>';
+      html += `
+        <tr>
+          <td><span class="agent-id">${esc(a.agent_id)}</span></td>
+          <td>${name}</td>
+          <td class="col-hide-mobile">${vis}</td>
+          <td><span class="requests-count">${a.request_count || 0}</span></td>
+          <td class="col-hide-mobile"><span class="last-seen">${timeAgo(a.last_seen)}</span></td>
+          <td><button class="delete-btn" onclick="showDeleteModal('${esc(a.agent_id)}')">Delete</button></td>
+        </tr>
+      `;
+    }
+    html += '</tbody></table></div>';
+  }
+
+  html += '<div class="refresh-indicator">Auto-refresh every <span>10s</span></div>';
+
+  document.getElementById('dashboard').innerHTML = html;
+}
+
+function esc(str) {
+  if (!str) return '';
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showDeleteModal(agentId) {
+  deleteTargetId = agentId;
+  document.getElementById('modalAgentId').textContent = agentId;
+  document.getElementById('deleteModal').classList.add('active');
+}
+
+function closeModal() {
+  document.getElementById('deleteModal').classList.remove('active');
+  deleteTargetId = null;
+}
+
+async function confirmDelete() {
+  if (!deleteTargetId) return;
+  const btn = document.getElementById('modalConfirmBtn');
+  btn.textContent = 'Deleting...';
+  btn.disabled = true;
+
+  try {
+    await fetch(`/admin/api/agents/${deleteTargetId}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    closeModal();
+    loadDashboard();
+  } catch (e) {
+    alert('Failed to delete agent');
+  }
+
+  btn.textContent = 'Delete';
+  btn.disabled = false;
+}
+
+async function handleLogout() {
+  await fetch('/admin/api/logout', {method: 'POST', credentials: 'same-origin'});
+  window.location.href = '/admin/login';
+}
+
+// Initial load + auto-refresh
+loadDashboard();
+refreshTimer = setInterval(loadDashboard, 10000);
+</script>
+</body>
+</html>

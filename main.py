@@ -16,11 +16,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from contextlib import asynccontextmanager, contextmanager
 
+import hmac as _hmac
+import secrets
 import httpx
 from croniter import croniter
-from fastapi import FastAPI, HTTPException, Header, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Header, Depends, Query, WebSocket, WebSocketDisconnect, Cookie, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("agentforge")
@@ -31,6 +33,12 @@ MAX_MEMORY_VALUE_SIZE = 50_000  # 50KB per value
 MAX_QUEUE_PAYLOAD_SIZE = 100_000  # 100KB per job
 RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX = 120  # requests per window per agent
+
+# Admin auth: load password hash from env (set on VPS only, never in code)
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
+ADMIN_SESSION_SECRET = os.getenv("ADMIN_SESSION_SECRET", secrets.token_hex(32))
+_admin_sessions: dict[str, float] = {}  # token -> expiry timestamp
+ADMIN_SESSION_TTL = 3600 * 4  # 4 hours
 
 # ─── App ──────────────────────────────────────────────────────────────────────
 @asynccontextmanager
@@ -45,7 +53,7 @@ app = FastAPI(
     title="AgentForge",
     description="Open-source toolkit API for autonomous agents. "
     "Persistent memory, task queues, message relay, and text utilities.",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -644,8 +652,6 @@ def webhook_delete(webhook_id: str, agent_id: str = Depends(get_agent_id)):
 
 def _fire_webhooks(agent_id: str, event_type: str, data: dict):
     """Fire webhooks for an agent in a background thread. Best-effort delivery."""
-    import hmac as _hmac
-
     with get_db() as db:
         rows = db.execute(
             "SELECT webhook_id, url, secret, event_types FROM webhooks WHERE agent_id=? AND active=1",
@@ -1071,6 +1077,124 @@ async def relay_websocket(ws: WebSocket):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# ADMIN PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _verify_admin_session(admin_token: str = Cookie(None)) -> bool:
+    """Verify admin session cookie is valid and not expired."""
+    if not admin_token or admin_token not in _admin_sessions:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if time.time() > _admin_sessions[admin_token]:
+        del _admin_sessions[admin_token]
+        raise HTTPException(status_code=401, detail="Session expired")
+    return True
+
+class AdminLoginRequest(BaseModel):
+    password: str
+
+@app.post("/admin/api/login", tags=["Admin"])
+def admin_login(req: AdminLoginRequest, response: Response):
+    """Authenticate admin and set session cookie."""
+    if not ADMIN_PASSWORD_HASH:
+        raise HTTPException(503, "Admin not configured. Set ADMIN_PASSWORD_HASH env var.")
+    incoming_hash = hashlib.sha256(req.password.encode()).hexdigest()
+    if not _hmac.compare_digest(incoming_hash, ADMIN_PASSWORD_HASH):
+        raise HTTPException(401, "Invalid password")
+    token = secrets.token_urlsafe(48)
+    _admin_sessions[token] = time.time() + ADMIN_SESSION_TTL
+    response.set_cookie(
+        key="admin_token", value=token, httponly=True,
+        max_age=ADMIN_SESSION_TTL, samesite="strict", path="/",
+    )
+    return {"status": "authenticated"}
+
+@app.post("/admin/api/logout", tags=["Admin"])
+def admin_logout(response: Response, admin_token: str = Cookie(None)):
+    """Log out admin session."""
+    if admin_token and admin_token in _admin_sessions:
+        del _admin_sessions[admin_token]
+    response.delete_cookie("admin_token", path="/")
+    return {"status": "logged_out"}
+
+@app.get("/admin/api/dashboard", tags=["Admin"])
+def admin_dashboard(_: bool = Depends(_verify_admin_session)):
+    """Admin dashboard data: full system overview."""
+    with get_db() as db:
+        agents = db.execute(
+            "SELECT agent_id, name, description, public, created_at, last_seen, request_count "
+            "FROM agents ORDER BY created_at DESC"
+        ).fetchall()
+        agent_count = len(agents)
+        job_count = db.execute("SELECT COUNT(*) as c FROM queue").fetchone()["c"]
+        pending_jobs = db.execute("SELECT COUNT(*) as c FROM queue WHERE status='pending'").fetchone()["c"]
+        processing_jobs = db.execute("SELECT COUNT(*) as c FROM queue WHERE status='processing'").fetchone()["c"]
+        completed_jobs = db.execute("SELECT COUNT(*) as c FROM queue WHERE status='completed'").fetchone()["c"]
+        memory_keys = db.execute("SELECT COUNT(*) as c FROM memory").fetchone()["c"]
+        messages = db.execute("SELECT COUNT(*) as c FROM relay").fetchone()["c"]
+        webhooks = db.execute("SELECT COUNT(*) as c FROM webhooks WHERE active=1").fetchone()["c"]
+        schedules = db.execute("SELECT COUNT(*) as c FROM scheduled_tasks WHERE enabled=1").fetchone()["c"]
+        shared_keys = db.execute("SELECT COUNT(*) as c FROM shared_memory").fetchone()["c"]
+        public_agents = db.execute("SELECT COUNT(*) as c FROM agents WHERE public=1").fetchone()["c"]
+
+    return {
+        "agents": [dict(a) for a in agents],
+        "stats": {
+            "total_agents": agent_count,
+            "public_agents": public_agents,
+            "total_jobs": job_count,
+            "pending_jobs": pending_jobs,
+            "processing_jobs": processing_jobs,
+            "completed_jobs": completed_jobs,
+            "memory_keys": memory_keys,
+            "shared_memory_keys": shared_keys,
+            "messages_relayed": messages,
+            "active_webhooks": webhooks,
+            "active_schedules": schedules,
+            "websocket_connections": sum(len(s) for s in _ws_connections.values()),
+        },
+        "version": "0.3.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+@app.delete("/admin/api/agents/{agent_id}", tags=["Admin"])
+def admin_delete_agent(agent_id: str, _: bool = Depends(_verify_admin_session)):
+    """Delete an agent and all associated data."""
+    with get_db() as db:
+        row = db.execute("SELECT agent_id FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Agent not found")
+        db.execute("DELETE FROM memory WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM queue WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM relay WHERE from_agent=? OR to_agent=?", (agent_id, agent_id))
+        db.execute("DELETE FROM webhooks WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM scheduled_tasks WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM shared_memory WHERE owner_agent=?", (agent_id,))
+        db.execute("DELETE FROM rate_limits WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM agents WHERE agent_id=?", (agent_id,))
+    return {"status": "deleted", "agent_id": agent_id}
+
+@app.get("/admin/login", response_class=HTMLResponse, tags=["Admin"])
+def admin_login_page():
+    """Serve the admin login page."""
+    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin_login.html")
+    try:
+        with open(html_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(404, "Admin login page not found")
+
+@app.get("/admin", response_class=HTMLResponse, tags=["Admin"])
+def admin_page():
+    """Serve the admin dashboard page."""
+    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin.html")
+    try:
+        with open(html_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(404, "Admin page not found")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # HEALTH / METRICS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1089,7 +1213,7 @@ def health():
 
     return {
         "status": "operational",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "stats": {
             "registered_agents": agent_count,
             "public_agents": public_agents,
@@ -1141,7 +1265,7 @@ def stats(agent_id: str = Depends(get_agent_id)):
 def root():
     return {
         "service": "AgentForge",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "docs": "/docs",
         "description": "Open-source toolkit API for autonomous agents",
         "endpoints": {
