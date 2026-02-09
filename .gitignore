@@ -8,6 +8,7 @@ __pycache__/
 .env.local
 .env.production
 
-# IDE
+# IDE / tools
 .vscode/
 .idea/
+.claude/
