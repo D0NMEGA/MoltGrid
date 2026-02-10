@@ -12,8 +12,11 @@ import hashlib
 import sqlite3
 import asyncio
 import logging
+import smtplib
 import statistics
 import threading
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from contextlib import asynccontextmanager, contextmanager
@@ -44,6 +47,11 @@ ADMIN_SESSION_TTL = 3600 * 24  # 24 hours
 # Encrypted storage: set ENCRYPTION_KEY env var to enable AES encryption at rest
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 _fernet = Fernet(ENCRYPTION_KEY.encode()) if ENCRYPTION_KEY else None
+
+# Contact form SMTP: set SMTP_PASSWORD env var (Gmail App Password)
+SMTP_FROM = os.getenv("SMTP_FROM", "contact.agentgate@gmail.com")
+SMTP_TO = os.getenv("SMTP_TO", "don.mega306@gmail.com")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 
 # ─── App ──────────────────────────────────────────────────────────────────────
 @asynccontextmanager
@@ -2346,6 +2354,26 @@ def submit_contact(form: ContactForm):
             "INSERT INTO contact_submissions (id, name, email, subject, message, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (submission_id, form.name, form.email, form.subject, form.message, now)
         )
+    # Send email via Gmail SMTP
+    if SMTP_PASSWORD:
+        try:
+            msg = MIMEMultipart()
+            msg["From"] = SMTP_FROM
+            msg["To"] = SMTP_TO
+            msg["Subject"] = f"AgentForge Contact: {form.subject or 'No subject'}"
+            body = (
+                f"Name: {form.name or 'Not provided'}\n"
+                f"Email: {form.email}\n"
+                f"Subject: {form.subject or 'Not provided'}\n\n"
+                f"Message:\n{form.message}"
+            )
+            msg.attach(MIMEText(body, "plain"))
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login(SMTP_FROM, SMTP_PASSWORD)
+                server.sendmail(SMTP_FROM, SMTP_TO, msg.as_string())
+            logger.info(f"Contact email sent: {submission_id}")
+        except Exception as e:
+            logger.error(f"Failed to send contact email: {e}")
     return {"status": "sent", "id": submission_id}
 
 # ═══════════════════════════════════════════════════════════════════════════════
