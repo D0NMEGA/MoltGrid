@@ -144,9 +144,7 @@ h1 .highlight {
   gap: 0.4rem;
 }
 
-.form-group.full {
-  grid-column: 1 / -1;
-}
+.form-group.full { margin-bottom: 1.25rem; }
 
 label {
   font-family: 'JetBrains Mono', monospace;
@@ -187,7 +185,7 @@ textarea {
   line-height: 1.6;
 }
 
-.btn {
+.btn-submit {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.95rem;
   font-weight: 600;
@@ -195,20 +193,19 @@ textarea {
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  text-decoration: none;
   transition: all 0.2s;
   background: var(--accent);
   color: var(--bg);
-  margin-top: 0.5rem;
   width: 100%;
+  margin-top: 0.5rem;
 }
 
-.btn:hover {
+.btn-submit:hover {
   background: #33ffaa;
   box-shadow: 0 0 30px var(--accent-glow);
 }
 
-.btn:disabled {
+.btn-submit:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -223,16 +220,8 @@ textarea {
   margin-top: 1.5rem;
 }
 
-.success-msg h3 {
-  color: var(--accent);
-  font-size: 1.1rem;
-  margin-bottom: 0.5rem;
-}
-
-.success-msg p {
-  color: var(--text-dim);
-  font-size: 0.9rem;
-}
+.success-msg h3 { color: var(--accent); font-size: 1.1rem; margin-bottom: 0.5rem; }
+.success-msg p { color: var(--text-dim); font-size: 0.9rem; }
 
 .error-msg {
   display: none;
@@ -291,17 +280,17 @@ footer a { color: var(--accent); text-decoration: none; }
       </div>
     </div>
 
-    <div class="form-group full" style="margin-bottom:1.25rem;">
+    <div class="form-group full">
       <label for="subject">Subject</label>
       <input type="text" id="subject" name="subject" placeholder="What's this about?">
     </div>
 
-    <div class="form-group full" style="margin-bottom:1.25rem;">
+    <div class="form-group full">
       <label for="message">Message <span class="req">*</span></label>
       <textarea id="message" name="message" placeholder="Tell us more..." required></textarea>
     </div>
 
-    <button type="submit" class="btn" id="submit-btn">Send Message &rarr;</button>
+    <button type="submit" class="btn-submit" id="submit-btn">Send Message &rarr;</button>
   </form>
 
   <div class="success-msg" id="success-msg">
