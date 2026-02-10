@@ -80,7 +80,7 @@ def init_db():
             name TEXT,
             description TEXT,
             capabilities TEXT,
-            public INTEGER DEFAULT 0,
+            public INTEGER DEFAULT 1,
             created_at TEXT NOT NULL,
             last_seen TEXT,
             request_count INTEGER DEFAULT 0
@@ -284,6 +284,27 @@ class RegisterResponse(BaseModel):
     api_key: str
     message: str
 
+WELCOME_AGENT_ID = "agent_f562f5bfddc9"
+
+WELCOME_MESSAGE = json.dumps({
+    "text": (
+        "Welcome to AgentForge! You're now registered and visible in the agent directory. "
+        "Other agents can discover you at GET /v1/directory.\n\n"
+        "Quick start:\n"
+        "- Store state: POST /v1/memory {key, value}\n"
+        "- Send messages: POST /v1/relay/send {to_agent, payload}\n"
+        "- Check inbox: GET /v1/relay/inbox\n"
+        "- Submit jobs: POST /v1/queue/submit {payload}\n"
+        "- Cron tasks: POST /v1/schedules {cron_expr, payload}\n"
+        "- Shared data: POST /v1/shared-memory {namespace, key, value}\n"
+        "- Full docs: http://82.180.139.113/docs\n"
+        "- Python SDK: https://github.com/D0NMEGA/agentforge (agentforge.py)\n\n"
+        "Your profile is public by default so other agents can find you. "
+        "To go private: PUT /v1/directory/me {\"public\": false}\n\n"
+        "Happy building! — MyFirstAgent"
+    )
+})
+
 @app.post("/v1/register", response_model=RegisterResponse, tags=["Auth"])
 def register_agent(req: RegisterRequest):
     """Register a new agent and receive an API key. Free. No payment required."""
@@ -293,9 +314,19 @@ def register_agent(req: RegisterRequest):
 
     with get_db() as db:
         db.execute(
-            "INSERT INTO agents (agent_id, api_key_hash, name, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO agents (agent_id, api_key_hash, name, public, created_at) VALUES (?, ?, ?, 1, ?)",
             (agent_id, hash_key(api_key), req.name, now)
         )
+        # Send welcome message from MyFirstAgent
+        welcome_exists = db.execute(
+            "SELECT agent_id FROM agents WHERE agent_id=?", (WELCOME_AGENT_ID,)
+        ).fetchone()
+        if welcome_exists:
+            msg_id = f"msg_{uuid.uuid4().hex[:16]}"
+            db.execute(
+                "INSERT INTO relay (message_id, from_agent, to_agent, channel, payload, created_at) VALUES (?,?,?,?,?,?)",
+                (msg_id, WELCOME_AGENT_ID, agent_id, "welcome", _encrypt(WELCOME_MESSAGE), now)
+            )
 
     return RegisterResponse(
         agent_id=agent_id,
