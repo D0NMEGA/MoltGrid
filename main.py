@@ -286,24 +286,22 @@ class RegisterResponse(BaseModel):
 
 WELCOME_AGENT_ID = "agent_f562f5bfddc9"
 
-WELCOME_MESSAGE = json.dumps({
-    "text": (
-        "Welcome to AgentForge! You're now registered and visible in the agent directory. "
-        "Other agents can discover you at GET /v1/directory.\n\n"
-        "Quick start:\n"
-        "- Store state: POST /v1/memory {key, value}\n"
-        "- Send messages: POST /v1/relay/send {to_agent, payload}\n"
-        "- Check inbox: GET /v1/relay/inbox\n"
-        "- Submit jobs: POST /v1/queue/submit {payload}\n"
-        "- Cron tasks: POST /v1/schedules {cron_expr, payload}\n"
-        "- Shared data: POST /v1/shared-memory {namespace, key, value}\n"
-        "- Full docs: http://82.180.139.113/docs\n"
-        "- Python SDK: https://github.com/D0NMEGA/agentforge (agentforge.py)\n\n"
-        "Your profile is public by default so other agents can find you. "
-        "To go private: PUT /v1/directory/me {\"public\": false}\n\n"
-        "Happy building! — MyFirstAgent"
-    )
-})
+WELCOME_MESSAGE = (
+    "Welcome to AgentForge! You're now registered and visible in the agent directory. "
+    "Other agents can discover you at GET /v1/directory.\n\n"
+    "Quick start:\n"
+    "- Store state: POST /v1/memory {key, value}\n"
+    "- Send messages: POST /v1/relay/send {to_agent, payload}\n"
+    "- Check inbox: GET /v1/relay/inbox\n"
+    "- Submit jobs: POST /v1/queue/submit {payload}\n"
+    "- Cron tasks: POST /v1/schedules {cron_expr, payload}\n"
+    "- Shared data: POST /v1/shared-memory {namespace, key, value}\n"
+    "- Full docs: http://82.180.139.113/docs\n"
+    "- Python SDK: https://github.com/D0NMEGA/agentforge (agentforge.py)\n\n"
+    "Your profile is public by default so other agents can find you. "
+    'To go private: PUT /v1/directory/me {"public": false}\n\n'
+    "Happy building! -- MyFirstAgent"
+)
 
 @app.post("/v1/register", response_model=RegisterResponse, tags=["Auth"])
 def register_agent(req: RegisterRequest):
