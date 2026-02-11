@@ -10,6 +10,7 @@
   --bg: #0a0a0f; --surface: #12121a; --surface2: #1a1a26; --border: #2a2a3a;
   --text: #e4e4ef; --text-dim: #7a7a92; --accent: #00ff88; --accent-dim: #00cc6a;
   --accent-glow: rgba(0,255,136,0.15); --red: #ff4444; --yellow: #ffcc00; --blue: #4488ff;
+  --purple: #bb88ff;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--bg); color:var(--text); font-family:'Space Grotesk',sans-serif; line-height:1.6; }
@@ -30,12 +31,12 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
 h1 { font-size:1.6rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.25rem; }
 .dash-sub { color:var(--text-dim); font-size:0.8rem; margin-bottom:1.5rem; font-family:'JetBrains Mono',monospace; }
 
-.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:0.75rem; margin-bottom:2rem; }
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:0.75rem; margin-bottom:2rem; }
 .stat-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem; }
 .stat-card:hover { border-color:rgba(0,255,136,0.3); }
 .stat-label { font-family:'JetBrains Mono',monospace; font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin-bottom:0.25rem; }
 .stat-value { font-size:1.6rem; font-weight:700; color:var(--accent); font-family:'JetBrains Mono',monospace; }
-.stat-value.blue { color:var(--blue); } .stat-value.yellow { color:var(--yellow); }
+.stat-value.blue { color:var(--blue); } .stat-value.yellow { color:var(--yellow); } .stat-value.purple { color:var(--purple); }
 
 .tabs { display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:1.5rem; overflow-x:auto; }
 .tab { font-family:'JetBrains Mono',monospace; font-size:0.75rem; padding:10px 18px; background:transparent; color:var(--text-dim); border:none; cursor:pointer; transition:all 0.2s; border-bottom:2px solid transparent; margin-bottom:-2px; white-space:nowrap; }
@@ -56,6 +57,8 @@ h1 { font-size:1.6rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.25r
 .badge-yellow { color:var(--yellow); background:rgba(255,204,0,0.1); }
 .badge-blue { color:var(--blue); background:rgba(68,136,255,0.1); }
 .badge-dim { color:var(--text-dim); background:rgba(122,122,146,0.1); }
+.badge-purple { color:var(--purple); background:rgba(187,136,255,0.12); }
+.badge-red { color:var(--red); background:rgba(255,68,68,0.1); }
 .delete-btn { font-family:'JetBrains Mono',monospace; font-size:0.65rem; padding:4px 10px; background:transparent; color:var(--text-dim); border:1px solid var(--border); border-radius:4px; cursor:pointer; }
 .delete-btn:hover { border-color:var(--red); color:var(--red); background:rgba(255,68,68,0.1); }
 .payload-preview { color:var(--text-dim); font-family:'JetBrains Mono',monospace; font-size:0.7rem; }
@@ -76,7 +79,6 @@ h1 { font-size:1.6rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.25r
 .refresh-info { font-family:'JetBrains Mono',monospace; font-size:0.65rem; color:var(--text-dim); text-align:center; margin-top:1.5rem; }
 .refresh-info span { color:var(--accent); }
 
-/* Detail modal */
 .modal-overlay { display:none; position:fixed; top:0;left:0;right:0;bottom:0; background:rgba(0,0,0,0.75); z-index:200; align-items:center; justify-content:center; }
 .modal-overlay.active { display:flex; }
 .modal { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:0; max-width:700px; width:92%; max-height:85vh; overflow:hidden; display:flex; flex-direction:column; }
@@ -90,7 +92,6 @@ h1 { font-size:1.6rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.25r
 .modal-btn-default { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
 .modal-btn-danger { background:var(--red); color:#fff; }
 
-/* Detail fields */
 .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin-bottom:1.25rem; }
 .detail-field { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:0.75rem 1rem; }
 .detail-field.full { grid-column:1/-1; }
@@ -98,6 +99,10 @@ h1 { font-size:1.6rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.25r
 .detail-value { font-family:'JetBrains Mono',monospace; font-size:0.8rem; color:var(--text); word-break:break-all; }
 .detail-value.accent { color:var(--accent); }
 .detail-value.large { font-size:0.75rem; white-space:pre-wrap; max-height:300px; overflow-y:auto; line-height:1.7; }
+
+.rating { font-family:'JetBrains Mono',monospace; font-size:0.8rem; }
+.rating-high { color:var(--accent); } .rating-mid { color:var(--yellow); } .rating-low { color:var(--red); }
+.credits-val { color:var(--yellow); font-family:'JetBrains Mono',monospace; }
 
 @media(max-width:768px) {
   header{padding:0.75rem 1rem} .dashboard{padding:4.5rem 1rem 2rem} .stats-grid{grid-template-columns:repeat(2,1fr)}
@@ -124,10 +129,10 @@ h1 { font-size:1.6rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.25r
 
 <script>
 // ── State ──
-const S = { filterAgent:'', filterStatus:'', filterNamespace:'' };
-const _cache = {}; // tab -> row data for click handlers
+const S = { filterAgent:'', filterStatus:'', filterNamespace:'', filterMktStatus:'' };
+const _cache = {};
 let currentTab = 'overview';
-let pageOffsets = { messages:0, memory:0, queue:0, shared:0 };
+let pageOffsets = { messages:0, memory:0, queue:0, shared:0, marketplace:0, collaborations:0, scenarios:0, contact:0 };
 
 // ── API ──
 async function api(path) {
@@ -148,15 +153,53 @@ async function loadDashboard() {
 async function loadTab(tab, silent) {
   currentTab = tab;
   if (tab === 'overview') { render(); return; }
-  if (!silent) render(); // show loading state
-  const map = { messages:'/admin/api/messages', memory:'/admin/api/memory', queue:'/admin/api/queue', webhooks:'/admin/api/webhooks', schedules:'/admin/api/schedules', shared:'/admin/api/shared-memory', sla:'/admin/api/sla' };
+  if (!silent) render();
+  const map = { messages:'/admin/api/messages', memory:'/admin/api/memory', queue:'/admin/api/queue', webhooks:'/admin/api/webhooks', schedules:'/admin/api/schedules', shared:'/admin/api/shared-memory', sla:'/admin/api/sla', marketplace:'/admin/api/marketplace', collaborations:'/admin/api/collaborations', scenarios:'/admin/api/scenarios', contact:'/admin/api/contact' };
   let url = map[tab] + `?limit=100&offset=${pageOffsets[tab]||0}`;
   if (S.filterAgent) url += `&agent_id=${S.filterAgent}`;
   if (tab==='queue' && S.filterStatus) url += `&status=${S.filterStatus}`;
   if (tab==='shared' && S.filterNamespace) url += `&namespace=${encodeURIComponent(S.filterNamespace)}`;
+  if (tab==='marketplace' && S.filterMktStatus) url += `&status=${S.filterMktStatus}`;
   const data = await api(url);
   if (data) { S[tab] = data; render(); }
 }
+
+// ── Helpers ──
+function sc(l,v,c) { return `<div class="stat-card"><div class="stat-label">${l}</div><div class="stat-value ${c||''}">${v}</div></div>`; }
+function e(s) { return s!=null ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+function ago(iso) { if(!iso)return'never';const d=(Date.now()-new Date(iso).getTime())/1000;if(d<60)return Math.floor(d)+'s ago';if(d<3600)return Math.floor(d/60)+'m ago';if(d<86400)return Math.floor(d/3600)+'h ago';return Math.floor(d/86400)+'d ago'; }
+function short(id) { return id&&id.length>22 ? id.slice(0,22)+'\u2026' : id||''; }
+function pre(s,n=80) { return s&&s.length>n ? s.slice(0,n)+'\u2026' : s||''; }
+function sBadge(st) { const m={completed:'green',processing:'yellow',pending:'blue'}; return `<span class="badge badge-${m[st]||'dim'}">${e(st)}</span>`; }
+function mktBadge(st) { const m={open:'blue',claimed:'yellow',delivered:'purple',completed:'green',rejected:'red',expired:'dim'}; return `<span class="badge badge-${m[st]||'dim'}">${e(st)}</span>`; }
+function pretty(s) { try{return JSON.stringify(JSON.parse(s),null,2)}catch(x){return s} }
+
+function ratingDisplay(val) {
+  if (val==null||val==='') return '<span style="color:var(--text-dim)">--</span>';
+  const n=parseFloat(val); const cls=n>=4?'rating-high':n>=2.5?'rating-mid':'rating-low';
+  return `<span class="rating ${cls}">${n.toFixed(1)}</span>`;
+}
+function creditsDisplay(val) { return `<span class="credits-val">${val||0}</span>`; }
+
+function agentSel() {
+  const aa = S.dashboard?.agents||[];
+  let h = '<select onchange="S.filterAgent=this.value;pageOffsets[currentTab]=0;loadTab(currentTab)"><option value="">All agents</option>';
+  for (const a of aa) h += `<option value="${e(a.agent_id)}"${S.filterAgent===a.agent_id?' selected':''}>${e(a.name||short(a.agent_id))}</option>`;
+  return h+'</select>';
+}
+
+function mktStatusSel() {
+  let h = '<select onchange="S.filterMktStatus=this.value;pageOffsets.marketplace=0;loadTab(\'marketplace\')"><option value="">All statuses</option>';
+  for (const st of ['open','claimed','delivered','completed','rejected','expired']) h += `<option value="${st}"${S.filterMktStatus===st?' selected':''}>${st.charAt(0).toUpperCase()+st.slice(1)}</option>`;
+  return h+'</select>';
+}
+
+function pager(data,key) {
+  if(!data||!data.total)return'';const o=pageOffsets[key]||0;
+  return `<div class="pagination"><span>Showing ${o+1}\u2013${Math.min(o+(data.limit||100),data.total)} of ${data.total}</span><div><button class="page-btn"${o===0?' disabled':''} onclick="pageOffsets['${key}']-=100;loadTab('${key}')">Prev</button> <button class="page-btn"${o+(data.limit||100)>=data.total?' disabled':''} onclick="pageOffsets['${key}']+=100;loadTab('${key}')">Next</button></div></div>`;
+}
+
+function df(label,value,cls,full) { return `<div class="detail-field${full?' full':''}"><div class="detail-label">${label}</div><div class="detail-value ${cls||''}">${value}</div></div>`; }
 
 // ── Render ──
 function render() {
@@ -169,53 +212,45 @@ function render() {
     ${sc('Agents',s.total_agents)}${sc('Public',s.public_agents)}${sc('Jobs',s.total_jobs,'blue')}${sc('Pending',s.pending_jobs,'yellow')}
     ${sc('Memory',s.memory_keys)}${sc('Shared',s.shared_memory_keys)}${sc('Messages',s.messages_relayed,'blue')}${sc('WS',s.websocket_connections)}
     ${sc('Webhooks',s.active_webhooks)}${sc('Schedules',s.active_schedules)}
+    ${sc('Marketplace',s.marketplace_open,'blue')}${sc('Credits',s.total_credits_circulation,'yellow')}${sc('Collabs',s.collaborations,'purple')}${sc('Scenarios',s.test_scenarios)}${sc('Contact',s.contact_submissions||0)}
   </div>
   <div style="display:flex;gap:0.75rem;margin-bottom:1.5rem;flex-wrap:wrap">
     <span class="badge ${d.encryption_enabled?'badge-green':'badge-dim'}" style="font-size:0.7rem;padding:4px 12px">${d.encryption_enabled?'AES Encrypted':'Unencrypted'}</span>
   </div>`;
 
-  const tabs = [['overview','Overview'],['messages','Messages',s.messages_relayed],['memory','Memory',s.memory_keys],['queue','Queue',s.total_jobs],['webhooks','Webhooks',s.active_webhooks],['schedules','Schedules',s.active_schedules],['shared','Shared Memory',s.shared_memory_keys],['sla','SLA']];
+  const tabs = [
+    ['overview','Overview'],['messages','Messages',s.messages_relayed],['memory','Memory',s.memory_keys],
+    ['queue','Queue',s.total_jobs],['webhooks','Webhooks',s.active_webhooks],['schedules','Schedules',s.active_schedules],
+    ['shared','Shared Memory',s.shared_memory_keys],
+    ['marketplace','Marketplace',s.marketplace_open],['collaborations','Collabs',s.collaborations],
+    ['scenarios','Scenarios',s.test_scenarios],['contact','Contact',s.contact_submissions||0],
+    ['sla','SLA']
+  ];
   h += '<div class="tabs">';
   for (const [id,label,cnt] of tabs) h += `<button class="tab ${currentTab===id?'active':''}" onclick="loadTab('${id}')">${label}${cnt!==undefined?`<span class="tab-count">${cnt}</span>`:''}</button>`;
   h += '</div>';
 
-  const renderers = { overview:renderOverview, messages:renderMessages, memory:renderMemory, queue:renderQueue, webhooks:renderWebhooks, schedules:renderSchedules, shared:renderShared, sla:renderSLA };
+  const renderers = { overview:renderOverview, messages:renderMessages, memory:renderMemory, queue:renderQueue, webhooks:renderWebhooks, schedules:renderSchedules, shared:renderShared, sla:renderSLA, marketplace:renderMarketplace, collaborations:renderCollaborations, scenarios:renderScenarios, contact:renderContact };
   h += (renderers[currentTab] || renderOverview)(S.dashboard);
   h += '<div class="refresh-info">Auto-refresh every <span>15s</span></div>';
   document.getElementById('dashboard').innerHTML = h;
 }
 
-function sc(l,v,c) { return `<div class="stat-card"><div class="stat-label">${l}</div><div class="stat-value ${c||''}">${v}</div></div>`; }
-function e(s) { return s!=null ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
-function ago(iso) { if(!iso)return'never';const d=(Date.now()-new Date(iso).getTime())/1000;if(d<60)return Math.floor(d)+'s ago';if(d<3600)return Math.floor(d/60)+'m ago';if(d<86400)return Math.floor(d/3600)+'h ago';return Math.floor(d/86400)+'d ago'; }
-function short(id) { return id&&id.length>22 ? id.slice(0,22)+'\u2026' : id||''; }
-function pre(s,n=80) { return s&&s.length>n ? s.slice(0,n)+'\u2026' : s||''; }
-function sBadge(st) { const m={completed:'green',processing:'yellow',pending:'blue'}; return `<span class="badge badge-${m[st]||'dim'}">${e(st)}</span>`; }
-function pretty(s) { try{return JSON.stringify(JSON.parse(s),null,2)}catch(x){return s} }
-
-function agentSel() {
-  const aa = S.dashboard?.agents||[];
-  let h = '<select onchange="S.filterAgent=this.value;pageOffsets[currentTab]=0;loadTab(currentTab)"><option value="">All agents</option>';
-  for (const a of aa) h += `<option value="${e(a.agent_id)}"${S.filterAgent===a.agent_id?' selected':''}>${e(a.name||short(a.agent_id))}</option>`;
-  return h+'</select>';
-}
-
-function pager(data,key) {
-  if(!data||!data.total)return'';const o=pageOffsets[key]||0;
-  return `<div class="pagination"><span>Showing ${o+1}\u2013${Math.min(o+(data.limit||100),data.total)} of ${data.total}</span><div><button class="page-btn"${o===0?' disabled':''} onclick="pageOffsets['${key}']-=100;loadTab('${key}')">Prev</button> <button class="page-btn"${o+(data.limit||100)>=data.total?' disabled':''} onclick="pageOffsets['${key}']+=100;loadTab('${key}')">Next</button></div></div>`;
-}
-
-// ── Tab renderers ──
+// ── Tab Renderers ──
 function renderOverview(d) {
   if(!d.agents.length) return '<div class="empty">No agents registered yet</div>';
   _cache.agents = d.agents;
-  let h = '<div class="table-wrap"><table class="data-table"><thead><tr><th>Agent ID</th><th>Name</th><th class="hide-mobile">Description</th><th>Vis</th><th>Reqs</th><th class="hide-mobile">Last Seen</th><th></th></tr></thead><tbody>';
+  let h = '<div class="table-wrap"><table class="data-table"><thead><tr><th>Agent ID</th><th>Name</th><th class="hide-mobile">Description</th><th>Vis</th><th>Rep</th><th class="hide-mobile">Credits</th><th class="hide-mobile">Avail</th><th>Reqs</th><th class="hide-mobile">Last Seen</th><th></th></tr></thead><tbody>';
   d.agents.forEach((a,i) => {
+    const avail = a.available==null ? true : !!a.available;
     h += `<tr class="clickable-row" onclick="viewAgent('${e(a.agent_id)}')">
       <td><span class="id-cell">${e(short(a.agent_id))}</span></td>
       <td class="mono">${a.name?e(a.name):'<span style="color:var(--text-dim)">unnamed</span>'}</td>
       <td class="hide-mobile" style="color:var(--text-dim);font-size:0.75rem">${e(pre(a.description,50))}</td>
       <td>${a.public?'<span class="badge badge-green">PUB</span>':'<span class="badge badge-dim">PRV</span>'}</td>
+      <td>${ratingDisplay(a.reputation)}</td>
+      <td class="hide-mobile">${creditsDisplay(a.credits)}</td>
+      <td class="hide-mobile">${avail?'<span class="badge badge-green">YES</span>':'<span class="badge badge-dim">BUSY</span>'}</td>
       <td class="mono">${a.request_count||0}</td>
       <td class="hide-mobile mono" style="color:var(--text-dim)">${ago(a.last_seen)}</td>
       <td><button class="delete-btn" onclick="event.stopPropagation();confirmDel('${e(a.agent_id)}')">Delete</button></td>
@@ -334,59 +369,119 @@ function renderShared() {
   return h+'</tbody></table></div>'+pager(data,'shared');
 }
 
+function renderMarketplace() {
+  const data = S.marketplace;
+  if(!data) return '<div class="loading"><div class="spinner"></div>Loading...</div>';
+  _cache.marketplace = data.tasks;
+  let h = `<div class="filter-bar">${mktStatusSel()}</div>`;
+  if(!data.tasks.length) return h+'<div class="empty">No marketplace tasks</div>';
+  h += '<div class="table-wrap"><table class="data-table"><thead><tr><th>Task ID</th><th>Creator</th><th>Title</th><th>Status</th><th>Reward</th><th class="hide-mobile">Claimed By</th><th class="hide-mobile">Created</th></tr></thead><tbody>';
+  data.tasks.forEach((t,i) => {
+    h += `<tr class="clickable-row" onclick="viewMarketTask(${i})">
+      <td class="id-cell">${e(short(t.task_id))}</td>
+      <td class="mono">${e(short(t.creator_agent))}</td>
+      <td class="mono">${e(pre(t.title,40))}</td>
+      <td>${mktBadge(t.status)}</td>
+      <td>${creditsDisplay(t.reward_credits)}</td>
+      <td class="hide-mobile mono">${t.claimed_by?e(short(t.claimed_by)):'<span style="color:var(--text-dim)">--</span>'}</td>
+      <td class="hide-mobile mono" style="color:var(--text-dim)">${ago(t.created_at)}</td>
+    </tr>`;
+  });
+  return h+'</tbody></table></div>'+pager(data,'marketplace');
+}
+
+function renderCollaborations() {
+  const data = S.collaborations;
+  if(!data) return '<div class="loading"><div class="spinner"></div>Loading...</div>';
+  _cache.collaborations = data.collaborations;
+  let h = `<div class="filter-bar">${agentSel()}</div>`;
+  if(!data.collaborations.length) return h+'<div class="empty">No collaborations</div>';
+  h += '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Agent</th><th>Partner</th><th class="hide-mobile">Task Type</th><th>Outcome</th><th>Rating</th><th class="hide-mobile">Created</th></tr></thead><tbody>';
+  data.collaborations.forEach((c,i) => {
+    const ob = {success:'green',failure:'red',partial:'yellow'}[c.outcome]||'dim';
+    h += `<tr class="clickable-row" onclick="viewCollab(${i})">
+      <td class="id-cell">${e(short(c.collaboration_id))}</td>
+      <td class="mono">${e(short(c.agent_id))}</td>
+      <td class="mono">${e(short(c.partner_agent))}</td>
+      <td class="hide-mobile mono">${e(c.task_type||'--')}</td>
+      <td><span class="badge badge-${ob}">${e(c.outcome)}</span></td>
+      <td>${ratingDisplay(c.rating)}</td>
+      <td class="hide-mobile mono" style="color:var(--text-dim)">${ago(c.created_at)}</td>
+    </tr>`;
+  });
+  return h+'</tbody></table></div>'+pager(data,'collaborations');
+}
+
+function renderScenarios() {
+  const data = S.scenarios;
+  if(!data) return '<div class="loading"><div class="spinner"></div>Loading...</div>';
+  _cache.scenarios = data.scenarios;
+  if(!data.scenarios.length) return '<div class="empty">No test scenarios</div>';
+  let h = '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Creator</th><th>Name</th><th>Pattern</th><th>Agents</th><th>Status</th><th class="hide-mobile">Created</th></tr></thead><tbody>';
+  data.scenarios.forEach((s,i) => {
+    const stb = {created:'blue',running:'yellow',completed:'green',failed:'red'}[s.status]||'dim';
+    h += `<tr class="clickable-row" onclick="viewScenario(${i})">
+      <td class="id-cell">${e(short(s.scenario_id))}</td>
+      <td class="mono">${e(short(s.creator_agent))}</td>
+      <td class="mono">${e(pre(s.name||'unnamed',30))}</td>
+      <td><span class="badge badge-blue">${e(s.pattern)}</span></td>
+      <td class="mono">${s.agent_count}</td>
+      <td><span class="badge badge-${stb}">${e(s.status)}</span></td>
+      <td class="hide-mobile mono" style="color:var(--text-dim)">${ago(s.created_at)}</td>
+    </tr>`;
+  });
+  return h+'</tbody></table></div>'+pager(data,'scenarios');
+}
+
+function renderContact() {
+  const data = S.contact;
+  if(!data) return '<div class="loading"><div class="spinner"></div>Loading...</div>';
+  _cache.contact = data.submissions;
+  if(!data.submissions.length) return '<div class="empty">No contact submissions</div>';
+  let h = '<div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Subject</th><th class="hide-mobile">Message</th><th>Submitted</th></tr></thead><tbody>';
+  data.submissions.forEach((c,i) => {
+    h += `<tr class="clickable-row" onclick="viewContact(${i})">
+      <td class="id-cell">${e(short(c.id))}</td>
+      <td class="mono">${e(c.name||'--')}</td>
+      <td class="mono">${e(c.email)}</td>
+      <td class="mono">${e(pre(c.subject||'--',30))}</td>
+      <td class="hide-mobile"><span class="payload-preview">${e(pre(c.message,60))}</span></td>
+      <td class="mono" style="color:var(--text-dim)">${ago(c.created_at)}</td>
+    </tr>`;
+  });
+  return h+'</tbody></table></div>'+pager(data,'contact');
+}
+
 function renderSLA() {
   const data = S.sla;
   if(!data) return '<div class="loading"><div class="spinner"></div>Loading SLA data...</div>';
   const w = data.windows;
   const pctColor = p => p >= 99.9 ? 'accent' : p >= 99 ? 'yellow' : '';
-
   let h = '<div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:2rem">';
   for (const [label, d] of [['24 Hours', w['24h']], ['7 Days', w['7d']], ['30 Days', w['30d']]]) {
-    const pct = d.uptime_pct;
-    const col = pctColor(pct);
+    const pct = d.uptime_pct; const col = pctColor(pct);
     h += `<div class="stat-card" style="text-align:center">
       <div class="stat-label">${label} Uptime</div>
       <div class="stat-value" style="font-size:2rem;${col==='accent'?'color:var(--accent)':col==='yellow'?'color:var(--yellow)':'color:var(--red)'}">${pct.toFixed(3)}%</div>
-      <div style="font-size:0.7rem;color:var(--text-dim);font-family:'JetBrains Mono',monospace;margin-top:0.5rem">
-        ${d.successful_checks}/${d.total_checks} checks passed<br>
-        Avg response: ${d.avg_response_ms.toFixed(1)}ms
-      </div>
+      <div style="font-size:0.7rem;color:var(--text-dim);font-family:'JetBrains Mono',monospace;margin-top:0.5rem">${d.successful_checks}/${d.total_checks} checks passed<br>Avg response: ${d.avg_response_ms.toFixed(1)}ms</div>
     </div>`;
   }
   h += '</div>';
-
-  h += `<div class="detail-field full" style="margin-bottom:1.5rem;text-align:center">
-    <div class="detail-label">SLA Target</div>
-    <div class="detail-value accent" style="font-size:1.2rem">${e(data.sla_target)}</div>
-    <div style="font-size:0.7rem;color:var(--text-dim);margin-top:0.25rem">Checks every 60 seconds</div>
-  </div>`;
-
-  h += `<div class="detail-field full" style="margin-bottom:1.5rem;text-align:center">
-    <div class="detail-label">Storage Encryption</div>
-    <div class="detail-value ${data.encryption_enabled?'accent':''}" style="font-size:1rem">${data.encryption_enabled?'AES-128 (Fernet) Enabled':'Not Configured'}</div>
-  </div>`;
-
+  h += `<div class="detail-field full" style="margin-bottom:1.5rem;text-align:center"><div class="detail-label">SLA Target</div><div class="detail-value accent" style="font-size:1.2rem">${e(data.sla_target)}</div><div style="font-size:0.7rem;color:var(--text-dim);margin-top:0.25rem">Checks every 60 seconds</div></div>`;
+  h += `<div class="detail-field full" style="margin-bottom:1.5rem;text-align:center"><div class="detail-label">Storage Encryption</div><div class="detail-value ${data.encryption_enabled?'accent':''}" style="font-size:1rem">${data.encryption_enabled?'AES-128 (Fernet) Enabled':'Not Configured'}</div></div>`;
   if (data.recent_checks && data.recent_checks.length) {
     h += '<div style="margin-top:1rem"><div class="detail-label" style="margin-bottom:0.75rem">RECENT CHECKS</div>';
     h += '<div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:1rem">';
-    for (const c of data.recent_checks.slice(0,60)) {
-      const col = c.status==='up' ? 'var(--accent)' : 'var(--red)';
-      h += `<div title="${c.checked_at} - ${c.status} (${c.response_ms}ms)" style="width:8px;height:24px;background:${col};border-radius:2px;opacity:0.8"></div>`;
-    }
+    for (const c of data.recent_checks.slice(0,60)) { const col=c.status==='up'?'var(--accent)':'var(--red)'; h += `<div title="${c.checked_at} - ${c.status} (${c.response_ms}ms)" style="width:8px;height:24px;background:${col};border-radius:2px;opacity:0.8"></div>`; }
     h += '</div>';
     h += '<div class="table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Status</th><th>Response</th></tr></thead><tbody>';
-    for (const c of data.recent_checks.slice(0,20)) {
-      h += `<tr><td class="mono" style="color:var(--text-dim)">${ago(c.checked_at)}</td>
-        <td>${c.status==='up'?'<span class="badge badge-green">UP</span>':'<span class="badge" style="color:var(--red);background:rgba(255,68,68,0.1)">DOWN</span>'}</td>
-        <td class="mono">${c.response_ms.toFixed(1)}ms</td></tr>`;
-    }
-    h += '</tbody></table></div>';
-    h += '</div>';
+    for (const c of data.recent_checks.slice(0,20)) { h += `<tr><td class="mono" style="color:var(--text-dim)">${ago(c.checked_at)}</td><td>${c.status==='up'?'<span class="badge badge-green">UP</span>':'<span class="badge badge-red">DOWN</span>'}</td><td class="mono">${c.response_ms.toFixed(1)}ms</td></tr>`; }
+    h += '</tbody></table></div></div>';
   }
   return h;
 }
 
-// ── Detail modals ──
+// ── Detail Modals ──
 function openModal(headerHtml, bodyHtml, footerHtml) {
   document.getElementById('modalInner').innerHTML = `
     <div class="modal-header"><h3>${headerHtml}</h3><button class="modal-close-x" onclick="closeModal()">\u2715</button></div>
@@ -395,8 +490,6 @@ function openModal(headerHtml, bodyHtml, footerHtml) {
   document.getElementById('modal').classList.add('active');
 }
 function closeModal() { document.getElementById('modal').classList.remove('active'); }
-
-function df(label,value,cls,full) { return `<div class="detail-field${full?' full':''}"><div class="detail-label">${label}</div><div class="detail-value ${cls||''}">${value}</div></div>`; }
 
 function viewMessage(i) {
   const m = _cache.messages[i]; if(!m)return;
@@ -465,6 +558,63 @@ function viewSharedEntry(i) {
   openModal('Shared Memory Entry', body);
 }
 
+function viewMarketTask(i) {
+  const t = _cache.marketplace[i]; if(!t)return;
+  let body = `<div class="detail-grid">
+    ${df('Task ID',e(t.task_id),'accent')}${df('Status',mktBadge(t.status))}
+    ${df('Creator',e(t.creator_agent),'accent')}${df('Category',e(t.category||'--'))}
+    ${df('Reward',creditsDisplay(t.reward_credits))}${df('Priority',t.priority)}
+    ${df('Effort',e(t.estimated_effort||'--'))}${df('Deadline',t.deadline||'None')}
+    ${df('Claimed By',t.claimed_by?e(t.claimed_by):'--')}${df('Claimed At',t.claimed_at||'--')}
+    ${df('Delivered At',t.delivered_at||'--')}${df('Rating',t.rating!=null?ratingDisplay(t.rating):'--')}
+    ${df('Created',t.created_at)}
+    ${df('Title',e(t.title),'',true)}
+    ${t.description?df('Description',e(t.description),'',true):''}
+  </div>`;
+  if (t.requirements&&t.requirements.length) body += df('Requirements',t.requirements.map(r=>'<span class="badge badge-blue">'+e(r)+'</span> ').join(''),'',true);
+  if (t.tags&&t.tags.length) body += df('Tags',t.tags.map(tg=>'<span class="badge badge-dim">'+e(tg)+'</span> ').join(''),'',true);
+  if (t.result) body += df('Delivery Result',e(pretty(typeof t.result==='string'?t.result:JSON.stringify(t.result))),'large',true);
+  openModal('Marketplace Task', body);
+}
+
+function viewCollab(i) {
+  const c = _cache.collaborations[i]; if(!c)return;
+  const ob = {success:'green',failure:'red',partial:'yellow'}[c.outcome]||'dim';
+  const body = `<div class="detail-grid">
+    ${df('Collaboration ID',e(c.collaboration_id),'accent',true)}
+    ${df('Agent',e(c.agent_id),'accent')}${df('Partner',e(c.partner_agent),'accent')}
+    ${df('Task Type',e(c.task_type||'--'))}${df('Outcome','<span class="badge badge-'+ob+'">'+e(c.outcome)+'</span>')}
+    ${df('Rating',ratingDisplay(c.rating))}${df('Created',c.created_at)}
+  </div>`;
+  openModal('Collaboration Detail', body);
+}
+
+function viewScenario(i) {
+  const s = _cache.scenarios[i]; if(!s)return;
+  const stb = {created:'blue',running:'yellow',completed:'green',failed:'red'}[s.status]||'dim';
+  let body = `<div class="detail-grid">
+    ${df('Scenario ID',e(s.scenario_id),'accent',true)}
+    ${df('Creator',e(s.creator_agent),'accent')}${df('Name',e(s.name||'unnamed'))}
+    ${df('Pattern','<span class="badge badge-blue">'+e(s.pattern)+'</span>')}${df('Agent Count',s.agent_count)}
+    ${df('Status','<span class="badge badge-'+stb+'">'+e(s.status)+'</span>')}${df('Timeout',s.timeout_seconds+'s')}
+    ${df('Created',s.created_at)}${df('Completed',s.completed_at||'--')}
+  </div>`;
+  if (s.success_criteria) body += df('Success Criteria','<pre style="margin:0;white-space:pre-wrap">'+e(JSON.stringify(s.success_criteria,null,2))+'</pre>','',true);
+  if (s.results) body += df('Results','<pre style="margin:0;white-space:pre-wrap">'+e(JSON.stringify(s.results,null,2))+'</pre>','',true);
+  openModal('Test Scenario', body);
+}
+
+function viewContact(i) {
+  const c = _cache.contact[i]; if(!c)return;
+  const body = `<div class="detail-grid">
+    ${df('ID',e(c.id),'accent')}${df('Submitted',c.created_at)}
+    ${df('Name',e(c.name||'--'))}${df('Email',e(c.email))}
+    ${df('Subject',e(c.subject||'--'),'',true)}
+    ${df('Message',e(c.message),'large',true)}
+  </div>`;
+  openModal('Contact Submission', body);
+}
+
 async function viewAgent(agentId) {
   const data = await api(`/admin/api/agents/${agentId}`);
   if(!data) return;
@@ -475,12 +625,14 @@ async function viewAgent(agentId) {
   let body = `<div class="detail-grid">
     ${df('Agent ID',e(a.agent_id),'accent',true)}
     ${df('Name',e(a.name)||'unnamed')}${df('Public',a.public?'Yes':'No')}
+    ${df('Reputation',ratingDisplay(a.reputation)+(a.reputation_count?' <span style="color:var(--text-dim);font-size:0.65rem">('+a.reputation_count+' reviews)</span>':''))}
+    ${df('Credits',creditsDisplay(a.credits||0))}
+    ${df('Available',a.available==null||a.available?'Yes':'No')}${df('Capabilities',caps||'None')}
     ${df('Created',a.created_at)}${df('Last Seen',a.last_seen||'Never')}
-    ${df('Total Requests',a.request_count||0)}${df('Capabilities',caps||'None')}
+    ${df('Total Requests',a.request_count||0)}
     ${a.description?df('Description',e(a.description),'',true):''}
   </div>`;
 
-  // Summary counts
   body += `<div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin:1rem 0">
     <span class="badge badge-green">Memory: ${data.memory.length}</span>
     <span class="badge badge-blue">Jobs: ${data.jobs.length}</span>
@@ -489,6 +641,10 @@ async function viewAgent(agentId) {
     <span class="badge badge-green">Webhooks: ${data.webhooks.length}</span>
     <span class="badge badge-green">Schedules: ${data.schedules.length}</span>
     <span class="badge badge-green">Shared: ${data.shared_memory.length}</span>
+    <span class="badge badge-purple">Collabs: ${data.collaborations.length}</span>
+    <span class="badge badge-yellow">Mkt Created: ${data.marketplace_created.length}</span>
+    <span class="badge badge-yellow">Mkt Claimed: ${data.marketplace_claimed.length}</span>
+    <span class="badge badge-blue">Scenarios: ${data.test_scenarios.length}</span>
   </div>`;
 
   // Messages
@@ -497,7 +653,7 @@ async function viewAgent(agentId) {
     body += '<div style="margin-top:1rem"><div class="detail-label" style="margin-bottom:0.5rem">MESSAGES</div>';
     for (const m of allMsgs.slice(0,25)) {
       const dir = m.from_agent===agentId ? `\u2192 ${short(m.to_agent)}` : `\u2190 ${short(m.from_agent)}`;
-      body += `<div class="detail-field full" style="margin-bottom:0.5rem;cursor:pointer" onclick="_tmpMsg=${JSON.stringify(m).replace(/'/g,'\\u0027')};_showTmpMsg()">
+      body += `<div class="detail-field full" style="margin-bottom:0.5rem">
         <div style="display:flex;justify-content:space-between;margin-bottom:0.25rem">
           <span class="mono" style="color:var(--accent);font-size:0.7rem">${e(dir)}</span>
           <span class="mono" style="color:var(--text-dim);font-size:0.65rem">[${e(m.channel)}] ${ago(m.created_at)}</span>
@@ -523,15 +679,76 @@ async function viewAgent(agentId) {
     body += '</div>';
   }
 
+  // Collaborations
+  if (data.collaborations.length) {
+    body += '<div style="margin-top:1rem"><div class="detail-label" style="margin-bottom:0.5rem">COLLABORATIONS</div>';
+    for (const c of data.collaborations.slice(0,20)) {
+      const ob = {success:'green',failure:'red',partial:'yellow'}[c.outcome]||'dim';
+      body += `<div class="detail-field full" style="margin-bottom:0.5rem">
+        <div style="display:flex;justify-content:space-between;margin-bottom:0.25rem">
+          <span class="mono" style="color:var(--accent);font-size:0.7rem">with ${e(short(c.partner_agent===agentId?c.agent_id:c.partner_agent))}</span>
+          <span class="mono" style="color:var(--text-dim);font-size:0.65rem">${ago(c.created_at)}</span>
+        </div>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <span class="badge badge-${ob}">${e(c.outcome)}</span>
+          ${ratingDisplay(c.rating)}
+          ${c.task_type?'<span class="mono" style="color:var(--text-dim);font-size:0.7rem">'+e(c.task_type)+'</span>':''}
+        </div>
+      </div>`;
+    }
+    body += '</div>';
+  }
+
+  // Marketplace
+  const allMkt = [...(data.marketplace_created||[]),...(data.marketplace_claimed||[])].sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  if (allMkt.length) {
+    body += '<div style="margin-top:1rem"><div class="detail-label" style="margin-bottom:0.5rem">MARKETPLACE ACTIVITY</div>';
+    for (const t of allMkt.slice(0,20)) {
+      const role = t.creator_agent===agentId ? 'Creator' : 'Claimer';
+      body += `<div class="detail-field full" style="margin-bottom:0.5rem">
+        <div style="display:flex;justify-content:space-between;margin-bottom:0.25rem">
+          <span class="mono" style="color:var(--accent);font-size:0.7rem">${e(pre(t.title,50))}</span>
+          <span class="mono" style="color:var(--text-dim);font-size:0.65rem">${ago(t.created_at)}</span>
+        </div>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          ${mktBadge(t.status)}
+          <span class="badge badge-dim">${e(role)}</span>
+          ${creditsDisplay(t.reward_credits)}
+        </div>
+      </div>`;
+    }
+    body += '</div>';
+  }
+
+  // Test Scenarios
+  if (data.test_scenarios.length) {
+    body += '<div style="margin-top:1rem"><div class="detail-label" style="margin-bottom:0.5rem">TEST SCENARIOS</div>';
+    for (const s of data.test_scenarios.slice(0,20)) {
+      const stb = {created:'blue',running:'yellow',completed:'green',failed:'red'}[s.status]||'dim';
+      body += `<div class="detail-field full" style="margin-bottom:0.5rem">
+        <div style="display:flex;justify-content:space-between;margin-bottom:0.25rem">
+          <span class="mono" style="color:var(--accent);font-size:0.7rem">${e(s.name||short(s.scenario_id))}</span>
+          <span class="mono" style="color:var(--text-dim);font-size:0.65rem">${ago(s.created_at)}</span>
+        </div>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <span class="badge badge-blue">${e(s.pattern)}</span>
+          <span class="badge badge-${stb}">${e(s.status)}</span>
+          <span class="mono" style="color:var(--text-dim);font-size:0.7rem">${s.agent_count} agents</span>
+        </div>
+      </div>`;
+    }
+    body += '</div>';
+  }
+
   const footer = `<button class="modal-btn modal-btn-default" onclick="closeModal()">Close</button>
     <button class="modal-btn modal-btn-danger" onclick="confirmDel('${e(agentId)}')">Delete Agent</button>`;
   openModal(`Agent: ${e(a.name||short(a.agent_id))}`, body, footer);
 }
 
-// Delete confirmation
+// ── Delete / Logout ──
 function confirmDel(agentId) {
   closeModal();
-  const body = `<p style="color:var(--text-dim);margin-bottom:1rem">Permanently delete <span class="mono" style="color:var(--accent)">${e(agentId)}</span> and ALL associated data (memory, jobs, messages, webhooks, schedules, shared memory)?</p>`;
+  const body = `<p style="color:var(--text-dim);margin-bottom:1rem">Permanently delete <span class="mono" style="color:var(--accent)">${e(agentId)}</span> and ALL associated data?</p>`;
   const footer = `<button class="modal-btn modal-btn-default" onclick="closeModal()">Cancel</button><button class="modal-btn modal-btn-danger" onclick="doDel('${e(agentId)}')">Delete Forever</button>`;
   openModal('Delete Agent', body, footer);
 }

@@ -596,9 +596,10 @@ def queue_list(
                 (agent_id, queue_name, status, limit)
             ).fetchall()
         else:
+            # Default: show only active jobs (pending + processing), not completed
             rows = db.execute(
                 "SELECT job_id, status, priority, created_at, completed_at FROM queue "
-                "WHERE agent_id=? AND queue_name=? ORDER BY created_at DESC LIMIT ?",
+                "WHERE agent_id=? AND queue_name=? AND status IN ('pending','processing') ORDER BY priority DESC, created_at ASC LIMIT ?",
                 (agent_id, queue_name, limit)
             ).fetchall()
     return {"queue_name": queue_name, "jobs": [dict(r) for r in rows], "count": len(rows)}
@@ -1843,7 +1844,8 @@ def admin_dashboard(_: bool = Depends(_verify_admin_session)):
     """Admin dashboard data: full system overview."""
     with get_db() as db:
         agents = db.execute(
-            "SELECT agent_id, name, description, capabilities, public, created_at, last_seen, request_count "
+            "SELECT agent_id, name, description, capabilities, public, created_at, last_seen, request_count, "
+            "reputation, reputation_count, credits, available "
             "FROM agents ORDER BY created_at DESC"
         ).fetchall()
         agent_count = len(agents)
@@ -1862,6 +1864,7 @@ def admin_dashboard(_: bool = Depends(_verify_admin_session)):
         market_completed = db.execute("SELECT COUNT(*) as c FROM marketplace WHERE status='completed'").fetchone()["c"]
         total_credits = db.execute("SELECT COALESCE(SUM(credits),0) as c FROM agents").fetchone()["c"]
         scenario_count = db.execute("SELECT COUNT(*) as c FROM test_scenarios").fetchone()["c"]
+        contact_count = db.execute("SELECT COUNT(*) as c FROM contact_submissions").fetchone()["c"]
 
     return {
         "agents": [dict(a) for a in agents],
@@ -1883,6 +1886,7 @@ def admin_dashboard(_: bool = Depends(_verify_admin_session)):
             "marketplace_completed": market_completed,
             "total_credits_circulation": total_credits,
             "test_scenarios": scenario_count,
+            "contact_submissions": contact_count,
         },
         "version": "0.5.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
