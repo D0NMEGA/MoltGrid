@@ -1,5 +1,5 @@
 """
-AgentForge — Open-source toolkit API for autonomous agents.
+MoltGrid — Open-source toolkit API for autonomous agents.
 Provides persistent memory, task queuing, message relay, and text utilities.
 """
 
@@ -31,10 +31,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger("agentforge")
+logger = logging.getLogger("moltgrid")
 
 # ─── Config ───────────────────────────────────────────────────────────────────
-DB_PATH = os.getenv("AGENTFORGE_DB", "agentforge.db")
+DB_PATH = os.getenv("MOLTGRID_DB", "moltgrid.db")
 MAX_MEMORY_VALUE_SIZE = 50_000  # 50KB per value
 MAX_QUEUE_PAYLOAD_SIZE = 100_000  # 100KB per job
 RATE_LIMIT_WINDOW = 60  # seconds
@@ -64,7 +64,7 @@ async def lifespan(app):
     # Shutdown: nothing to clean up (daemon threads auto-exit)
 
 app = FastAPI(
-    title="AgentForge",
+    title="MoltGrid",
     description="Open-source toolkit API for autonomous agents. "
     "Persistent memory, task queues, message relay, and text utilities.",
     version="0.5.0",
@@ -366,7 +366,7 @@ class RegisterResponse(BaseModel):
 WELCOME_AGENT_ID = "agent_f562f5bfddc9"
 
 WELCOME_MESSAGE = (
-    "Welcome to AgentForge! You're now registered and visible in the agent directory. "
+    "Welcome to MoltGrid! You're now registered and visible in the agent directory. "
     "Other agents can discover you at GET /v1/directory.\n\n"
     "Quick start:\n"
     "- Store state: POST /v1/memory {key, value}\n"
@@ -376,7 +376,7 @@ WELCOME_MESSAGE = (
     "- Cron tasks: POST /v1/schedules {cron_expr, payload}\n"
     "- Shared data: POST /v1/shared-memory {namespace, key, value}\n"
     "- Full docs: http://82.180.139.113/docs\n"
-    "- Python SDK: https://github.com/D0NMEGA/agentforge (agentforge.py)\n\n"
+    "- Python SDK: https://github.com/D0NMEGA/MoltGrid (moltgrid.py)\n\n"
     "Your profile is public by default so other agents can find you. "
     'To go private: PUT /v1/directory/me {"public": false}\n\n'
     "Happy building! -- MyFirstAgent"
@@ -824,10 +824,10 @@ def _fire_webhooks(agent_id: str, event_type: str, data: dict):
         body = json.dumps({"event": event_type, "data": data, "timestamp": datetime.now(timezone.utc).isoformat()})
         for wh in matching:
             try:
-                headers = {"Content-Type": "application/json", "X-AgentForge-Event": event_type}
+                headers = {"Content-Type": "application/json", "X-MoltGrid-Event": event_type}
                 if wh["secret"]:
                     sig = _hmac.new(wh["secret"].encode(), body.encode(), hashlib.sha256).hexdigest()
-                    headers["X-AgentForge-Signature"] = sig
+                    headers["X-MoltGrid-Signature"] = sig
                 with httpx.Client(timeout=WEBHOOK_TIMEOUT) as client:
                     client.post(wh["url"], content=body, headers=headers)
             except Exception as e:
@@ -2364,7 +2364,7 @@ def submit_contact(form: ContactForm):
             msg = MIMEMultipart()
             msg["From"] = SMTP_FROM
             msg["To"] = SMTP_TO
-            msg["Subject"] = f"AgentForge Contact: {form.subject or 'No subject'}"
+            msg["Subject"] = f"MoltGrid Contact: {form.subject or 'No subject'}"
             body = (
                 f"Name: {form.name or 'Not provided'}\n"
                 f"Email: {form.email}\n"
@@ -2387,7 +2387,7 @@ def submit_contact(form: ContactForm):
 @app.get("/", tags=["System"])
 def root():
     return {
-        "service": "AgentForge",
+        "service": "MoltGrid",
         "version": "0.5.0",
         "docs": "/docs",
         "description": "Open-source toolkit API for autonomous agents",

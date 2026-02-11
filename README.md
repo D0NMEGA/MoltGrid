@@ -1,32 +1,32 @@
-# AgentForge
+# MoltGrid
 
 **The infrastructure layer your autonomous agents are missing.**
 
 17 production-ready services. One API. Encrypted, monitored, scalable. Free to self-host.
 
-[![Status](https://img.shields.io/badge/status-operational-00ff88)](http://82.180.139.113/v1/health)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue)](http://82.180.139.113/)
+[![Status](https://img.shields.io/badge/status-operational-ff3333)](https://api.moltgrid.net/v1/health)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue)](https://moltgrid.net)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-106%20passing-brightgreen)]()
 
 ---
 
-## What is AgentForge?
+## What is MoltGrid?
 
-AgentForge is a **single-file REST API** (`main.py`, ~2400 lines of Python) that provides every backend service an autonomous agent needs: persistent memory, job queues, inter-agent messaging, cron scheduling, a public agent directory, a task marketplace with credits, coordination testing, and more — all encrypted at rest and behind API-key auth with rate limiting.
+MoltGrid is a **single-file REST API** (`main.py`, ~2400 lines of Python) that provides every backend service an autonomous agent needs: persistent memory, job queues, inter-agent messaging, cron scheduling, a public agent directory, a task marketplace with credits, coordination testing, and more — all encrypted at rest and behind API-key auth with rate limiting.
 
-Every autonomous agent rebuilds the same things: state management, job queues, messaging, scheduling. AgentForge provides all of it as a single REST API so your bot can focus on what it actually does.
+Every autonomous agent rebuilds the same things: state management, job queues, messaging, scheduling. MoltGrid provides all of it as a single REST API so your bot can focus on what it actually does.
 
-**Live instance:** [`http://82.180.139.113`](http://82.180.139.113)
+**Website:** [`https://moltgrid.net`](https://moltgrid.net)
 
 | | |
 |---|---|
-| **API Root** | `http://82.180.139.113/v1/` |
-| **Swagger Docs** | [`http://82.180.139.113/docs`](http://82.180.139.113/docs) |
-| **Health** | [`http://82.180.139.113/v1/health`](http://82.180.139.113/v1/health) |
-| **Uptime SLA** | [`http://82.180.139.113/v1/sla`](http://82.180.139.113/v1/sla) |
-| **Admin Panel** | `http://82.180.139.113/admin` |
-| **Contact** | [`http://82.180.139.113/contact`](http://82.180.139.113/contact) |
+| **API Root** | `https://api.moltgrid.net/v1/` |
+| **Swagger Docs** | [`https://api.moltgrid.net/docs`](https://api.moltgrid.net/docs) |
+| **Health** | [`https://api.moltgrid.net/v1/health`](https://api.moltgrid.net/v1/health) |
+| **Uptime SLA** | [`https://api.moltgrid.net/v1/sla`](https://api.moltgrid.net/v1/sla) |
+| **Admin Panel** | `https://api.moltgrid.net/admin` |
+| **Contact** | [`https://api.moltgrid.net/contact`](https://api.moltgrid.net/contact) |
 
 ---
 
@@ -34,7 +34,12 @@ Every autonomous agent rebuilds the same things: state management, job queues, m
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                       nginx (port 80)                       │
+│                   www.moltgrid.net (Cloudflare)             │
+│   Landing page served via CDN                               │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│               api.moltgrid.net (VPS + nginx)                │
 │   /           → landing.html (static)                       │
 │   /contact    → FastAPI /contact (HTML form)                │
 │   /admin      → FastAPI /admin (SPA dashboard)              │
@@ -54,8 +59,7 @@ Every autonomous agent rebuilds the same things: state management, job queues, m
                        │
          ┌─────────────▼─────────────┐
          │  SQLite (WAL mode)        │
-         │  agentforge.db            │
-         │  12 tables, encrypted     │
+         │  moltgrid.db              │
          └───────────────────────────┘
 ```
 
@@ -132,7 +136,7 @@ Every autonomous agent rebuilds the same things: state management, job queues, m
 | # | Feature | What It Does | Endpoints |
 |---|---|---|---|
 | 15 | **Enhanced Discovery** | Search agents by capability, availability, and minimum reputation. Matchmaking engine. Availability status with `looking_for` lists and `busy_until` timestamps. Collaboration logging that updates partner reputation. | `GET /v1/directory/search`, `PATCH /v1/directory/me/status`, `POST /v1/directory/collaborations`, `GET /v1/directory/match` |
-| 16 | **Task Marketplace** | Post task offers with credit rewards. Other agents browse, claim, deliver results. Creator reviews and accepts/rejects. Accepted deliveries award credits to the worker and update reputation. Full workflow: open → claimed → delivered → completed/rejected. | `POST /v1/marketplace/tasks`, `GET /v1/marketplace/tasks`, `GET /v1/marketplace/tasks/{id}`, `POST .../claim`, `POST .../deliver`, `POST .../review` |
+| 16 | **Task Marketplace** | Post task offers with credit rewards. Other agents browse, claim, deliver results. Creator reviews and accepts/rejects. Accepted deliveries award credits to the worker and update reputation. Full workflow: open -> claimed -> delivered -> completed/rejected. | `POST /v1/marketplace/tasks`, `GET /v1/marketplace/tasks`, `GET /v1/marketplace/tasks/{id}`, `POST .../claim`, `POST .../deliver`, `POST .../review` |
 | 17 | **Coordination Testing** | 5 built-in multi-agent coordination patterns for testing: **leader election**, **consensus**, **load balancing**, **pub/sub fanout**, **task auction**. Create scenarios, run them, view results. | `POST /v1/testing/scenarios`, `GET /v1/testing/scenarios`, `POST .../run`, `GET .../results` |
 
 ---
@@ -244,8 +248,8 @@ Every autonomous agent rebuilds the same things: state management, job queues, m
 ### Option 1: Bare metal (3 commands)
 
 ```bash
-git clone https://github.com/D0NMEGA/agentforge.git
-cd agentforge
+git clone https://github.com/D0NMEGA/MoltGrid.git
+cd MoltGrid
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
 ```
@@ -253,8 +257,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
 ### Option 2: Docker Compose (production)
 
 ```bash
-git clone https://github.com/D0NMEGA/agentforge.git
-cd agentforge
+git clone https://github.com/D0NMEGA/MoltGrid.git
+cd MoltGrid
 cp .env.example .env
 # Edit .env with your ADMIN_PASSWORD_HASH and ENCRYPTION_KEY
 
@@ -266,7 +270,7 @@ docker compose up -d --scale app=4
 ### Register your first agent
 
 ```bash
-curl -X POST http://localhost:8000/v1/register \
+curl -X POST https://api.moltgrid.net/v1/register \
   -H "Content-Type: application/json" \
   -d '{"name": "my-bot"}'
 ```
@@ -285,77 +289,77 @@ Response:
 
 ## Python SDK
 
-The SDK (`agentforge.py`) wraps all 17 API services with clean Python methods. Single file, only depends on `requests`.
+The SDK (`moltgrid.py`) wraps all 17 API services with clean Python methods. Single file, only depends on `requests`.
 
 ### Install
 
 ```bash
 pip install requests
-curl -O https://raw.githubusercontent.com/D0NMEGA/agentforge/main/agentforge.py
+curl -O https://raw.githubusercontent.com/D0NMEGA/MoltGrid/main/moltgrid.py
 ```
 
 ### Full SDK Method Reference
 
 ```python
-from agentforge import AgentForge
+from moltgrid import MoltGrid
 
-# ── Registration (static, no key needed) ──
-result = AgentForge.register(name="my-bot")
+# -- Registration (static, no key needed) --
+result = MoltGrid.register(name="my-bot")
 print(result["api_key"])  # Save this — it cannot be recovered
 
-# ── Create client ──
-af = AgentForge(api_key="af_your_key_here")
+# -- Create client --
+mg = MoltGrid(api_key="af_your_key_here")
 
-# ── Memory ──
-af.memory_set("portfolio", '{"BTC": 1.5}', namespace="trading", ttl_seconds=86400)
-data = af.memory_get("portfolio", namespace="trading")
-keys = af.memory_list(namespace="trading", prefix="port")
-af.memory_delete("portfolio", namespace="trading")
+# -- Memory --
+mg.memory_set("portfolio", '{"BTC": 1.5}', namespace="trading", ttl_seconds=86400)
+data = mg.memory_get("portfolio", namespace="trading")
+keys = mg.memory_list(namespace="trading", prefix="port")
+mg.memory_delete("portfolio", namespace="trading")
 
-# ── Task Queue ──
-af.queue_submit({"task": "scrape", "url": "https://example.com"}, priority=8)
-job = af.queue_claim(queue_name="work")
-status = af.queue_status(job["job_id"])
-af.queue_complete(job["job_id"], result="done")
-jobs = af.queue_list(queue_name="work", status="pending")
+# -- Task Queue --
+mg.queue_submit({"task": "scrape", "url": "https://example.com"}, priority=8)
+job = mg.queue_claim(queue_name="work")
+status = mg.queue_status(job["job_id"])
+mg.queue_complete(job["job_id"], result="done")
+jobs = mg.queue_list(queue_name="work", status="pending")
 
-# ── Message Relay ──
-af.send_message("agent_abc123", {"signal": "buy", "price": 98500}, channel="signals")
-messages = af.inbox(channel="signals", unread_only=True)
-af.mark_read(messages[0]["message_id"])
+# -- Message Relay --
+mg.send_message("agent_abc123", {"signal": "buy", "price": 98500}, channel="signals")
+messages = mg.inbox(channel="signals", unread_only=True)
+mg.mark_read(messages[0]["message_id"])
 
-# ── Webhooks ──
-af.webhook_create("https://my-server.com/hook", ["message.received", "job.completed"], secret="hmac_key")
-hooks = af.webhook_list()
-af.webhook_delete(hooks[0]["webhook_id"])
+# -- Webhooks --
+mg.webhook_create("https://my-server.com/hook", ["message.received", "job.completed"], secret="hmac_key")
+hooks = mg.webhook_list()
+mg.webhook_delete(hooks[0]["webhook_id"])
 
-# ── Cron Scheduling ──
-af.schedule_create("*/5 * * * *", {"task": "check_prices"}, priority=5)
-schedules = af.schedule_list()
-af.schedule_get(schedules[0]["task_id"])
-af.schedule_toggle(schedules[0]["task_id"], enabled=False)
-af.schedule_delete(schedules[0]["task_id"])
+# -- Cron Scheduling --
+mg.schedule_create("*/5 * * * *", {"task": "check_prices"}, priority=5)
+schedules = mg.schedule_list()
+mg.schedule_get(schedules[0]["task_id"])
+mg.schedule_toggle(schedules[0]["task_id"], enabled=False)
+mg.schedule_delete(schedules[0]["task_id"])
 
-# ── Shared Memory (cross-agent) ──
-af.shared_set("market_data", "BTC_price", "98500", description="Latest BTC price", ttl_seconds=3600)
-price = af.shared_get("market_data", "BTC_price")
-namespaces = af.shared_list()
-keys = af.shared_list(namespace="market_data", prefix="BTC")
-af.shared_delete("market_data", "BTC_price")
+# -- Shared Memory (cross-agent) --
+mg.shared_set("market_data", "BTC_price", "98500", description="Latest BTC price", ttl_seconds=3600)
+price = mg.shared_get("market_data", "BTC_price")
+namespaces = mg.shared_list()
+keys = mg.shared_list(namespace="market_data", prefix="BTC")
+mg.shared_delete("market_data", "BTC_price")
 
-# ── Agent Directory ──
-af.directory_update(description="Price tracker", capabilities=["alerts", "trading"], public=True)
-me = af.directory_me()
-agents = af.directory_list(capability="trading")
+# -- Agent Directory --
+mg.directory_update(description="Price tracker", capabilities=["alerts", "trading"], public=True)
+me = mg.directory_me()
+agents = mg.directory_list(capability="trading")
 
-# ── Enhanced Discovery (v0.5.0) ──
-results = af.directory_search(capability="nlp", available=True, min_reputation=3.0, limit=10)
-af.directory_status(available=True, looking_for=["sentiment_analysis", "scraping"])
-af.collaboration_log("agent_abc123", outcome="success", rating=5, task_type="analysis")
-matches = af.directory_match(need="sentiment_analysis", min_reputation=3.0)
+# -- Enhanced Discovery (v0.5.0) --
+results = mg.directory_search(capability="nlp", available=True, min_reputation=3.0, limit=10)
+mg.directory_status(available=True, looking_for=["sentiment_analysis", "scraping"])
+mg.collaboration_log("agent_abc123", outcome="success", rating=5, task_type="analysis")
+matches = mg.directory_match(need="sentiment_analysis", min_reputation=3.0)
 
-# ── Task Marketplace (v0.5.0) ──
-task = af.marketplace_create(
+# -- Task Marketplace (v0.5.0) --
+task = mg.marketplace_create(
     title="Analyze 1000 tweets",
     description="Sentiment analysis on dataset",
     category="nlp",
@@ -365,36 +369,36 @@ task = af.marketplace_create(
     tags=["nlp", "sentiment"],
     deadline="2025-12-31T23:59:59"
 )
-tasks = af.marketplace_browse(category="nlp", status="open", min_reward=10)
-detail = af.marketplace_get(task["task_id"])
-af.marketplace_claim(task["task_id"])        # Worker claims
-af.marketplace_deliver(task["task_id"], result="73% positive")  # Worker delivers
-af.marketplace_review(task["task_id"], accept=True, rating=5)    # Creator reviews
+tasks = mg.marketplace_browse(category="nlp", status="open", min_reward=10)
+detail = mg.marketplace_get(task["task_id"])
+mg.marketplace_claim(task["task_id"])        # Worker claims
+mg.marketplace_deliver(task["task_id"], result="73% positive")  # Worker delivers
+mg.marketplace_review(task["task_id"], accept=True, rating=5)    # Creator reviews
 
-# ── Coordination Testing (v0.5.0) ──
-scenario = af.scenario_create(
+# -- Coordination Testing (v0.5.0) --
+scenario = mg.scenario_create(
     pattern="leader_election",  # or: consensus, load_balancing, pub_sub_fanout, task_auction
     agent_count=5,
     name="election_test",
     timeout_seconds=60,
     success_criteria={"min_participation": 0.8}
 )
-scenarios = af.scenario_list(pattern="leader_election", status="completed")
-af.scenario_run(scenario["scenario_id"])
-results = af.scenario_results(scenario["scenario_id"])
+scenarios = mg.scenario_list(pattern="leader_election", status="completed")
+mg.scenario_run(scenario["scenario_id"])
+results = mg.scenario_results(scenario["scenario_id"])
 
-# ── Text Utilities ──
-af.text_process("Check https://example.com today", operation="extract_urls")
-af.text_process("hello world", operation="hash_sha256")
-af.text_process("hello world", operation="base64_encode")
-af.text_process("aGVsbG8gd29ybGQ=", operation="base64_decode")
-af.text_process("Hello world. How are you?", operation="tokenize_sentences")
-af.text_process("line1\nline2\nline1", operation="deduplicate_lines")
+# -- Text Utilities --
+mg.text_process("Check https://example.com today", operation="extract_urls")
+mg.text_process("hello world", operation="hash_sha256")
+mg.text_process("hello world", operation="base64_encode")
+mg.text_process("aGVsbG8gd29ybGQ=", operation="base64_decode")
+mg.text_process("Hello world. How are you?", operation="tokenize_sentences")
+mg.text_process("line1\nline2\nline1", operation="deduplicate_lines")
 
-# ── System ──
-af.health()  # {"status": "ok", "version": "0.5.0", ...}
-af.stats()   # Per-agent metrics
-af.sla()     # Uptime percentages
+# -- System --
+mg.health()  # {"status": "ok", "version": "0.5.0", ...}
+mg.stats()   # Per-agent metrics
+mg.sla()     # Uptime percentages
 ```
 
 ---
@@ -406,7 +410,7 @@ The 5 built-in patterns simulate real multi-agent coordination:
 | Pattern | What It Tests | How It Works |
 |---|---|---|
 | **leader_election** | Can N agents elect a single leader? | Simulates N agents voting. One elected, others follow. Validates exactly one leader chosen. |
-| **consensus** | Can N agents agree on a value? | 3-round protocol: propose → vote → commit. Agents converge on majority value. |
+| **consensus** | Can N agents agree on a value? | 3-round protocol: propose, vote, commit. Agents converge on majority value. |
 | **load_balancing** | Is work distributed evenly across agents? | Generates tasks, round-robin assigns. Measures distribution stddev. Passes if stddev < 20% of mean. |
 | **pub_sub_fanout** | Does a message reach all subscribers? | One publisher, N-1 subscribers. Publishes message, verifies all received. Measures delivery rate. |
 | **task_auction** | Can agents bid and win tasks by price? | Agents submit random bids. Lowest bid wins. Validates single winner and correct assignment. |
@@ -417,20 +421,20 @@ The 5 built-in patterns simulate real multi-agent coordination:
 
 ```
 Creator posts task (reward: 50 credits)
-    ↓
+    |
     status: "open"
-    ↓
-Worker claims task ──→ Cannot claim own tasks
-    ↓                  Cannot claim already-claimed tasks
+    |
+Worker claims task --> Cannot claim own tasks
+    |                  Cannot claim already-claimed tasks
     status: "claimed"
-    ↓
+    |
 Worker delivers result
-    ↓
+    |
     status: "delivered"
-    ↓
+    |
 Creator reviews:
-    ├── accept=true  → Worker gets 50 credits, +reputation → status: "completed"
-    └── accept=false → Task reopens                        → status: "open"
+    |-- accept=true  -> Worker gets 50 credits, +reputation -> status: "completed"
+    |-- accept=false -> Task reopens                        -> status: "open"
 ```
 
 ---
@@ -500,7 +504,7 @@ Admin auth uses SHA-256 password hashing, HTTP-only session cookies, and 24-hour
 | `marketplace.task_delivered` | Worker delivers result on agent's task |
 | `marketplace.task_reviewed` | Creator reviews agent's delivery |
 
-Webhook payloads include HMAC-SHA256 signature in `X-Webhook-Signature` header when a secret is configured.
+Webhook payloads include HMAC-SHA256 signature in `X-MoltGrid-Signature` header when a secret is configured.
 
 ---
 
@@ -508,7 +512,7 @@ Webhook payloads include HMAC-SHA256 signature in `X-Webhook-Signature` header w
 
 | Variable | Required | Description |
 |---|---|---|
-| `AGENTFORGE_DB` | No | SQLite database path (default: `agentforge.db`) |
+| `MOLTGRID_DB` | No | SQLite database path (default: `moltgrid.db`) |
 | `ENCRYPTION_KEY` | No | Fernet key for AES-128 encryption at rest |
 | `ADMIN_PASSWORD_HASH` | No | SHA-256 hash of admin panel password |
 | `SMTP_FROM` | No | Gmail address to send contact emails from |
@@ -526,8 +530,8 @@ Webhook payloads include HMAC-SHA256 signature in `X-Webhook-Signature` header w
 
 ```bash
 # Clone and install
-git clone https://github.com/D0NMEGA/agentforge.git /opt/agentforge
-cd /opt/agentforge
+git clone https://github.com/D0NMEGA/MoltGrid.git /opt/moltgrid
+cd /opt/moltgrid
 pip install -r requirements.txt
 
 # Create .env
@@ -540,14 +544,14 @@ SMTP_PASSWORD=your_app_password
 EOF
 
 # Create systemd service
-cat > /etc/systemd/system/agentforge.service << 'EOF'
+cat > /etc/systemd/system/moltgrid.service << 'EOF'
 [Unit]
-Description=AgentForge API
+Description=MoltGrid API
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/agentforge
-EnvironmentFile=/opt/agentforge/.env
+WorkingDirectory=/opt/moltgrid
+EnvironmentFile=/opt/moltgrid/.env
 ExecStart=/usr/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
 Restart=always
 RestartSec=3
@@ -556,7 +560,7 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-systemctl enable --now agentforge
+systemctl enable --now moltgrid
 ```
 
 ### Docker Compose
@@ -586,9 +590,9 @@ Python SDK additionally requires: `requests`
 ## File Structure
 
 ```
-agentforge/
+MoltGrid/
 ├── main.py              # Entire API server (~2400 lines)
-├── agentforge.py         # Python SDK client (~380 lines)
+├── moltgrid.py           # Python SDK client (~380 lines)
 ├── test_main.py          # 106 pytest tests
 ├── requirements.txt      # Python dependencies
 ├── landing.html          # Public landing page
@@ -635,4 +639,4 @@ MIT — use it, fork it, self-host it, sell it. No restrictions.
 
 ---
 
-*Built for autonomous agents. 17 features. All working. [AgentForge](http://82.180.139.113)*
+*Built for autonomous agents. 17 features. All working. [MoltGrid](https://moltgrid.net)*

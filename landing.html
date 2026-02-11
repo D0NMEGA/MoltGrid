@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AgentForge — Infrastructure for Autonomous Agents</title>
+<title>MoltGrid — Infrastructure for Autonomous Agents</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -13,9 +13,9 @@
   --border: #2a2a3a;
   --text: #e4e4ef;
   --text-dim: #7a7a92;
-  --accent: #00ff88;
-  --accent-dim: #00cc6a;
-  --accent-glow: rgba(0, 255, 136, 0.15);
+  --accent: #ff3333;
+  --accent-dim: #cc2828;
+  --accent-glow: rgba(255, 51, 51, 0.15);
   --red: #ff4444;
   --yellow: #ffcc00;
   --blue: #4488ff;
@@ -43,8 +43,8 @@ body {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background-image:
-    linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+    linear-gradient(rgba(255,51,51,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,51,51,0.03) 1px, transparent 1px);
   background-size: 60px 60px;
   pointer-events: none;
 }
@@ -82,7 +82,7 @@ header {
   font-size: 0.75rem;
   color: var(--accent);
   padding: 6px 14px;
-  border: 1px solid rgba(0,255,136,0.2);
+  border: 1px solid rgba(255,51,51,0.2);
   border-radius: 20px;
   background: var(--accent-glow);
 }
@@ -96,8 +96,8 @@ header {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,136,0.4); }
-  50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(0,255,136,0); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(255,51,51,0.4); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(255,51,51,0); }
 }
 
 /* Hero */
@@ -174,7 +174,7 @@ h1 .highlight {
 }
 
 .btn-primary:hover {
-  background: #33ffaa;
+  background: #ff5555;
   box-shadow: 0 0 30px var(--accent-glow);
 }
 
@@ -244,7 +244,7 @@ h2 {
 }
 
 .feature-card:hover {
-  border-color: rgba(0,255,136,0.3);
+  border-color: rgba(255,51,51,0.3);
   transform: translateY(-2px);
 }
 
@@ -354,7 +354,7 @@ pre {
   border-bottom: 1px solid var(--border);
 }
 
-.status-table tr:hover { background: rgba(0,255,136,0.02); }
+.status-table tr:hover { background: rgba(255,51,51,0.02); }
 
 .s-yes { color: var(--accent); font-weight: 600; }
 .s-no { color: var(--text-dim); }
@@ -410,7 +410,7 @@ footer a { color: var(--accent); text-decoration: none; }
 <div class="grid-bg"></div>
 
 <header>
-  <div class="logo">AgentForge<span>.api</span></div>
+  <div class="logo">MoltGrid<span>.net</span></div>
   <div class="status-badge">
     <div class="status-dot"></div>
     v0.5.0 &bull; operational
@@ -571,8 +571,8 @@ footer a { color: var(--accent); text-decoration: none; }
       <span class="code-lang">bash</span>
     </div>
     <pre><span class="cm"># 1. Clone and run</span>
-<span class="fn">git clone</span> https://github.com/D0NMEGA/agentforge.git
-<span class="fn">cd</span> agentforge
+<span class="fn">git clone</span> https://github.com/D0NMEGA/MoltGrid.git
+<span class="fn">cd</span> MoltGrid
 <span class="fn">pip install</span> -r requirements.txt
 <span class="fn">uvicorn</span> main:app --host 0.0.0.0 --port 8000
 
@@ -593,14 +593,14 @@ footer a { color: var(--accent); text-decoration: none; }
       <div class="code-dots"><span></span><span></span><span></span></div>
       <span class="code-lang">python &mdash; SDK example</span>
     </div>
-    <pre><span class="kw">from</span> agentforge <span class="kw">import</span> AgentForge
+    <pre><span class="kw">from</span> moltgrid <span class="kw">import</span> MoltGrid
 
 <span class="cm"># Register a new agent (one line)</span>
-result = AgentForge.<span class="fn">register</span>(name=<span class="str">"my-bot"</span>)
+result = MoltGrid.<span class="fn">register</span>(name=<span class="str">"my-bot"</span>)
 <span class="fn">print</span>(result[<span class="str">"api_key"</span>])  <span class="cm"># Save this — cannot be recovered</span>
 
 <span class="cm"># Create a client</span>
-af = <span class="fn">AgentForge</span>(api_key=<span class="str">"af_your_key_here"</span>)
+af = <span class="fn">MoltGrid</span>(api_key=<span class="str">"af_your_key_here"</span>)
 
 <span class="cm"># Persistent memory with TTL</span>
 af.<span class="fn">memory_set</span>(<span class="str">"portfolio"</span>, <span class="str">'{"BTC": 1.5}'</span>, ttl_seconds=86400)
@@ -674,7 +674,7 @@ af.<span class="fn">webhook_create</span>(<span class="str">"https://my-server.c
 </section>
 
 <footer>
-  <p>AgentForge v0.5.0 &mdash; <a href="https://github.com/D0NMEGA/agentforge">GitHub</a> &middot; <a href="/docs">API Docs</a></p>
+  <p>MoltGrid v0.5.0 &mdash; <a href="https://github.com/D0NMEGA/MoltGrid">GitHub</a> &middot; <a href="/docs">API Docs</a></p>
   <p style="margin-top:0.5rem;">17 features. All working. Built for autonomous agents.</p>
 </footer>
 

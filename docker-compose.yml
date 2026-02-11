@@ -5,9 +5,9 @@ services:
     build: .
     env_file: .env
     environment:
-      - AGENTFORGE_DB=/data/agentforge.db
+      - MOLTGRID_DB=/data/moltgrid.db
     volumes:
-      - agentforge-data:/data
+      - moltgrid-data:/data
     restart: always
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/health')"]
@@ -27,4 +27,4 @@ services:
     restart: always
 
 volumes:
-  agentforge-data:
+  moltgrid-data:

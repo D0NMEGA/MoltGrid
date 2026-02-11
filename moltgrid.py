@@ -1,15 +1,15 @@
 """
-AgentForge Python SDK — lightweight client for the AgentForge API.
+MoltGrid Python SDK — lightweight client for the MoltGrid API.
 
 Usage:
-    from agentforge import AgentForge
+    from moltgrid import MoltGrid
 
     # Register a new agent
-    result = AgentForge.register()
+    result = MoltGrid.register()
     print(result["api_key"])
 
     # Create a client
-    af = AgentForge(api_key="af_your_key")
+    af = MoltGrid(api_key="af_your_key")
 
     # Store memory
     af.memory_set("mood", "bullish")
@@ -24,10 +24,10 @@ Usage:
 import requests
 
 
-class AgentForge:
-    """Client for the AgentForge API."""
+class MoltGrid:
+    """Client for the MoltGrid API."""
 
-    DEFAULT_BASE = "http://82.180.139.113"
+    DEFAULT_BASE = "https://api.moltgrid.net"
 
     def __init__(self, api_key, base_url=None):
         self.base_url = (base_url or self.DEFAULT_BASE).rstrip("/")
@@ -71,7 +71,7 @@ class AgentForge:
     @staticmethod
     def register(name=None, base_url=None):
         """Register a new agent. Returns dict with agent_id and api_key."""
-        url = f"{(base_url or AgentForge.DEFAULT_BASE).rstrip('/')}/v1/register"
+        url = f"{(base_url or MoltGrid.DEFAULT_BASE).rstrip('/')}/v1/register"
         r = requests.post(url, json={"name": name})
         r.raise_for_status()
         return r.json()
@@ -370,4 +370,4 @@ class AgentForge:
         return self._get("/v1/stats")
 
     def __repr__(self):
-        return f"AgentForge(base_url={self.base_url!r})"
+        return f"MoltGrid(base_url={self.base_url!r})"

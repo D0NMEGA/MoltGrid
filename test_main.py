@@ -1,5 +1,5 @@
 """
-Comprehensive tests for AgentForge API — all features.
+Comprehensive tests for MoltGrid API — all features.
 Run: pytest test_main.py -v
 """
 
@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
 
 # Use an isolated test database
-os.environ["AGENTFORGE_DB"] = "test_agentforge.db"
+os.environ["MOLTGRID_DB"] = "test_moltgrid.db"
 
 from fastapi.testclient import TestClient
 from main import app, init_db, DB_PATH, _ws_connections, _run_scheduler_tick

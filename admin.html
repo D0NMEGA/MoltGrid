@@ -3,27 +3,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AgentForge — Admin Dashboard</title>
+<title>MoltGrid — Admin Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg: #0a0a0f; --surface: #12121a; --surface2: #1a1a26; --border: #2a2a3a;
-  --text: #e4e4ef; --text-dim: #7a7a92; --accent: #00ff88; --accent-dim: #00cc6a;
-  --accent-glow: rgba(0,255,136,0.15); --red: #ff4444; --yellow: #ffcc00; --blue: #4488ff;
+  --text: #e4e4ef; --text-dim: #7a7a92; --accent: #ff3333; --accent-dim: #cc2828;
+  --accent-glow: rgba(255,51,51,0.15); --red: #ff4444; --yellow: #ffcc00; --blue: #4488ff;
   --purple: #bb88ff;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--bg); color:var(--text); font-family:'Space Grotesk',sans-serif; line-height:1.6; }
 .noise { position:fixed; top:0;left:0;right:0;bottom:0; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E"); pointer-events:none; z-index:999; }
-.grid-bg { position:fixed; top:0;left:0;right:0;bottom:0; background-image:linear-gradient(rgba(0,255,136,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,136,0.03) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
+.grid-bg { position:fixed; top:0;left:0;right:0;bottom:0; background-image:linear-gradient(rgba(255,51,51,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,51,51,0.03) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
 
 header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgba(10,10,15,0.9); backdrop-filter:blur(20px); border-bottom:1px solid var(--border); z-index:100; display:flex; justify-content:space-between; align-items:center; }
 .logo { font-family:'JetBrains Mono',monospace; font-weight:700; font-size:1.2rem; color:var(--accent); text-decoration:none; }
 .logo span { color:var(--text-dim); }
 .header-right { display:flex; align-items:center; gap:1rem; }
-.status-badge { display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--accent); padding:4px 12px; border:1px solid rgba(0,255,136,0.2); border-radius:20px; background:var(--accent-glow); }
+.status-badge { display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--accent); padding:4px 12px; border:1px solid rgba(255,51,51,0.2); border-radius:20px; background:var(--accent-glow); }
 .status-dot { width:6px; height:6px; background:var(--accent); border-radius:50%; animation:pulse 2s infinite; }
-@keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(0,255,136,0.4)} 50%{opacity:0.7;box-shadow:0 0 0 6px rgba(0,255,136,0)} }
+@keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(255,51,51,0.4)} 50%{opacity:0.7;box-shadow:0 0 0 6px rgba(255,51,51,0)} }
 .logout-btn { font-family:'JetBrains Mono',monospace; font-size:0.7rem; padding:4px 12px; background:transparent; color:var(--text-dim); border:1px solid var(--border); border-radius:6px; cursor:pointer; transition:all 0.2s; }
 .logout-btn:hover { border-color:var(--red); color:var(--red); }
 
@@ -33,7 +33,7 @@ h1 { font-size:1.6rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.25r
 
 .stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:0.75rem; margin-bottom:2rem; }
 .stat-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem; }
-.stat-card:hover { border-color:rgba(0,255,136,0.3); }
+.stat-card:hover { border-color:rgba(255,51,51,0.3); }
 .stat-label { font-family:'JetBrains Mono',monospace; font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin-bottom:0.25rem; }
 .stat-value { font-size:1.6rem; font-weight:700; color:var(--accent); font-family:'JetBrains Mono',monospace; }
 .stat-value.blue { color:var(--blue); } .stat-value.yellow { color:var(--yellow); } .stat-value.purple { color:var(--purple); }
@@ -49,7 +49,7 @@ h1 { font-size:1.6rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.25r
 .data-table td { padding:0.6rem 1rem; border-bottom:1px solid var(--border); max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .data-table tr:last-child td { border-bottom:none; }
 .clickable-row { cursor:pointer; transition:background 0.15s; }
-.clickable-row:hover { background:rgba(0,255,136,0.04) !important; }
+.clickable-row:hover { background:rgba(255,51,51,0.04) !important; }
 .mono { font-family:'JetBrains Mono',monospace; font-size:0.75rem; }
 .id-cell { color:var(--accent); font-family:'JetBrains Mono',monospace; font-size:0.75rem; }
 .badge { display:inline-block; font-family:'JetBrains Mono',monospace; font-size:0.6rem; padding:2px 8px; border-radius:4px; }
@@ -116,7 +116,7 @@ h1 { font-size:1.6rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.25r
 <div class="grid-bg"></div>
 
 <header>
-  <a href="/" class="logo">AgentForge<span>.admin</span></a>
+  <a href="/" class="logo">MoltGrid<span>.admin</span></a>
   <div class="header-right">
     <div class="status-badge"><div class="status-dot"></div><span id="versionBadge">loading...</span></div>
     <button class="logout-btn" onclick="handleLogout()">Logout</button>
