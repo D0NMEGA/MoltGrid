@@ -60,6 +60,12 @@ async def lifespan(app):
     threading.Thread(target=_scheduler_loop, daemon=True).start()
     threading.Thread(target=_uptime_loop, daemon=True).start()
     logger.info("Background threads started (scheduler, uptime monitor)")
+    # Run an immediate uptime check to seed the database
+    try:
+        _uptime_check()
+        logger.info("Initial uptime check completed")
+    except Exception as e:
+        logger.error(f"Initial uptime check failed: {e}")
     yield
     # Shutdown: nothing to clean up (daemon threads auto-exit)
 
@@ -320,7 +326,17 @@ def hash_key(key: str) -> str:
 def generate_api_key() -> str:
     return f"af_{uuid.uuid4().hex}"
 
-async def get_agent_id(x_api_key: str = Header(..., alias="X-API-Key")) -> str:
+async def get_agent_id(request: Request) -> str:
+    # Handle X-API-Key header case-insensitively (nginx/proxies may lowercase it)
+    x_api_key = None
+    for header_name, header_value in request.headers.items():
+        if header_name.lower() == "x-api-key":
+            x_api_key = header_value
+            break
+
+    if not x_api_key:
+        raise HTTPException(401, "Missing X-API-Key header")
+
     with get_db() as db:
         row = db.execute(
             "SELECT agent_id FROM agents WHERE api_key_hash = ?",
@@ -2240,12 +2256,13 @@ def sla():
             cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             total = db.execute("SELECT COUNT(*) as c FROM uptime_checks WHERE checked_at >= ?", (cutoff,)).fetchone()["c"]
             up = db.execute("SELECT COUNT(*) as c FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,)).fetchone()["c"]
-            avg_ms = db.execute("SELECT AVG(response_ms) as avg FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,)).fetchone()["avg"]
+            avg_ms_row = db.execute("SELECT AVG(response_ms) as avg FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,)).fetchone()
+            avg_ms = avg_ms_row["avg"] if avg_ms_row and avg_ms_row["avg"] is not None else 0.0
             result[label] = {
                 "uptime_pct": round(up / total * 100, 3) if total > 0 else 100.0,
                 "total_checks": total,
                 "successful_checks": up,
-                "avg_response_ms": round(avg_ms or 0, 2),
+                "avg_response_ms": round(avg_ms, 2),
             }
         last_check = db.execute("SELECT * FROM uptime_checks ORDER BY checked_at DESC LIMIT 1").fetchone()
     return {
