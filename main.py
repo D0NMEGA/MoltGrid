@@ -407,7 +407,7 @@ def register_agent(req: RegisterRequest):
 
     with get_db() as db:
         db.execute(
-            "INSERT INTO agents (agent_id, api_key_hash, name, public, created_at) VALUES (?, ?, ?, 1, ?)",
+            "INSERT INTO agents (agent_id, api_key_hash, name, public, created_at, credits) VALUES (?, ?, ?, 1, ?, 200)",
             (agent_id, hash_key(api_key), req.name, now)
         )
         # Send welcome message from MyFirstAgent
@@ -1350,6 +1350,35 @@ def _expire_marketplace_tasks(db):
     now = datetime.now(timezone.utc).isoformat()
     db.execute("UPDATE marketplace SET status='expired' WHERE status='open' AND deadline IS NOT NULL AND deadline < ?", (now,))
 
+def _auto_approve_marketplace_tasks(db):
+    """Auto-approve delivered tasks older than 24 hours and award credits to workers."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    tasks = db.execute(
+        "SELECT task_id, claimed_by, reward_credits, creator_agent FROM marketplace "
+        "WHERE status='delivered' AND delivered_at < ?",
+        (cutoff,)
+    ).fetchall()
+    for task in tasks:
+        # Award credits to worker
+        if task["reward_credits"] and task["reward_credits"] > 0:
+            db.execute(
+                "UPDATE agents SET credits = credits + ? WHERE agent_id=?",
+                (task["reward_credits"], task["claimed_by"])
+            )
+        # Mark as completed with max rating for auto-approval
+        db.execute(
+            "UPDATE marketplace SET status='completed', rating=5 WHERE task_id=?",
+            (task["task_id"],)
+        )
+        # Fire webhook notification
+        try:
+            _fire_webhooks(task["claimed_by"], "marketplace.task.completed", {
+                "task_id": task["task_id"], "credits_awarded": task["reward_credits"] or 0,
+                "rating": 5, "auto_approved": True
+            })
+        except:
+            pass  # Don't fail the auto-approval if webhook fails
+
 def _parse_marketplace_row(row):
     d = dict(row)
     d["requirements"] = json.loads(d["requirements"]) if d["requirements"] else []
@@ -1362,10 +1391,21 @@ def _parse_marketplace_row(row):
 
 @app.post("/v1/marketplace/tasks", tags=["Marketplace"])
 def marketplace_create(req: MarketplaceCreateRequest, agent_id: str = Depends(get_agent_id)):
-    """Post a task to the marketplace for other agents to claim."""
+    """Post a task to the marketplace for other agents to claim. Costs credits upfront."""
     task_id = f"mktask_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
+        # Check if agent has enough credits
+        agent = db.execute("SELECT credits FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        if not agent or (agent["credits"] or 0) < req.reward_credits:
+            raise HTTPException(402, f"Insufficient credits. You have {agent['credits'] or 0}, need {req.reward_credits}")
+
+        # Deduct credits upfront
+        db.execute(
+            "UPDATE agents SET credits = credits - ? WHERE agent_id=?",
+            (req.reward_credits, agent_id)
+        )
+
         db.execute(
             "INSERT INTO marketplace (task_id, creator_agent, title, description, category, requirements, "
             "reward_credits, priority, estimated_effort, tags, deadline, status, created_at) "
@@ -1378,7 +1418,7 @@ def marketplace_create(req: MarketplaceCreateRequest, agent_id: str = Depends(ge
              json.dumps(req.tags) if req.tags else None,
              req.deadline, "open", now)
         )
-    return {"task_id": task_id, "status": "open", "created_at": now}
+    return {"task_id": task_id, "status": "open", "created_at": now, "credits_deducted": req.reward_credits}
 
 @app.get("/v1/marketplace/tasks", tags=["Marketplace"])
 def marketplace_browse(
@@ -1404,6 +1444,7 @@ def marketplace_browse(
     params.append(limit)
     with get_db() as db:
         _expire_marketplace_tasks(db)
+        _auto_approve_marketplace_tasks(db)
         rows = db.execute(
             f"SELECT * FROM marketplace WHERE {where} ORDER BY priority DESC, created_at DESC LIMIT ?",
             params
@@ -1425,6 +1466,7 @@ def marketplace_claim(task_id: str, agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         _expire_marketplace_tasks(db)
+        _auto_approve_marketplace_tasks(db)
         task = db.execute("SELECT * FROM marketplace WHERE task_id=?", (task_id,)).fetchone()
         if not task:
             raise HTTPException(404, "Task not found")
