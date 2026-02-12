@@ -733,7 +733,7 @@ def text_process(req: TextProcessRequest, agent_id: str = Depends(get_agent_id))
     ops = {
         "word_count": lambda t: {"word_count": len(t.split())},
         "char_count": lambda t: {"char_count": len(t), "char_count_no_spaces": len(t.replace(" ", ""))},
-        "extract_urls": lambda t: {"urls": re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+', t)},
+        "extract_urls": lambda t: {"urls": re.findall(r'https?://[^\s<>"{}|\\^[\]]+', t)},
         "extract_emails": lambda t: {"emails": re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', t)},
         "tokenize_sentences": lambda t: {"sentences": [s.strip() for s in re.split(r'(?<=[.!?])\s+', t) if s.strip()]},
         "deduplicate_lines": lambda t: {"lines": list(dict.fromkeys(t.splitlines())), "removed": len(t.splitlines()) - len(set(t.splitlines()))},
