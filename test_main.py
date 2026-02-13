@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 os.environ["MOLTGRID_DB"] = "test_moltgrid.db"
 
 from fastapi.testclient import TestClient
-from main import app, init_db, DB_PATH, _ws_connections, _run_scheduler_tick
+from main import app, init_db, DB_PATH, _ws_connections, _run_scheduler_tick, _run_liveness_check
 
 client = TestClient(app)
 
@@ -64,7 +64,7 @@ class TestRegistration:
 
     def test_missing_api_key(self):
         r = client.get("/v1/memory")
-        assert r.status_code == 422
+        assert r.status_code == 401
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1068,3 +1068,202 @@ class TestCoordinationTesting:
         client.post(f"/v1/testing/scenarios/{s['scenario_id']}/run", headers=h)
         r = client.post(f"/v1/testing/scenarios/{s['scenario_id']}/run", headers=h)
         assert r.status_code == 200
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEAD-LETTER QUEUE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDeadLetterQueue:
+    def test_submit_with_max_attempts(self):
+        """Submit a job with max_attempts=3 and verify it's stored correctly."""
+        _, _, h = register_agent()
+        r = client.post("/v1/queue/submit", json={
+            "payload": "retry-job", "max_attempts": 3, "retry_delay_seconds": 10,
+        }, headers=h)
+        assert r.status_code == 200
+        assert r.json()["max_attempts"] == 3
+        job_id = r.json()["job_id"]
+        status = client.get(f"/v1/queue/{job_id}", headers=h)
+        assert status.json()["status"] == "pending"
+
+    def test_fail_and_retry(self):
+        """Submit with max_attempts=3, claim, fail — verify attempt increments and job retries."""
+        _, _, h = register_agent()
+        r = client.post("/v1/queue/submit", json={
+            "payload": "will-retry", "max_attempts": 3, "retry_delay_seconds": 0,
+        }, headers=h)
+        job_id = r.json()["job_id"]
+
+        # Claim and fail (1st attempt)
+        client.post("/v1/queue/claim", headers=h)
+        fail_r = client.post(f"/v1/queue/{job_id}/fail", json={"reason": "error 1"}, headers=h)
+        assert fail_r.status_code == 200
+        d = fail_r.json()
+        assert d["status"] == "pending_retry"
+        assert d["attempts"] == 1
+        assert d["max_attempts"] == 3
+
+    def test_fail_moves_to_dead_letter(self):
+        """Submit with max_attempts=1, claim, fail — verify job moves to dead_letter."""
+        _, _, h = register_agent()
+        r = client.post("/v1/queue/submit", json={
+            "payload": "one-shot", "max_attempts": 1,
+        }, headers=h)
+        job_id = r.json()["job_id"]
+
+        client.post("/v1/queue/claim", headers=h)
+        fail_r = client.post(f"/v1/queue/{job_id}/fail", json={"reason": "fatal"}, headers=h)
+        assert fail_r.status_code == 200
+        assert fail_r.json()["status"] == "dead_lettered"
+
+    def test_dead_letter_list(self):
+        """Fail a job, then GET /v1/queue/dead_letter and verify it appears."""
+        _, _, h = register_agent()
+        r = client.post("/v1/queue/submit", json={
+            "payload": "dlq-list-test", "max_attempts": 1,
+        }, headers=h)
+        job_id = r.json()["job_id"]
+
+        client.post("/v1/queue/claim", headers=h)
+        client.post(f"/v1/queue/{job_id}/fail", json={"reason": "dead"}, headers=h)
+
+        dlq = client.get("/v1/queue/dead_letter", headers=h)
+        assert dlq.status_code == 200
+        jobs = dlq.json()["jobs"]
+        assert len(jobs) == 1
+        assert jobs[0]["job_id"] == job_id
+        assert jobs[0]["fail_reason"] == "dead"
+
+    def test_replay_from_dead_letter(self):
+        """Fail a job to dead_letter, replay it, verify it's back as pending."""
+        _, _, h = register_agent()
+        r = client.post("/v1/queue/submit", json={
+            "payload": "replay-me", "max_attempts": 1,
+        }, headers=h)
+        job_id = r.json()["job_id"]
+
+        client.post("/v1/queue/claim", headers=h)
+        client.post(f"/v1/queue/{job_id}/fail", json={"reason": "oops"}, headers=h)
+
+        # Verify it's in dead letter
+        dlq = client.get("/v1/queue/dead_letter", headers=h)
+        assert dlq.json()["count"] == 1
+
+        # Replay
+        replay_r = client.post(f"/v1/queue/{job_id}/replay", headers=h)
+        assert replay_r.status_code == 200
+        assert replay_r.json()["status"] == "pending"
+
+        # Dead letter should be empty now
+        dlq2 = client.get("/v1/queue/dead_letter", headers=h)
+        assert dlq2.json()["count"] == 0
+
+        # Job should be back in active queue
+        status = client.get(f"/v1/queue/{job_id}", headers=h)
+        assert status.json()["status"] == "pending"
+
+    def test_fail_fires_webhook(self):
+        """Register webhook for job.failed, fail a job past max_attempts, verify webhook fires."""
+        _, _, h = register_agent()
+        client.post("/v1/webhooks", json={
+            "url": "https://example.com/hook",
+            "event_types": ["job.failed"],
+        }, headers=h)
+
+        r = client.post("/v1/queue/submit", json={
+            "payload": "webhook-fail", "max_attempts": 1,
+        }, headers=h)
+        job_id = r.json()["job_id"]
+        client.post("/v1/queue/claim", headers=h)
+
+        with patch("main.threading.Thread") as mock_thread:
+            mock_thread.return_value = MagicMock()
+            client.post(f"/v1/queue/{job_id}/fail", json={"reason": "boom"}, headers=h)
+            assert mock_thread.called
+
+    def test_claim_skips_retry_delay(self):
+        """Submit with long retry_delay, claim+fail, verify next claim is empty (job is waiting)."""
+        _, _, h = register_agent()
+        r = client.post("/v1/queue/submit", json={
+            "payload": "delayed-retry", "max_attempts": 3, "retry_delay_seconds": 9999,
+            "queue_name": "delay-test",
+        }, headers=h)
+        job_id = r.json()["job_id"]
+
+        # Claim and fail — sets next_retry_at far in the future
+        client.post("/v1/queue/claim", params={"queue_name": "delay-test"}, headers=h)
+        client.post(f"/v1/queue/{job_id}/fail", json={"reason": "wait"}, headers=h)
+
+        # Next claim should find nothing (job is waiting for retry)
+        claim2 = client.post("/v1/queue/claim", params={"queue_name": "delay-test"}, headers=h)
+        assert claim2.json()["status"] == "empty"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HEARTBEAT / LIVENESS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestHeartbeat:
+    def test_heartbeat_basic(self):
+        """Send heartbeat and verify response structure."""
+        aid, _, h = register_agent()
+        r = client.post("/v1/agents/heartbeat", json={"status": "online"}, headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["agent_id"] == aid
+        assert d["status"] == "online"
+        assert "heartbeat_at" in d
+
+    def test_heartbeat_updates_agent(self):
+        """Send heartbeat, check /v1/directory/me shows updated fields."""
+        _, _, h = register_agent()
+        client.post("/v1/agents/heartbeat", json={"status": "busy", "metadata": {"load": 0.8}}, headers=h)
+        me = client.get("/v1/directory/me", headers=h).json()
+        assert me["heartbeat_status"] == "busy"
+        assert me["heartbeat_at"] is not None
+        assert me["heartbeat_interval"] == 60
+
+    def test_search_online_filter(self):
+        """Two agents: one sends heartbeat, search online=true returns only it."""
+        _, _, h1 = register_agent("online-bot")
+        _, _, h2 = register_agent("silent-bot")
+
+        # Make both public
+        client.put("/v1/directory/me", json={"description": "a", "public": True}, headers=h1)
+        client.put("/v1/directory/me", json={"description": "b", "public": True}, headers=h2)
+
+        # Only first agent sends heartbeat
+        client.post("/v1/agents/heartbeat", json={"status": "online"}, headers=h1)
+
+        r = client.get("/v1/directory/search", params={"online": True})
+        assert r.status_code == 200
+        agents = r.json()["agents"]
+        assert len(agents) == 1
+        assert agents[0]["heartbeat_status"] == "online"
+
+    def test_offline_detection(self):
+        """Set heartbeat_at to far past, run liveness check, verify status becomes offline."""
+        import sqlite3
+        aid, _, h = register_agent()
+
+        # Send a heartbeat first to set status to online
+        client.post("/v1/agents/heartbeat", json={"status": "online"}, headers=h)
+        me = client.get("/v1/directory/me", headers=h).json()
+        assert me["heartbeat_status"] == "online"
+
+        # Manually set heartbeat_at to far in the past (beyond 2x interval)
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "UPDATE agents SET heartbeat_at = '2000-01-01T00:00:00+00:00' WHERE agent_id = ?",
+            (aid,)
+        )
+        conn.commit()
+        conn.close()
+
+        # Run the liveness check
+        _run_liveness_check()
+
+        # Agent should now be offline
+        me2 = client.get("/v1/directory/me", headers=h).json()
+        assert me2["heartbeat_status"] == "offline"

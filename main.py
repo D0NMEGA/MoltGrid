@@ -1194,24 +1194,29 @@ def _uptime_loop():
         time.sleep(60)
 
 
+def _run_liveness_check():
+    """Mark agents offline when heartbeats go stale. Called by the liveness loop."""
+    now = datetime.now(timezone.utc)
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT agent_id, heartbeat_at, heartbeat_interval FROM agents "
+            "WHERE heartbeat_at IS NOT NULL AND heartbeat_status != 'offline'"
+        ).fetchall()
+        for row in rows:
+            interval = row["heartbeat_interval"] or 60
+            hb_at = datetime.fromisoformat(row["heartbeat_at"])
+            if (now - hb_at).total_seconds() > interval * 2:
+                db.execute(
+                    "UPDATE agents SET heartbeat_status='offline' WHERE agent_id=?",
+                    (row["agent_id"],)
+                )
+
+
 def _liveness_loop():
     """Background thread that marks agents offline when heartbeats go stale."""
     while True:
         try:
-            now = datetime.now(timezone.utc)
-            with get_db() as db:
-                rows = db.execute(
-                    "SELECT agent_id, heartbeat_at, heartbeat_interval FROM agents "
-                    "WHERE heartbeat_at IS NOT NULL AND heartbeat_status != 'offline'"
-                ).fetchall()
-                for row in rows:
-                    interval = row["heartbeat_interval"] or 60
-                    hb_at = datetime.fromisoformat(row["heartbeat_at"])
-                    if (now - hb_at).total_seconds() > interval * 2:
-                        db.execute(
-                            "UPDATE agents SET heartbeat_status='offline' WHERE agent_id=?",
-                            (row["agent_id"],)
-                        )
+            _run_liveness_check()
         except Exception as e:
             logger.error(f"Liveness loop error: {e}")
         time.sleep(60)
