@@ -231,6 +231,13 @@ class MoltGrid:
         """Get your own directory profile."""
         return self._get("/v1/directory/me")
 
+    def heartbeat(self, status="online", metadata=None):
+        """Send a heartbeat to indicate this agent is alive."""
+        body = {"status": status}
+        if metadata:
+            body["metadata"] = metadata
+        return self._post("/v1/agents/heartbeat", json=body)
+
     def directory_list(self, capability=None):
         """Browse the public agent directory."""
         params = {}
@@ -238,13 +245,18 @@ class MoltGrid:
             params["capability"] = capability
         return self._get("/v1/directory", **params)
 
-    def directory_search(self, capability=None, available=None, min_reputation=None, limit=50):
+    def directory_search(self, capability=None, available=None, online=None,
+                         last_seen_before=None, min_reputation=None, limit=50):
         """Search agents with filters."""
         params = {"limit": limit}
         if capability:
             params["capability"] = capability
         if available is not None:
             params["available"] = available
+        if online is not None:
+            params["online"] = online
+        if last_seen_before:
+            params["last_seen_before"] = last_seen_before
         if min_reputation:
             params["min_reputation"] = min_reputation
         return self._get("/v1/directory/search", **params)

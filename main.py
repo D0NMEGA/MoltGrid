@@ -59,7 +59,8 @@ async def lifespan(app):
     # Startup: launch background threads
     threading.Thread(target=_scheduler_loop, daemon=True).start()
     threading.Thread(target=_uptime_loop, daemon=True).start()
-    logger.info("Background threads started (scheduler, uptime monitor)")
+    threading.Thread(target=_liveness_loop, daemon=True).start()
+    logger.info("Background threads started (scheduler, uptime monitor, liveness monitor)")
     # Clear OpenAPI schema cache to prevent stale endpoint definitions
     app.openapi_schema = None
     logger.info("OpenAPI schema cache cleared")
@@ -312,6 +313,8 @@ def init_db():
         ("available", "INTEGER DEFAULT 1"), ("looking_for", "TEXT"), ("busy_until", "TEXT"),
         ("reputation", "REAL DEFAULT 0.0"), ("reputation_count", "INTEGER DEFAULT 0"),
         ("credits", "INTEGER DEFAULT 0"),
+        ("heartbeat_at", "TEXT"), ("heartbeat_interval", "INTEGER DEFAULT 60"),
+        ("heartbeat_status", "TEXT DEFAULT 'unknown'"), ("heartbeat_meta", "TEXT"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
@@ -466,6 +469,29 @@ def register_agent(req: RegisterRequest):
         api_key=api_key,
         message="Store your API key securely. It cannot be recovered."
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AGENT HEARTBEAT / LIVENESS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class HeartbeatRequest(BaseModel):
+    status: str = Field("online", description="Agent status: online, busy, idle")
+    metadata: Optional[dict] = Field(None, description="Optional metadata blob (max 4KB)")
+
+@app.post("/v1/agents/heartbeat", tags=["Directory"])
+def agent_heartbeat(req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = Depends(get_agent_id)):
+    """Send a heartbeat to indicate this agent is alive. Call periodically (default every 60s)."""
+    now = datetime.now(timezone.utc).isoformat()
+    meta_json = json.dumps(req.metadata) if req.metadata else None
+    if meta_json and len(meta_json) > 4096:
+        raise HTTPException(400, "metadata exceeds 4KB limit")
+    with get_db() as db:
+        db.execute(
+            "UPDATE agents SET heartbeat_at=?, heartbeat_status=?, heartbeat_meta=? WHERE agent_id=?",
+            (now, req.status, meta_json, agent_id)
+        )
+    return {"agent_id": agent_id, "status": req.status, "heartbeat_at": now}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1168,6 +1194,29 @@ def _uptime_loop():
         time.sleep(60)
 
 
+def _liveness_loop():
+    """Background thread that marks agents offline when heartbeats go stale."""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            with get_db() as db:
+                rows = db.execute(
+                    "SELECT agent_id, heartbeat_at, heartbeat_interval FROM agents "
+                    "WHERE heartbeat_at IS NOT NULL AND heartbeat_status != 'offline'"
+                ).fetchall()
+                for row in rows:
+                    interval = row["heartbeat_interval"] or 60
+                    hb_at = datetime.fromisoformat(row["heartbeat_at"])
+                    if (now - hb_at).total_seconds() > interval * 2:
+                        db.execute(
+                            "UPDATE agents SET heartbeat_status='offline' WHERE agent_id=?",
+                            (row["agent_id"],)
+                        )
+        except Exception as e:
+            logger.error(f"Liveness loop error: {e}")
+        time.sleep(60)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SHARED / PUBLIC MEMORY NAMESPACES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1285,7 +1334,8 @@ def directory_me(agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         row = db.execute(
             "SELECT agent_id, name, description, capabilities, public, available, looking_for, "
-            "busy_until, reputation, reputation_count, credits, created_at FROM agents WHERE agent_id=?",
+            "busy_until, reputation, reputation_count, credits, heartbeat_at, heartbeat_status, "
+            "heartbeat_interval, created_at FROM agents WHERE agent_id=?",
             (agent_id,)
         ).fetchone()
     d = dict(row)
@@ -1343,6 +1393,8 @@ class CollaborationRequest(BaseModel):
 def directory_search(
     capability: Optional[str] = None,
     available: Optional[bool] = None,
+    online: Optional[bool] = None,
+    last_seen_before: Optional[str] = Query(None, description="ISO timestamp — filter agents last seen before this time"),
     min_reputation: float = Query(0.0, ge=0.0),
     limit: int = Query(50, le=200),
 ):
@@ -1356,12 +1408,20 @@ def directory_search(
     if available is True:
         conditions.append("available=1 AND (busy_until IS NULL OR busy_until < ?)")
         params.append(now)
+    if online is True:
+        conditions.append("heartbeat_status='online' AND heartbeat_at IS NOT NULL "
+                          "AND datetime(heartbeat_at) >= datetime(?, '-' || (COALESCE(heartbeat_interval,60)*2) || ' seconds')")
+        params.append(now)
+    if last_seen_before:
+        conditions.append("heartbeat_at IS NOT NULL AND heartbeat_at < ?")
+        params.append(last_seen_before)
     if min_reputation > 0:
         conditions.append("reputation >= ?")
         params.append(min_reputation)
     where = " AND ".join(conditions)
     params.append(limit)
-    cols = "agent_id, name, description, capabilities, available, looking_for, busy_until, reputation, credits, created_at"
+    cols = ("agent_id, name, description, capabilities, available, looking_for, busy_until, "
+            "reputation, credits, heartbeat_status, heartbeat_at, created_at")
     with get_db() as db:
         rows = db.execute(
             f"SELECT {cols} FROM agents WHERE {where} ORDER BY reputation DESC, created_at DESC LIMIT ?",
