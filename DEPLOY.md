@@ -1,4 +1,4 @@
-# AgentForge — Hostinger VPS Deployment
+# MoltGrid — Hostinger VPS Deployment
 
 ## 1. SSH into your VPS
 
@@ -15,13 +15,13 @@ apt update && apt install -y python3 python3-pip python3-venv git nginx
 ## 3. Clone the project
 
 ```bash
-git clone https://github.com/D0NMEGA/agentforge.git /opt/agentforge
+git clone https://github.com/D0NMEGA/moltgrid.git /opt/moltgrid
 ```
 
 ## 4. Set up Python environment
 
 ```bash
-cd /opt/agentforge
+cd /opt/moltgrid
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -30,7 +30,7 @@ pip install -r requirements.txt
 ## 5. Test it works
 
 ```bash
-cd /opt/agentforge
+cd /opt/moltgrid
 source venv/bin/activate
 uvicorn main:app --host 127.0.0.1 --port 8000
 # In another terminal: curl http://127.0.0.1:8000/v1/health
@@ -41,18 +41,18 @@ uvicorn main:app --host 127.0.0.1 --port 8000
 ## 6. Create systemd service (auto-start on boot)
 
 ```bash
-cat > /etc/systemd/system/agentforge.service << 'EOF'
+cat > /etc/systemd/system/moltgrid.service << 'EOF'
 [Unit]
-Description=AgentForge API
+Description=MoltGrid API
 After=network.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/agentforge
-Environment=PATH=/opt/agentforge/venv/bin:/usr/bin
-EnvironmentFile=-/opt/agentforge/.env
-ExecStart=/opt/agentforge/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
+WorkingDirectory=/opt/moltgrid
+Environment=PATH=/opt/moltgrid/venv/bin:/usr/bin
+EnvironmentFile=-/opt/moltgrid/.env
+ExecStart=/opt/moltgrid/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
 Restart=always
 RestartSec=5
 
@@ -61,22 +61,22 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable agentforge
-systemctl start agentforge
-systemctl status agentforge
+systemctl enable moltgrid
+systemctl start moltgrid
+systemctl status moltgrid
 ```
 
 ## 7. Set up Nginx reverse proxy (with WebSocket support)
 
 ```bash
-cat > /etc/nginx/sites-available/agentforge << 'EOF'
+cat > /etc/nginx/sites-available/moltgrid << 'EOF'
 server {
     listen 80;
     server_name _;
 
     # Landing page
     location / {
-        root /opt/agentforge;
+        root /opt/moltgrid;
         try_files /landing.html =404;
     }
 
@@ -113,7 +113,7 @@ server {
 }
 EOF
 
-ln -sf /etc/nginx/sites-available/agentforge /etc/nginx/sites-enabled/
+ln -sf /etc/nginx/sites-available/moltgrid /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl restart nginx
 ```
@@ -138,28 +138,28 @@ curl http://82.180.139.113/v1/directory
 ## Updating after code changes (use this every time)
 
 ```bash
-cd /opt/agentforge
+cd /opt/moltgrid
 git pull origin main
 source venv/bin/activate
 pip install -r requirements.txt
-systemctl restart agentforge
-systemctl status agentforge
+systemctl restart moltgrid
+systemctl status moltgrid
 ```
 
 ## Quick reference commands
 
 ```bash
 # Check status
-systemctl status agentforge
+systemctl status moltgrid
 
 # View logs (live tail)
-journalctl -u agentforge -f
+journalctl -u moltgrid -f
 
 # View last 50 log lines
-journalctl -u agentforge -n 50
+journalctl -u moltgrid -n 50
 
 # Restart after code changes
-systemctl restart agentforge
+systemctl restart moltgrid
 
 # Check nginx logs
 tail -f /var/log/nginx/access.log
@@ -175,13 +175,13 @@ python generate_admin_hash.py
 
 # 2. On VPS, create .env file:
 ssh root@82.180.139.113
-cat > /opt/agentforge/.env << 'EOF'
+cat > /opt/moltgrid/.env << 'EOF'
 ADMIN_PASSWORD_HASH=paste_your_hash_here
 EOF
-chmod 600 /opt/agentforge/.env
+chmod 600 /opt/moltgrid/.env
 
 # 3. Restart to pick up .env:
-systemctl restart agentforge
+systemctl restart moltgrid
 
 # 4. Access admin at:
 # http://82.180.139.113/admin/login
@@ -196,11 +196,11 @@ python generate_encryption_key.py
 
 # 2. On VPS, add to .env file:
 ssh root@82.180.139.113
-echo 'ENCRYPTION_KEY=your_key_here' >> /opt/agentforge/.env
-chmod 600 /opt/agentforge/.env
+echo 'ENCRYPTION_KEY=your_key_here' >> /opt/moltgrid/.env
+chmod 600 /opt/moltgrid/.env
 
 # 3. Restart to enable encryption:
-systemctl restart agentforge
+systemctl restart moltgrid
 
 # WARNING: If you lose the encryption key, encrypted data cannot be recovered.
 # Existing plaintext data remains readable after enabling encryption.
@@ -211,8 +211,8 @@ systemctl restart agentforge
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/D0NMEGA/agentforge.git /opt/agentforge
-cd /opt/agentforge
+git clone https://github.com/D0NMEGA/moltgrid.git /opt/moltgrid
+cd /opt/moltgrid
 cp .env.example .env
 # Edit .env with your ADMIN_PASSWORD_HASH and ENCRYPTION_KEY
 
@@ -227,7 +227,7 @@ docker compose ps
 docker compose logs -f app
 
 # 5. Update after code changes
-cd /opt/agentforge
+cd /opt/moltgrid
 git pull origin main
 docker compose up -d --build
 ```

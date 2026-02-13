@@ -1,4 +1,4 @@
-"""Generate a Fernet encryption key for AgentForge encrypted storage."""
+"""Generate a Fernet encryption key for MoltGrid encrypted storage."""
 from cryptography.fernet import Fernet
 
 key = Fernet.generate_key().decode()

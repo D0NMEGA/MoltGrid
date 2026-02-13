@@ -5,7 +5,7 @@ import hashlib
 import getpass
 
 def main():
-    print("AgentForge Admin Password Hash Generator")
+    print("MoltGrid Admin Password Hash Generator")
     print("=" * 42)
     pw = getpass.getpass("Enter admin password: ")
     if not pw:
