@@ -128,9 +128,36 @@ def init_db():
             started_at TEXT,
             completed_at TEXT,
             result TEXT,
+            max_attempts INTEGER DEFAULT 1,
+            attempt_count INTEGER DEFAULT 0,
+            retry_delay_seconds INTEGER DEFAULT 0,
+            next_retry_at TEXT,
+            failed_at TEXT,
+            fail_reason TEXT,
             FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
         );
         CREATE INDEX IF NOT EXISTS idx_queue_status ON queue(queue_name, status, priority DESC);
+
+        CREATE TABLE IF NOT EXISTS dead_letter (
+            job_id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            queue_name TEXT NOT NULL DEFAULT 'default',
+            payload TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'failed',
+            priority INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            result TEXT,
+            max_attempts INTEGER DEFAULT 1,
+            attempt_count INTEGER DEFAULT 0,
+            retry_delay_seconds INTEGER DEFAULT 0,
+            failed_at TEXT,
+            fail_reason TEXT,
+            moved_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dlq_agent ON dead_letter(agent_id, queue_name);
 
         CREATE TABLE IF NOT EXISTS relay (
             message_id TEXT PRIMARY KEY,
@@ -288,6 +315,16 @@ def init_db():
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
+
+    # Migrate existing queue table — add retry/dead-letter columns
+    q_existing = {row[1] for row in conn.execute("PRAGMA table_info(queue)").fetchall()}
+    for col, typedef in [
+        ("max_attempts", "INTEGER DEFAULT 1"), ("attempt_count", "INTEGER DEFAULT 0"),
+        ("retry_delay_seconds", "INTEGER DEFAULT 0"), ("next_retry_at", "TEXT"),
+        ("failed_at", "TEXT"), ("fail_reason", "TEXT"),
+    ]:
+        if col not in q_existing:
+            conn.execute(f"ALTER TABLE queue ADD COLUMN {col} {typedef}")
 
     conn.commit()
     conn.close()
@@ -522,6 +559,8 @@ class QueueSubmitRequest(BaseModel):
     payload: Union[str, dict] = Field(..., description="Job payload (string or JSON object)")
     queue_name: str = Field("default", max_length=64)
     priority: int = Field(0, ge=0, le=10, description="Higher = processed first")
+    max_attempts: int = Field(1, ge=1, le=10, description="Max retry attempts before dead-lettering")
+    retry_delay_seconds: int = Field(0, ge=0, le=3600, description="Seconds to wait before retrying")
 
 class QueueJobResponse(BaseModel):
     job_id: str
@@ -544,10 +583,10 @@ def queue_submit(req: QueueSubmitRequest, agent_id: str = Depends(get_agent_id))
 
     with get_db() as db:
         db.execute(
-            "INSERT INTO queue (job_id, agent_id, queue_name, payload, priority, created_at) VALUES (?,?,?,?,?,?)",
-            (job_id, agent_id, req.queue_name, _encrypt(payload_str), req.priority, now)
+            "INSERT INTO queue (job_id, agent_id, queue_name, payload, priority, created_at, max_attempts, retry_delay_seconds) VALUES (?,?,?,?,?,?,?,?)",
+            (job_id, agent_id, req.queue_name, _encrypt(payload_str), req.priority, now, req.max_attempts, req.retry_delay_seconds)
         )
-    return {"job_id": job_id, "status": "pending", "queue_name": req.queue_name}
+    return {"job_id": job_id, "status": "pending", "queue_name": req.queue_name, "max_attempts": req.max_attempts}
 
 @app.get("/v1/queue/{job_id}", response_model=QueueJobResponse, tags=["Queue"])
 def queue_status(job_id: str, agent_id: str = Depends(get_agent_id)):
@@ -566,13 +605,14 @@ def queue_status(job_id: str, agent_id: str = Depends(get_agent_id)):
 
 @app.post("/v1/queue/claim", tags=["Queue"])
 def queue_claim(queue_name: str = "default", agent_id: str = Depends(get_agent_id)):
-    """Claim the next pending job from a queue (for worker agents)."""
+    """Claim the next pending job from a queue (for worker agents). Skips jobs with future retry delays."""
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         row = db.execute(
             "SELECT job_id, payload, priority FROM queue WHERE queue_name=? AND status='pending' "
+            "AND (next_retry_at IS NULL OR next_retry_at <= ?) "
             "ORDER BY priority DESC, created_at ASC LIMIT 1",
-            (queue_name,)
+            (queue_name, now)
         ).fetchone()
         if not row:
             return {"status": "empty", "queue_name": queue_name}
@@ -625,6 +665,99 @@ def queue_list(
                 (agent_id, queue_name, limit)
             ).fetchall()
     return {"queue_name": queue_name, "jobs": [dict(r) for r in rows], "count": len(rows)}
+
+class QueueFailRequest(BaseModel):
+    reason: str = Field("", max_length=1000, description="Why the job failed")
+
+@app.post("/v1/queue/{job_id}/fail", tags=["Queue"])
+def queue_fail(job_id: str, req: QueueFailRequest, agent_id: str = Depends(get_agent_id)):
+    """Report a job as failed. Retries if attempts remain, otherwise moves to dead-letter queue."""
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM queue WHERE job_id=? AND status='processing'", (job_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Job not found or not in processing state")
+
+        attempt = (row["attempt_count"] or 0) + 1
+        max_att = row["max_attempts"] or 1
+        delay = row["retry_delay_seconds"] or 0
+
+        if attempt >= max_att:
+            # Move to dead-letter queue
+            db.execute(
+                "INSERT INTO dead_letter (job_id, agent_id, queue_name, payload, status, priority, "
+                "created_at, started_at, completed_at, result, max_attempts, attempt_count, "
+                "retry_delay_seconds, failed_at, fail_reason, moved_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (row["job_id"], row["agent_id"], row["queue_name"], row["payload"], "failed",
+                 row["priority"], row["created_at"], row["started_at"], row["completed_at"],
+                 row["result"], max_att, attempt, delay, now_iso, req.reason, now_iso)
+            )
+            db.execute("DELETE FROM queue WHERE job_id=?", (job_id,))
+            _fire_webhooks(row["agent_id"], "job.failed", {
+                "job_id": job_id, "queue_name": row["queue_name"],
+                "reason": req.reason, "attempts": attempt, "dead_lettered": True,
+            })
+            return {"job_id": job_id, "status": "dead_lettered", "attempts": attempt, "max_attempts": max_att}
+        else:
+            # Retry: set back to pending with delay
+            next_retry = (now + timedelta(seconds=delay)).isoformat() if delay > 0 else None
+            db.execute(
+                "UPDATE queue SET status='pending', started_at=NULL, attempt_count=?, "
+                "failed_at=?, fail_reason=?, next_retry_at=? WHERE job_id=?",
+                (attempt, now_iso, req.reason, next_retry, job_id)
+            )
+            return {"job_id": job_id, "status": "pending_retry", "attempts": attempt,
+                    "max_attempts": max_att, "next_retry_at": next_retry}
+
+@app.get("/v1/queue/dead_letter", tags=["Queue"])
+def queue_dead_letter_list(
+    queue_name: Optional[str] = None,
+    limit: int = Query(20, le=100),
+    offset: int = Query(0, ge=0),
+    agent_id: str = Depends(get_agent_id)
+):
+    """List dead-letter jobs for the authenticated agent."""
+    with get_db() as db:
+        if queue_name:
+            rows = db.execute(
+                "SELECT job_id, queue_name, priority, attempt_count, max_attempts, "
+                "fail_reason, created_at, failed_at, moved_at FROM dead_letter "
+                "WHERE agent_id=? AND queue_name=? ORDER BY moved_at DESC LIMIT ? OFFSET ?",
+                (agent_id, queue_name, limit, offset)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT job_id, queue_name, priority, attempt_count, max_attempts, "
+                "fail_reason, created_at, failed_at, moved_at FROM dead_letter "
+                "WHERE agent_id=? ORDER BY moved_at DESC LIMIT ? OFFSET ?",
+                (agent_id, limit, offset)
+            ).fetchall()
+    return {"jobs": [dict(r) for r in rows], "count": len(rows)}
+
+@app.post("/v1/queue/{job_id}/replay", tags=["Queue"])
+def queue_replay(job_id: str, agent_id: str = Depends(get_agent_id)):
+    """Replay a dead-letter job by moving it back to the active queue."""
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM dead_letter WHERE job_id=? AND agent_id=?", (job_id, agent_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Dead-letter job not found")
+
+        db.execute(
+            "INSERT INTO queue (job_id, agent_id, queue_name, payload, status, priority, "
+            "created_at, max_attempts, attempt_count, retry_delay_seconds) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (row["job_id"], row["agent_id"], row["queue_name"], row["payload"], "pending",
+             row["priority"], now, row["max_attempts"], 0, row["retry_delay_seconds"])
+        )
+        db.execute("DELETE FROM dead_letter WHERE job_id=?", (job_id,))
+    return {"job_id": job_id, "status": "pending", "replayed_at": now}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -763,7 +896,7 @@ def text_process(req: TextProcessRequest, agent_id: str = Depends(get_agent_id))
 # WEBHOOK CALLBACKS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-WEBHOOK_EVENT_TYPES = {"message.received", "job.completed", "marketplace.task.claimed", "marketplace.task.delivered", "marketplace.task.completed"}
+WEBHOOK_EVENT_TYPES = {"message.received", "job.completed", "job.failed", "marketplace.task.claimed", "marketplace.task.delivered", "marketplace.task.completed"}
 WEBHOOK_TIMEOUT = 5.0  # seconds
 
 class WebhookRegisterRequest(BaseModel):
