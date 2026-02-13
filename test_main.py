@@ -946,7 +946,7 @@ class TestMarketplace:
         assert r.json()["status"] == "completed"
         assert r.json()["credits_awarded"] == 100
         stats = client.get("/v1/stats", headers=h2).json()
-        assert stats["credits"] == 100
+        assert stats["credits"] == 300  # 200 starting + 100 reward
 
     def test_review_reject_reopens(self):
         _, _, h1 = register_agent()
@@ -978,7 +978,7 @@ class TestMarketplace:
         client.post(f"/v1/marketplace/tasks/{task['task_id']}/deliver", json={"result": "ok"}, headers=h2)
         client.post(f"/v1/marketplace/tasks/{task['task_id']}/review", json={"accept": True, "rating": 4}, headers=h1)
         profile = client.get("/v1/directory/me", headers=h2).json()
-        assert profile["credits"] == 25
+        assert profile["credits"] == 225  # 200 starting + 25 reward
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1186,7 +1186,7 @@ class TestDeadLetterQueue:
         """Submit with long retry_delay, claim+fail, verify next claim is empty (job is waiting)."""
         _, _, h = register_agent()
         r = client.post("/v1/queue/submit", json={
-            "payload": "delayed-retry", "max_attempts": 3, "retry_delay_seconds": 9999,
+            "payload": "delayed-retry", "max_attempts": 3, "retry_delay_seconds": 3600,
             "queue_name": "delay-test",
         }, headers=h)
         job_id = r.json()["job_id"]
