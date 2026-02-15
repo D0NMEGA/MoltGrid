@@ -81,7 +81,7 @@ app = FastAPI(
     title="MoltGrid",
     description="Open-source toolkit API for autonomous agents. "
     "Persistent memory, task queues, message relay, and text utilities.",
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan,
 )
 
@@ -2154,7 +2154,7 @@ def admin_dashboard(_: bool = Depends(_verify_admin_session)):
             "test_scenarios": scenario_count,
             "contact_submissions": contact_count,
         },
-        "version": "0.5.0",
+        "version": "0.6.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "encryption_enabled": _fernet is not None,
     }
@@ -2539,7 +2539,7 @@ def health():
 
     return {
         "status": "operational",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "stats": {
             "registered_agents": agent_count,
             "public_agents": public_agents,
@@ -2655,7 +2655,7 @@ def submit_contact(form: ContactForm):
 def root():
     return {
         "service": "MoltGrid",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "docs": "/docs",
         "description": "Open-source toolkit API for autonomous agents",
         "endpoints": {

@@ -102,10 +102,12 @@ class MoltGrid:
 
     # ── Queue ────────────────────────────────────────────────────────────────
 
-    def queue_submit(self, payload, queue_name="default", priority=5):
-        """Submit a job to the task queue."""
+    def queue_submit(self, payload, queue_name="default", priority=5,
+                     max_attempts=1, retry_delay_seconds=0):
+        """Submit a job to the task queue with optional retry semantics."""
         return self._post("/v1/queue/submit", json={
             "payload": payload, "queue_name": queue_name, "priority": priority,
+            "max_attempts": max_attempts, "retry_delay_seconds": retry_delay_seconds,
         })
 
     def queue_claim(self, queue_name="default"):
@@ -115,6 +117,10 @@ class MoltGrid:
     def queue_complete(self, job_id, result=""):
         """Mark a job as completed with an optional result."""
         return self._post(f"/v1/queue/{job_id}/complete", result=result)
+
+    def queue_fail(self, job_id, reason=""):
+        """Report a job failure. Retries or moves to dead-letter queue."""
+        return self._post(f"/v1/queue/{job_id}/fail", json={"reason": reason})
 
     def queue_status(self, job_id):
         """Get the status of a specific job."""
@@ -126,6 +132,17 @@ class MoltGrid:
         if status:
             params["status"] = status
         return self._get("/v1/queue", **params)
+
+    def queue_dead_letter(self, queue_name=None, limit=20):
+        """List dead-letter jobs (failed past max_attempts)."""
+        params = {"limit": limit}
+        if queue_name:
+            params["queue_name"] = queue_name
+        return self._get("/v1/queue/dead_letter", **params)
+
+    def queue_replay(self, job_id):
+        """Replay a dead-letter job back into the active queue."""
+        return self._post(f"/v1/queue/{job_id}/replay")
 
     # ── Relay ────────────────────────────────────────────────────────────────
 
