@@ -49,12 +49,12 @@ ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 _fernet = Fernet(ENCRYPTION_KEY.encode()) if ENCRYPTION_KEY else None
 
 # Contact form SMTP: set SMTP_PASSWORD env var (Gmail App Password)
-SMTP_FROM = os.getenv("SMTP_FROM")
-SMTP_TO = os.getenv("SMTP_TO")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_FROM = os.getenv("SMTP_FROM", "")
+SMTP_TO = os.getenv("SMTP_TO", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 
 if not SMTP_FROM or not SMTP_TO or not SMTP_PASSWORD:
-    raise RuntimeError("SMTP environment variables not set.")
+    logger.warning("SMTP environment variables not set — contact form will be disabled.")
 
 
 # ─── App ──────────────────────────────────────────────────────────────────────
