@@ -185,6 +185,73 @@ class TestQueue:
             # Webhook thread should have been started
             assert mock_thread.called
 
+    def test_claim_only_own_jobs(self):
+        """Test that agents can only claim their own jobs."""
+        _, _, h1 = register_agent("agent1")
+        _, _, h2 = register_agent("agent2")
+        
+        # Agent1 submits a job
+        r = client.post("/v1/queue/submit", json={"payload": "agent1 job"}, headers=h1)
+        job_id_1 = r.json()["job_id"]
+        
+        # Agent2 submits a job
+        r = client.post("/v1/queue/submit", json={"payload": "agent2 job"}, headers=h2)
+        job_id_2 = r.json()["job_id"]
+        
+        # Agent1 should only claim their own job
+        claimed_1 = client.post("/v1/queue/claim", headers=h1)
+        assert claimed_1.json()["job_id"] == job_id_1
+        assert claimed_1.json()["payload"] == "agent1 job"
+        
+        # Agent2 should only claim their own job
+        claimed_2 = client.post("/v1/queue/claim", headers=h2)
+        assert claimed_2.json()["job_id"] == job_id_2
+        assert claimed_2.json()["payload"] == "agent2 job"
+        
+        # Agent1 should have no more jobs to claim
+        empty_1 = client.post("/v1/queue/claim", headers=h1)
+        assert empty_1.json()["status"] == "empty"
+
+    def test_cannot_complete_other_agent_job(self):
+        """Test that agents cannot complete another agent's job."""
+        _, _, h1 = register_agent("agent1")
+        _, _, h2 = register_agent("agent2")
+        
+        # Agent1 submits and claims a job
+        r = client.post("/v1/queue/submit", json={"payload": "agent1 work"}, headers=h1)
+        job_id = r.json()["job_id"]
+        client.post("/v1/queue/claim", headers=h1)
+        
+        # Agent2 tries to complete Agent1's job - should fail with 403
+        complete_resp = client.post(f"/v1/queue/{job_id}/complete", params={"result": "hacked!"}, headers=h2)
+        assert complete_resp.status_code == 403
+        assert "Not authorized" in complete_resp.json()["detail"]
+        
+        # Agent1 can complete their own job
+        complete_resp = client.post(f"/v1/queue/{job_id}/complete", params={"result": "done!"}, headers=h1)
+        assert complete_resp.status_code == 200
+        assert complete_resp.json()["status"] == "completed"
+
+    def test_cannot_fail_other_agent_job(self):
+        """Test that agents cannot fail another agent's job."""
+        _, _, h1 = register_agent("agent1")
+        _, _, h2 = register_agent("agent2")
+        
+        # Agent1 submits and claims a job with max_attempts=2 for retry
+        r = client.post("/v1/queue/submit", json={"payload": "agent1 work", "max_attempts": 2}, headers=h1)
+        job_id = r.json()["job_id"]
+        client.post("/v1/queue/claim", headers=h1)
+        
+        # Agent2 tries to fail Agent1's job - should fail with 403
+        fail_resp = client.post(f"/v1/queue/{job_id}/fail", json={"reason": "hacked!"}, headers=h2)
+        assert fail_resp.status_code == 403
+        assert "Not authorized" in fail_resp.json()["detail"]
+        
+        # Agent1 can fail their own job
+        fail_resp = client.post(f"/v1/queue/{job_id}/fail", json={"reason": "error"}, headers=h1)
+        assert fail_resp.status_code == 200
+        assert fail_resp.json()["status"] == "pending_retry"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RELAY
