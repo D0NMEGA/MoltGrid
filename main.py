@@ -665,9 +665,9 @@ def queue_claim(queue_name: str = "default", agent_id: str = Depends(get_agent_i
     with get_db() as db:
         row = db.execute(
             "SELECT job_id, payload, priority FROM queue WHERE queue_name=? AND status='pending' "
-            "AND (next_retry_at IS NULL OR next_retry_at <= ?) "
+            "AND agent_id=? AND (next_retry_at IS NULL OR next_retry_at <= ?) "
             "ORDER BY priority DESC, created_at ASC LIMIT 1",
-            (queue_name, now)
+            (queue_name, agent_id, now)
         ).fetchone()
         if not row:
             return {"status": "empty", "queue_name": queue_name}
@@ -686,6 +686,8 @@ def queue_complete(job_id: str, result: str = "", agent_id: str = Depends(get_ag
         job_row = db.execute("SELECT agent_id, queue_name FROM queue WHERE job_id=? AND status='processing'", (job_id,)).fetchone()
         if not job_row:
             raise HTTPException(404, "Job not found or not in processing state")
+        if job_row["agent_id"] != agent_id:
+            raise HTTPException(403, "Not authorized to complete this job")
         db.execute(
             "UPDATE queue SET status='completed', completed_at=?, result=? WHERE job_id=?",
             (now, _encrypt(result) if result else result, job_id)
@@ -735,6 +737,8 @@ def queue_fail(job_id: str, req: QueueFailRequest, agent_id: str = Depends(get_a
         ).fetchone()
         if not row:
             raise HTTPException(404, "Job not found or not in processing state")
+        if row["agent_id"] != agent_id:
+            raise HTTPException(403, "Not authorized to fail this job")
 
         attempt = (row["attempt_count"] or 0) + 1
         max_att = row["max_attempts"] or 1
