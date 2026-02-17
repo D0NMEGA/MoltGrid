@@ -43,6 +43,14 @@ MAX_QUEUE_PAYLOAD_SIZE = 100_000  # 100KB per job
 RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX = 120  # requests per window per agent
 
+# Subscription tier limits
+TIER_LIMITS = {
+    "free":  {"max_agents": 1,   "max_api_calls": 10_000},
+    "hobby": {"max_agents": 10,  "max_api_calls": 1_000_000},
+    "team":  {"max_agents": 50,  "max_api_calls": 10_000_000},
+    "scale": {"max_agents": 200, "max_api_calls": None},  # unlimited
+}
+
 # Admin auth: load password hash from env (set on VPS only, never in code)
 ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
 ADMIN_SESSION_TTL = 3600 * 24  # 24 hours
@@ -399,6 +407,24 @@ def hash_key(key: str) -> str:
 def generate_api_key() -> str:
     return f"af_{uuid.uuid4().hex}"
 
+def _check_usage_quota(db, agent_id: str):
+    """Check if the agent's owner is within their monthly API call quota."""
+    row = db.execute("SELECT owner_id FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+    if not row or not row["owner_id"]:
+        return  # unowned agent, no quota
+    owner = db.execute(
+        "SELECT user_id, subscription_tier, usage_count, max_api_calls FROM users WHERE user_id = ?",
+        (row["owner_id"],),
+    ).fetchone()
+    if not owner:
+        return
+    tier = owner["subscription_tier"] or "free"
+    limit = TIER_LIMITS.get(tier, TIER_LIMITS["free"])["max_api_calls"]
+    if limit is not None and owner["usage_count"] >= limit:
+        raise HTTPException(429, f"Monthly API call quota exceeded for '{tier}' tier ({limit:,} calls)")
+    db.execute("UPDATE users SET usage_count = usage_count + 1 WHERE user_id = ?", (owner["user_id"],))
+
+
 async def get_agent_id(request: Request) -> str:
     # Handle X-API-Key header case-insensitively (nginx/proxies may lowercase it)
     x_api_key = None
@@ -432,6 +458,9 @@ async def get_agent_id(request: Request) -> str:
         ).fetchone()
         if rl and rl["count"] > RATE_LIMIT_MAX:
             raise HTTPException(429, f"Rate limit exceeded ({RATE_LIMIT_MAX}/min)")
+
+        # Usage quota check (per owner's subscription tier)
+        _check_usage_quota(db, row["agent_id"])
 
         db.execute(
             "UPDATE agents SET last_seen = ?, request_count = request_count + 1 WHERE agent_id = ?",
@@ -546,6 +575,192 @@ def auth_refresh(user_id: str = Depends(get_user_id)):
             raise HTTPException(404, "User not found")
     token = _create_token(user_id, row["email"])
     return {"user_id": user_id, "token": token}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# USER DASHBOARD
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _verify_agent_ownership(db, agent_id: str, user_id: str):
+    """Verify agent exists and belongs to this user. Returns agent row or raises 403."""
+    agent = db.execute("SELECT * FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if agent["owner_id"] != user_id:
+        raise HTTPException(403, "You do not own this agent")
+    return agent
+
+@app.get("/v1/user/agents", tags=["User Dashboard"])
+def user_list_agents(user_id: str = Depends(get_user_id)):
+    """List all agents owned by this user."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT agent_id, name, description, public, request_count, last_seen, "
+            "heartbeat_status, created_at FROM agents WHERE owner_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+    return {"agents": [dict(r) for r in rows], "count": len(rows)}
+
+@app.get("/v1/user/agents/{agent_id}/activity", tags=["User Dashboard"])
+def user_agent_activity(agent_id: str, user_id: str = Depends(get_user_id)):
+    """Activity feed for one owned agent — last 50 events across relay, queue, and memory."""
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        events = []
+
+        # Messages sent
+        for r in db.execute(
+            "SELECT message_id, 'message_sent' as event_type, to_agent as target, "
+            "channel, created_at as timestamp FROM relay WHERE from_agent = ? "
+            "ORDER BY created_at DESC LIMIT 50", (agent_id,)
+        ).fetchall():
+            events.append(dict(r))
+
+        # Messages received
+        for r in db.execute(
+            "SELECT message_id, 'message_received' as event_type, from_agent as source, "
+            "channel, created_at as timestamp FROM relay WHERE to_agent = ? "
+            "ORDER BY created_at DESC LIMIT 50", (agent_id,)
+        ).fetchall():
+            events.append(dict(r))
+
+        # Jobs submitted/completed/failed
+        for r in db.execute(
+            "SELECT job_id, 'job_' || status as event_type, queue_name, "
+            "COALESCE(completed_at, started_at, created_at) as timestamp "
+            "FROM queue WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50", (agent_id,)
+        ).fetchall():
+            events.append(dict(r))
+
+        # Memory updates
+        for r in db.execute(
+            "SELECT key, namespace, 'memory_update' as event_type, "
+            "updated_at as timestamp FROM memory WHERE agent_id = ? "
+            "ORDER BY updated_at DESC LIMIT 50", (agent_id,)
+        ).fetchall():
+            events.append(dict(r))
+
+    # Sort all events by timestamp DESC, take top 50
+    events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+    return {"agent_id": agent_id, "events": events[:50]}
+
+@app.get("/v1/user/usage", tags=["User Dashboard"])
+def user_usage(user_id: str = Depends(get_user_id)):
+    """Aggregate usage stats for the current billing period (calendar month)."""
+    now = datetime.now(timezone.utc)
+    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    # Last day of month
+    if now.month == 12:
+        period_end = now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    else:
+        period_end = now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    with get_db() as db:
+        user = db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(404, "User not found")
+        tier = user["subscription_tier"] or "free"
+        limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+
+        agent_ids = [r["agent_id"] for r in db.execute(
+            "SELECT agent_id FROM agents WHERE owner_id = ?", (user_id,)
+        ).fetchall()]
+
+        total_agents = len(agent_ids)
+        if not agent_ids:
+            return {
+                "total_api_calls": user["usage_count"],
+                "total_agents": 0, "memory_keys": 0,
+                "jobs_submitted": 0, "messages_sent": 0,
+                "period_start": period_start, "period_end": period_end,
+                "tier": tier, "limits": limits,
+            }
+
+        placeholders = ",".join("?" * len(agent_ids))
+
+        memory_keys = db.execute(
+            f"SELECT COUNT(*) as cnt FROM memory WHERE agent_id IN ({placeholders})", agent_ids
+        ).fetchone()["cnt"]
+
+        jobs_submitted = db.execute(
+            f"SELECT COUNT(*) as cnt FROM queue WHERE agent_id IN ({placeholders}) "
+            f"AND created_at >= ?", agent_ids + [period_start]
+        ).fetchone()["cnt"]
+
+        messages_sent = db.execute(
+            f"SELECT COUNT(*) as cnt FROM relay WHERE from_agent IN ({placeholders}) "
+            f"AND created_at >= ?", agent_ids + [period_start]
+        ).fetchone()["cnt"]
+
+    return {
+        "total_api_calls": user["usage_count"],
+        "total_agents": total_agents,
+        "memory_keys": memory_keys,
+        "jobs_submitted": jobs_submitted,
+        "messages_sent": messages_sent,
+        "period_start": period_start,
+        "period_end": period_end,
+        "tier": tier,
+        "limits": limits,
+    }
+
+@app.get("/v1/user/billing", tags=["User Dashboard"])
+def user_billing(user_id: str = Depends(get_user_id)):
+    """Subscription and billing info."""
+    with get_db() as db:
+        user = db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(404, "User not found")
+    tier = user["subscription_tier"] or "free"
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    # Next billing = first of next month
+    now = datetime.now(timezone.utc)
+    if now.month == 12:
+        next_billing = now.replace(year=now.year + 1, month=1, day=1).strftime("%Y-%m-%d")
+    else:
+        next_billing = now.replace(month=now.month + 1, day=1).strftime("%Y-%m-%d")
+    return {
+        "tier": tier,
+        "max_agents": limits["max_agents"],
+        "max_api_calls": limits["max_api_calls"],
+        "usage_count": user["usage_count"],
+        "stripe_customer_id": user["stripe_customer_id"],
+        "next_billing_date": next_billing,
+    }
+
+class TransferRequest(BaseModel):
+    to_email: str = Field(..., max_length=256)
+
+@app.post("/v1/user/agents/{agent_id}/transfer", tags=["User Dashboard"])
+def user_transfer_agent(agent_id: str, req: TransferRequest, user_id: str = Depends(get_user_id)):
+    """Transfer agent ownership to another user by email."""
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        recipient = db.execute("SELECT user_id, subscription_tier FROM users WHERE email = ?", (req.to_email.lower(),)).fetchone()
+        if not recipient:
+            raise HTTPException(404, "Recipient user not found")
+        if recipient["user_id"] == user_id:
+            raise HTTPException(400, "Cannot transfer to yourself")
+        # Check recipient's agent limit
+        r_tier = recipient["subscription_tier"] or "free"
+        r_limit = TIER_LIMITS.get(r_tier, TIER_LIMITS["free"])["max_agents"]
+        r_count = db.execute("SELECT COUNT(*) as cnt FROM agents WHERE owner_id = ?", (recipient["user_id"],)).fetchone()["cnt"]
+        if r_limit is not None and r_count >= r_limit:
+            raise HTTPException(403, f"Recipient has reached their agent limit ({r_limit})")
+        db.execute("UPDATE agents SET owner_id = ? WHERE agent_id = ?", (recipient["user_id"], agent_id))
+    return {"agent_id": agent_id, "transferred_to": req.to_email.lower(), "message": "Transfer complete"}
+
+@app.delete("/v1/user/account", tags=["User Dashboard"])
+def user_delete_account(user_id: str = Depends(get_user_id)):
+    """Soft-delete user account. Marks as inactive but preserves data."""
+    with get_db() as db:
+        db.execute(
+            "UPDATE users SET subscription_tier = 'deleted', max_agents = 0, max_api_calls = 0 WHERE user_id = ?",
+            (user_id,),
+        )
+        # Unlink agents (they become unowned, still functional)
+        db.execute("UPDATE agents SET owner_id = NULL WHERE owner_id = ?", (user_id,))
+    return {"user_id": user_id, "message": "Account deactivated. Agents unlinked."}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
