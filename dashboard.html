@@ -143,6 +143,48 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
 .modal textarea { width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:10px 14px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:0.8rem; outline:none; resize:vertical; min-height:80px; }
 .modal textarea:focus { border-color:var(--accent); }
 
+/* Billing page */
+.billing-grid { display:grid; grid-template-columns:1fr; gap:1.5rem; }
+.plan-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:1.75rem; }
+.plan-card-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem; }
+.plan-name { font-size:1.5rem; font-weight:700; letter-spacing:-1px; display:flex; align-items:center; gap:0.75rem; }
+.plan-price { font-family:'JetBrains Mono',monospace; font-size:1.2rem; font-weight:700; }
+.plan-price .period { font-size:0.7rem; color:var(--text-dim); font-weight:400; }
+.plan-detail { font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--text-dim); margin-bottom:0.5rem; }
+
+.tiers-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1rem; margin-top:1.5rem; }
+.tier-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.5rem; display:flex; flex-direction:column; transition:all 0.2s; position:relative; }
+.tier-card:hover { border-color:rgba(255,51,51,0.3); }
+.tier-card.current { border-color:var(--accent); box-shadow:0 0 20px var(--accent-glow); }
+.tier-card.current::after { content:"CURRENT"; position:absolute; top:-10px; right:12px; font-family:'JetBrains Mono',monospace; font-size:0.55rem; background:var(--accent); color:#fff; padding:2px 10px; border-radius:10px; letter-spacing:1px; }
+.tier-card-name { font-size:1.1rem; font-weight:700; margin-bottom:0.25rem; }
+.tier-card-price { font-family:'JetBrains Mono',monospace; font-size:1.4rem; font-weight:700; margin-bottom:0.75rem; }
+.tier-card-price .mo { font-size:0.7rem; color:var(--text-dim); font-weight:400; }
+.tier-card-features { list-style:none; margin-bottom:1.25rem; flex:1; }
+.tier-card-features li { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); padding:3px 0; }
+.tier-card-features li::before { content:"\2713 "; color:var(--green); }
+.tier-card .btn { width:100%; text-align:center; }
+
+.billing-history { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.5rem; margin-top:1.5rem; }
+.billing-history .label { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin-bottom:0.75rem; }
+
+/* Billing result pages */
+.result-container { display:flex; align-items:center; justify-content:center; min-height:80vh; padding:2rem; }
+.result-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:2.5rem; text-align:center; max-width:460px; width:100%; }
+.result-icon { font-size:3rem; margin-bottom:1rem; }
+.result-card h1 { font-size:1.4rem; font-weight:600; margin-bottom:0.5rem; }
+.result-card .subtitle { color:var(--text-dim); font-family:'JetBrains Mono',monospace; font-size:0.8rem; margin-bottom:1.5rem; }
+
+/* Upgrade banner */
+.upgrade-banner { background:rgba(255,204,0,0.08); border:1px solid rgba(255,204,0,0.2); border-radius:10px; padding:0.75rem 1.25rem; display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1.5rem; font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--yellow); }
+.upgrade-banner a { color:var(--accent); text-decoration:none; font-weight:600; white-space:nowrap; cursor:pointer; }
+.upgrade-banner a:hover { text-decoration:underline; }
+
+.upgrade-cta-inline { font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--accent); cursor:pointer; margin-top:0.5rem; }
+.upgrade-cta-inline:hover { text-decoration:underline; }
+.header-upgrade { font-family:'JetBrains Mono',monospace; font-size:0.65rem; color:var(--accent); cursor:pointer; text-decoration:none; padding:3px 10px; border:1px solid rgba(255,51,51,0.3); border-radius:12px; transition:all 0.2s; }
+.header-upgrade:hover { background:rgba(255,51,51,0.1); border-color:var(--accent); }
+
 /* Empty state */
 .empty-state { text-align:center; padding:4rem 2rem; }
 .empty-state .icon { font-size:2.5rem; margin-bottom:1rem; opacity:0.3; }
@@ -205,6 +247,9 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
     // Auth guard
     if (!token) return navigate("#/login");
     if (hash === "#/agents") return renderAgents(app);
+    if (hash === "#/billing") return renderBilling(app);
+    if (hash === "#/billing/success") return renderBillingSuccess(app);
+    if (hash === "#/billing/cancel") return renderBillingCancel(app);
 
     // Agent detail: #/agents/agent_xxxx
     var m = hash.match(/^#\/agents\/(agent_[a-f0-9]+)$/);
@@ -364,13 +409,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
     var tier = user.subscription_tier || "free";
 
     app.innerHTML =
-      '<header>' +
-      '<a class="logo" id="logo-link">Molt<span>Grid</span></a>' +
-      '<div class="header-right">' +
-      '<span class="user-email">' + esc(user.email) + '</span>' +
-      '<span class="tier-badge tier-' + esc(tier) + '">' + esc(tier) + '</span>' +
-      '<button class="btn btn-ghost" id="logout-btn">Logout</button>' +
-      '</div></header>' +
+      renderHeader(tier) +
       '<div class="page">' +
       '<div class="dash-header"><div><h1>Your Agents</h1></div>' +
       '<div id="register-area"></div></div>' +
@@ -378,8 +417,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
       '</div>' +
       '<div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal-content"></div></div>';
 
-    document.getElementById("logo-link").onclick = function() { navigate("#/agents"); };
-    document.getElementById("logout-btn").onclick = function() { token = null; user = null; navigate("#/login"); };
+    wireHeader();
     document.getElementById("modal-overlay").onclick = function(e) {
       if (e.target.id === "modal-overlay") e.target.classList.remove("active");
     };
@@ -389,10 +427,11 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
       var content = document.getElementById("agents-content");
       var regArea = document.getElementById("register-area");
 
-      var atLimit = tier === "free" && agents.length >= 1;
+      var maxAgents = user.max_agents || 1;
+      var atLimit = agents.length >= maxAgents;
       if (atLimit) {
-        regArea.innerHTML = '<button class="btn btn-accent" id="upgrade-btn">Upgrade to add more</button>';
-        document.getElementById("upgrade-btn").onclick = showUpgradeModal;
+        regArea.innerHTML = '<button class="btn btn-accent" id="upgrade-btn">Upgrade to add more agents \u2192</button>';
+        document.getElementById("upgrade-btn").onclick = function() { navigate("#/billing"); };
       } else {
         regArea.innerHTML = '<button class="btn btn-accent" id="register-btn">+ Register New Agent</button>';
         document.getElementById("register-btn").onclick = doRegister;
@@ -450,24 +489,22 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
     var tier = user.subscription_tier || "free";
     var maxCalls = user.max_api_calls || 10000;
 
+    var usagePctPre = maxCalls > 0 ? Math.round((user.usage_count / maxCalls) * 100) : 0;
+
     // Shell with header + modal
     app.innerHTML =
-      '<header>' +
-      '<a class="logo" id="logo-link">Molt<span>Grid</span></a>' +
-      '<div class="header-right">' +
-      '<span class="user-email">' + esc(user.email) + '</span>' +
-      '<span class="tier-badge tier-' + esc(tier) + '">' + esc(tier) + '</span>' +
-      '<button class="btn btn-ghost" id="logout-btn">Logout</button>' +
-      '</div></header>' +
+      renderHeader(tier) +
       '<div class="page">' +
       '<div class="back-link" id="back-link">\u2190 Back to agents</div>' +
+      (usagePctPre >= 80 ? '<div class="upgrade-banner">\u26A0 Approaching API limit \u2014 ' + usagePctPre + '% used this month <a id="banner-upgrade">Upgrade \u2192</a></div>' : '') +
       '<div id="detail-content"><div class="loading-page"><span class="spinner"></span> Loading agent\u2026</div></div>' +
       '</div>' +
       '<div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal-content"></div></div>';
 
-    document.getElementById("logo-link").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/agents"); };
-    document.getElementById("logout-btn").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); token = null; user = null; navigate("#/login"); };
+    wireHeader();
     document.getElementById("back-link").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/agents"); };
+    var bannerUpgrade = document.getElementById("banner-upgrade");
+    if (bannerUpgrade) bannerUpgrade.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
     document.getElementById("modal-overlay").onclick = function(e) {
       if (e.target.id === "modal-overlay") e.target.classList.remove("active");
     };
@@ -535,7 +572,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
 
       // Upgrade button
       var ub = document.getElementById("usage-upgrade");
-      if (ub) ub.onclick = showUpgradeModal;
+      if (ub) ub.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
 
       // Quick action handlers
       document.getElementById("act-message").onclick = function() { showMessageModal(agentId); };
@@ -679,6 +716,229 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
     };
   }
 
+  // ── Billing Page ──
+  function renderBilling(app) {
+    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+
+    if (!user) {
+      api("GET", "/v1/auth/me").then(function(me) {
+        user = me;
+        renderBilling(app);
+      }).catch(function() { token = null; navigate("#/login"); });
+      app.innerHTML = '<div class="loading-page"><span class="spinner"></span> Loading\u2026</div>';
+      return;
+    }
+
+    var tier = user.subscription_tier || "free";
+    var maxCalls = user.max_api_calls || 10000;
+    var maxAgents = user.max_agents || 1;
+    var usagePct = maxCalls > 0 ? Math.min(100, Math.round((user.usage_count / maxCalls) * 100)) : 0;
+    var barCls = usagePct >= 95 ? "red" : (usagePct >= 80 ? "yellow" : "green");
+
+    var tierPrices = { free: "$0", hobby: "$5", team: "$25", scale: "$99" };
+
+    app.innerHTML =
+      renderHeader(tier) +
+      '<div class="page">' +
+      '<div class="back-link" id="back-link">\u2190 Back to agents</div>' +
+      '<div class="dash-header"><h1>Billing & Plans</h1></div>' +
+      '<div class="billing-grid">' +
+
+      // Current Plan Card
+      '<div class="plan-card">' +
+      '<div class="plan-card-header"><div>' +
+      '<div class="plan-name"><span class="tier-badge tier-' + esc(tier) + '" style="font-size:0.75rem;padding:4px 14px">' + esc(tier.toUpperCase()) + '</span> Current Plan</div>' +
+      '</div><div class="plan-price">' + tierPrices[tier] + '<span class="period"> /month</span></div></div>' +
+
+      '<div class="plan-detail">API Usage: ' + (user.usage_count || 0).toLocaleString() + ' / ' + (maxCalls > 999999998 ? '\u221e' : maxCalls.toLocaleString()) + ' calls this month</div>' +
+      '<div class="usage-track" style="margin-bottom:0.75rem"><div class="usage-fill ' + barCls + '" style="width:' + usagePct + '%"></div></div>' +
+      '<div class="plan-detail">Agents: ' + '<span id="billing-agent-count">\u2026</span>' + ' / ' + maxAgents + ' used</div>' +
+      '</div>' +
+
+      // Tiers grid (placeholder, filled async)
+      '<div class="section-title">All Plans</div>' +
+      '<div id="tiers-container"><div class="loading-page" style="min-height:10vh"><span class="spinner"></span> Loading plans\u2026</div></div>' +
+
+      // Billing history
+      '<div class="billing-history">' +
+      '<div class="label">Billing History</div>' +
+      '<div id="billing-history-content">' +
+      (tier !== "free" ? '<p style="color:var(--text-dim);font-size:0.8rem">View invoices and manage payment methods in the Stripe portal.</p>' +
+        '<button class="btn btn-ghost" id="portal-btn" style="margin-top:0.75rem">Open Stripe Portal</button>' :
+        '<p style="color:var(--text-dim);font-size:0.8rem">No billing history yet. Upgrade to a paid plan to get started.</p>') +
+      '</div></div>' +
+
+      '</div></div>' +
+      '<div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal-content"></div></div>';
+
+    // Wire up
+    wireHeader();
+    document.getElementById("back-link").onclick = function() { navigate("#/agents"); };
+    document.getElementById("modal-overlay").onclick = function(e) {
+      if (e.target.id === "modal-overlay") e.target.classList.remove("active");
+    };
+
+    var portalBtn = document.getElementById("portal-btn");
+    if (portalBtn) {
+      portalBtn.onclick = function() {
+        portalBtn.disabled = true; portalBtn.textContent = "Opening\u2026";
+        api("POST", "/v1/billing/portal").then(function(data) {
+          if (data.portal_url) window.location.href = data.portal_url;
+        }).catch(function(err) {
+          window.alert("Portal error: " + (err.detail || "Stripe not configured"));
+          portalBtn.disabled = false; portalBtn.textContent = "Open Stripe Portal";
+        });
+      };
+    }
+
+    // Load agent count
+    api("GET", "/v1/user/agents").then(function(data) {
+      var el = document.getElementById("billing-agent-count");
+      if (el) el.textContent = (data.agents || []).length;
+    }).catch(function() {});
+
+    // Load pricing
+    api("GET", "/v1/pricing").then(function(data) {
+      var tiers = data.tiers || {};
+      var container = document.getElementById("tiers-container");
+      var order = ["free", "hobby", "team", "scale"];
+      var tierColors = { free: "var(--text-dim)", hobby: "var(--blue)", team: "var(--purple)", scale: "var(--yellow)" };
+      var html = '<div class="tiers-grid">';
+
+      order.forEach(function(t) {
+        var info = tiers[t];
+        if (!info) return;
+        var isCurrent = t === tier;
+        var priceStr = info.price === 0 ? "Free" : "$" + info.price + '<span class="mo">/mo</span>';
+        var callsStr = info.max_api_calls > 999999998 ? "Unlimited" : (info.max_api_calls / 1000000 >= 1 ? (info.max_api_calls / 1000000) + "M" : (info.max_api_calls / 1000) + "K");
+
+        html += '<div class="tier-card' + (isCurrent ? " current" : "") + '">' +
+          '<div class="tier-card-name" style="color:' + tierColors[t] + '">' + esc(t.charAt(0).toUpperCase() + t.slice(1)) + '</div>' +
+          '<div class="tier-card-price">' + priceStr + '</div>' +
+          '<ul class="tier-card-features">' +
+          '<li>' + info.max_agents + ' agents</li>' +
+          '<li>' + callsStr + ' API calls/month</li>' +
+          '</ul>';
+
+        if (isCurrent) {
+          html += '<button class="btn btn-ghost" disabled>Current plan</button>';
+        } else if (t === "free") {
+          html += '<button class="btn btn-ghost" disabled>Free tier</button>';
+        } else {
+          html += '<button class="btn btn-accent tier-checkout-btn" data-tier="' + t + '">Upgrade to ' + esc(t.charAt(0).toUpperCase() + t.slice(1)) + '</button>';
+        }
+        html += '</div>';
+      });
+
+      html += '</div>';
+
+      if (tier !== "free") {
+        html += '<div style="text-align:center;margin-top:1rem">' +
+          '<button class="btn btn-ghost" id="manage-sub-btn">Manage Subscription</button></div>';
+      }
+
+      container.innerHTML = html;
+
+      // Wire checkout buttons
+      document.querySelectorAll(".tier-checkout-btn").forEach(function(btn) {
+        btn.onclick = function() {
+          var t2 = this.getAttribute("data-tier");
+          this.disabled = true; this.textContent = "Redirecting\u2026";
+          startCheckout(t2);
+        };
+      });
+
+      var manageBtn = document.getElementById("manage-sub-btn");
+      if (manageBtn) {
+        manageBtn.onclick = function() {
+          manageBtn.disabled = true; manageBtn.textContent = "Opening\u2026";
+          api("POST", "/v1/billing/portal").then(function(data) {
+            if (data.portal_url) window.location.href = data.portal_url;
+          }).catch(function(err) {
+            window.alert("Portal error: " + (err.detail || "Stripe not configured"));
+            manageBtn.disabled = false; manageBtn.textContent = "Manage Subscription";
+          });
+        };
+      }
+    }).catch(function() {
+      document.getElementById("tiers-container").innerHTML =
+        '<div class="alert alert-error">Failed to load pricing plans.</div>';
+    });
+  }
+
+  // ── Billing Success Page ──
+  function renderBillingSuccess(app) {
+    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+
+    var tier = (user && user.subscription_tier) || "free";
+
+    app.innerHTML =
+      '<div class="result-container"><div class="result-card">' +
+      '<div class="result-icon">\u2705</div>' +
+      '<h1>Payment Successful!</h1>' +
+      '<p class="subtitle" id="success-status">Refreshing your account\u2026</p>' +
+      '<div class="spinner" style="margin:1rem auto;display:block;width:24px;height:24px"></div>' +
+      '</div></div>';
+
+    var attempts = 0;
+    var maxAttempts = 10;
+    var poll = setInterval(function() {
+      attempts++;
+      api("GET", "/v1/auth/me").then(function(me) {
+        user = me;
+        var newTier = me.subscription_tier || "free";
+        if (newTier !== "free" || attempts >= maxAttempts) {
+          clearInterval(poll);
+          var statusEl = document.getElementById("success-status");
+          if (statusEl) statusEl.textContent = "Plan updated to " + newTier.toUpperCase() + ". Redirecting\u2026";
+          setTimeout(function() { navigate("#/agents"); }, 2000);
+        }
+      }).catch(function() {
+        if (attempts >= maxAttempts) {
+          clearInterval(poll);
+          navigate("#/agents");
+        }
+      });
+    }, 2000);
+  }
+
+  // ── Billing Cancel Page ──
+  function renderBillingCancel(app) {
+    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+
+    app.innerHTML =
+      '<div class="result-container"><div class="result-card">' +
+      '<div class="result-icon">\uD83D\uDC4B</div>' +
+      '<h1>No worries!</h1>' +
+      '<p class="subtitle">Your free tier is still active. You can upgrade anytime.</p>' +
+      '<button class="btn btn-accent" id="cancel-go" style="margin-top:0.5rem">Go to dashboard</button>' +
+      '</div></div>';
+
+    document.getElementById("cancel-go").onclick = function() { navigate("#/agents"); };
+  }
+
+  // ── Shared header renderer ──
+  function renderHeader(tier) {
+    return '<header>' +
+      '<a class="logo" id="logo-link">Molt<span>Grid</span></a>' +
+      '<div class="header-right">' +
+      (tier === "free" ? '<a class="header-upgrade" id="header-upgrade-link">Upgrade</a>' : '') +
+      '<span class="user-email">' + esc(user.email) + '</span>' +
+      '<span class="tier-badge tier-' + esc(tier) + '">' + esc(tier) + '</span>' +
+      '<button class="btn btn-ghost" id="billing-link" style="font-size:0.7rem">Billing</button>' +
+      '<button class="btn btn-ghost" id="logout-btn">Logout</button>' +
+      '</div></header>';
+  }
+
+  function wireHeader() {
+    document.getElementById("logo-link").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/agents"); };
+    document.getElementById("logout-btn").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); token = null; user = null; navigate("#/login"); };
+    var billingLink = document.getElementById("billing-link");
+    if (billingLink) billingLink.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
+    var upgradeLink = document.getElementById("header-upgrade-link");
+    if (upgradeLink) upgradeLink.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
+  }
+
   // ── Register new agent ──
   function doRegister() {
     var btn = document.getElementById("register-btn");
@@ -743,9 +1003,11 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
       '<div><strong>Scale</strong> \u2014 200 agents, unlimited</div>' +
       '<div style="color:var(--yellow);font-family:JetBrains Mono,monospace;font-weight:700">$99/mo</div></div></div></div>' +
       '<div class="modal-actions">' +
-      '<button class="btn btn-ghost" id="modal-cancel">Cancel</button></div>';
+      '<button class="btn btn-ghost" id="modal-cancel">Cancel</button>' +
+      '<button class="btn btn-ghost" id="modal-billing">View all plans</button></div>';
 
     document.getElementById("modal-cancel").onclick = function() { overlay.classList.remove("active"); };
+    document.getElementById("modal-billing").onclick = function() { overlay.classList.remove("active"); navigate("#/billing"); };
     ["hobby","team","scale"].forEach(function(t) {
       document.getElementById("ck-" + t).onclick = function() { startCheckout(t); };
     });
