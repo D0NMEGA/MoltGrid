@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MoltGrid — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0a0f; --surface: #12121a; --surface2: #1a1a26; --border: #2a2a3a;
+  --text: #e4e4ef; --text-dim: #7a7a92; --accent: #ff3333; --accent-dim: #cc2828;
+  --accent-glow: rgba(255,51,51,0.15); --red: #ff4444; --yellow: #ffcc00; --blue: #4488ff;
+  --purple: #bb88ff; --green: #44cc66;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:'Space Grotesk',sans-serif; line-height:1.6; min-height:100vh; }
+.noise { position:fixed; top:0;left:0;right:0;bottom:0; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E"); pointer-events:none; z-index:999; }
+.grid-bg { position:fixed; top:0;left:0;right:0;bottom:0; background-image:linear-gradient(rgba(255,51,51,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,51,51,0.03) 1px,transparent 1px); background-size:60px 60px; pointer-events:none; }
+
+header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgba(10,10,15,0.9); backdrop-filter:blur(20px); border-bottom:1px solid var(--border); z-index:100; display:flex; justify-content:space-between; align-items:center; }
+.logo { font-family:'JetBrains Mono',monospace; font-weight:700; font-size:1.2rem; color:var(--accent); text-decoration:none; cursor:pointer; }
+.logo span { color:var(--text-dim); }
+.header-right { display:flex; align-items:center; gap:1rem; }
+.tier-badge { font-family:'JetBrains Mono',monospace; font-size:0.65rem; padding:3px 10px; border-radius:12px; text-transform:uppercase; letter-spacing:1px; }
+.tier-free { color:var(--text-dim); background:rgba(122,122,146,0.12); border:1px solid var(--border); }
+.tier-hobby { color:var(--blue); background:rgba(68,136,255,0.1); border:1px solid rgba(68,136,255,0.2); }
+.tier-team { color:var(--purple); background:rgba(187,136,255,0.1); border:1px solid rgba(187,136,255,0.2); }
+.tier-scale { color:var(--yellow); background:rgba(255,204,0,0.1); border:1px solid rgba(255,204,0,0.2); }
+.user-email { font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--text-dim); }
+.btn { font-family:'JetBrains Mono',monospace; font-size:0.75rem; padding:6px 14px; border-radius:6px; cursor:pointer; border:none; transition:all 0.2s; }
+.btn-ghost { background:transparent; color:var(--text-dim); border:1px solid var(--border); }
+.btn-ghost:hover { border-color:var(--red); color:var(--red); }
+.btn-accent { background:var(--accent); color:#fff; }
+.btn-accent:hover { background:var(--accent-dim); }
+.btn-accent:disabled { opacity:0.4; cursor:not-allowed; }
+
+.page { position:relative; z-index:10; padding:5rem 2rem 3rem; max-width:1100px; margin:0 auto; }
+
+/* Auth pages */
+.auth-container { display:flex; align-items:center; justify-content:center; min-height:100vh; padding:2rem; }
+.auth-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:2.5rem; width:100%; max-width:400px; }
+.auth-card h1 { font-size:1.4rem; font-weight:600; letter-spacing:-0.5px; margin-bottom:0.25rem; }
+.auth-card .subtitle { color:var(--text-dim); font-size:0.8rem; margin-bottom:1.5rem; font-family:'JetBrains Mono',monospace; }
+.form-group { margin-bottom:1rem; }
+.form-group label { display:block; font-family:'JetBrains Mono',monospace; font-size:0.65rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin-bottom:0.35rem; }
+.form-group input { width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:10px 14px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:0.85rem; outline:none; transition:border-color 0.2s; }
+.form-group input:focus { border-color:var(--accent); }
+.form-group input.error { border-color:var(--red); }
+.form-error { color:var(--red); font-family:'JetBrains Mono',monospace; font-size:0.7rem; margin-top:0.25rem; }
+.form-submit { width:100%; margin-top:0.5rem; padding:11px; font-size:0.85rem; }
+.auth-link { text-align:center; margin-top:1.25rem; font-size:0.8rem; color:var(--text-dim); }
+.auth-link a { color:var(--accent); text-decoration:none; cursor:pointer; }
+.auth-link a:hover { text-decoration:underline; }
+.alert { padding:10px 14px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:0.75rem; margin-bottom:1rem; }
+.alert-error { background:rgba(255,68,68,0.1); border:1px solid rgba(255,68,68,0.2); color:var(--red); }
+
+/* Agent cards */
+.dash-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:1rem; }
+.dash-header h1 { font-size:1.5rem; font-weight:600; letter-spacing:-1px; }
+.agent-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:1rem; }
+.agent-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.25rem; transition:all 0.2s; }
+.agent-card:hover { border-color:rgba(255,51,51,0.3); }
+.agent-card-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.75rem; }
+.agent-name { font-weight:600; font-size:1rem; }
+.agent-id { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); margin-top:2px; }
+.status-indicator { display:flex; align-items:center; gap:6px; font-family:'JetBrains Mono',monospace; font-size:0.65rem; }
+.status-dot { width:8px; height:8px; border-radius:50%; }
+.status-dot.online { background:var(--green); box-shadow:0 0 8px rgba(68,204,102,0.4); }
+.status-dot.offline { background:var(--text-dim); }
+.agent-stats { display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-top:0.75rem; }
+.agent-stat { background:var(--bg); border-radius:6px; padding:0.5rem 0.7rem; }
+.agent-stat-label { font-family:'JetBrains Mono',monospace; font-size:0.55rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; }
+.agent-stat-value { font-family:'JetBrains Mono',monospace; font-size:0.85rem; color:var(--text); margin-top:2px; }
+
+/* Modal */
+.modal-overlay { display:none; position:fixed; top:0;left:0;right:0;bottom:0; background:rgba(0,0,0,0.75); z-index:200; align-items:center; justify-content:center; }
+.modal-overlay.active { display:flex; }
+.modal { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:2rem; max-width:520px; width:92%; }
+.modal h2 { font-size:1.1rem; margin-bottom:0.5rem; }
+.modal .subtitle { color:var(--text-dim); font-size:0.8rem; margin-bottom:1.25rem; }
+.api-key-box { background:var(--bg); border:1px solid var(--accent); border-radius:8px; padding:12px 16px; font-family:'JetBrains Mono',monospace; font-size:0.8rem; color:var(--accent); word-break:break-all; margin-bottom:1rem; position:relative; }
+.copy-btn { position:absolute; top:8px; right:8px; background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); font-family:'JetBrains Mono',monospace; font-size:0.65rem; padding:4px 10px; border-radius:4px; cursor:pointer; }
+.copy-btn:hover { border-color:var(--accent); color:var(--accent); }
+.warning-text { color:var(--yellow); font-family:'JetBrains Mono',monospace; font-size:0.7rem; margin-bottom:1rem; }
+.modal-actions { display:flex; gap:0.75rem; justify-content:flex-end; }
+
+/* Empty state */
+.empty-state { text-align:center; padding:4rem 2rem; }
+.empty-state .icon { font-size:2.5rem; margin-bottom:1rem; opacity:0.3; }
+.empty-state p { color:var(--text-dim); font-family:'JetBrains Mono',monospace; font-size:0.85rem; margin-bottom:1.5rem; }
+
+/* Loading */
+.spinner { width:18px; height:18px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; display:inline-block; vertical-align:middle; margin-right:8px; }
+@keyframes spin { to{transform:rotate(360deg)} }
+.loading-page { display:flex; align-items:center; justify-content:center; min-height:60vh; font-family:'JetBrains Mono',monospace; color:var(--text-dim); }
+
+@media(max-width:600px) {
+  header { padding:0.75rem 1rem; }
+  .page { padding:4.5rem 1rem 2rem; }
+  .agent-grid { grid-template-columns:1fr; }
+  .auth-card { padding:1.5rem; }
+  .user-email { display:none; }
+}
+</style>
+</head>
+<body>
+<div class="noise"></div>
+<div class="grid-bg"></div>
+<div id="app"></div>
+
+<script>
+(function() {
+  "use strict";
+
+  // ── State ──
+  var token = null;
+  var user = null;
+  var API = window.location.origin;
+
+  // ── API helper ──
+  function api(method, path, body) {
+    var opts = { method: method, headers: {} };
+    if (token) opts.headers["Authorization"] = "Bearer " + token;
+    if (body) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(API + path, opts).then(function(r) {
+      return r.json().catch(function() { return {}; }).then(function(data) {
+        if (!r.ok) throw { status: r.status, detail: data.detail || "Request failed" };
+        return data;
+      });
+    });
+  }
+
+  // ── Router ──
+  function navigate(hash) { window.location.hash = hash; }
+
+  function route() {
+    var hash = window.location.hash || "#/login";
+    var app = document.getElementById("app");
+
+    if (hash === "#/login") return renderLogin(app);
+    if (hash === "#/signup") return renderSignup(app);
+
+    // Auth guard
+    if (!token) return navigate("#/login");
+    if (hash === "#/agents") return renderAgents(app);
+
+    navigate("#/agents");
+  }
+
+  window.addEventListener("hashchange", route);
+
+  // ── Time ago helper ──
+  function timeAgo(iso) {
+    if (!iso) return "never";
+    var s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return s + "s ago";
+    if (s < 3600) return Math.floor(s/60) + "m ago";
+    if (s < 86400) return Math.floor(s/3600) + "h ago";
+    return Math.floor(s/86400) + "d ago";
+  }
+
+  function esc(str) {
+    var d = document.createElement("div");
+    d.textContent = str || "";
+    return d.innerHTML;
+  }
+
+  function truncId(id) { return id ? id.slice(0, 18) + "\u2026" : ""; }
+
+  // ── Login Page ──
+  function renderLogin(app) {
+    app.innerHTML =
+      '<div class="auth-container"><div class="auth-card">' +
+      '<h1>Welcome back</h1>' +
+      '<p class="subtitle">Sign in to your MoltGrid account</p>' +
+      '<div id="login-alert"></div>' +
+      '<form id="login-form">' +
+      '<div class="form-group"><label>Email</label>' +
+      '<input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email"></div>' +
+      '<div class="form-group"><label>Password</label>' +
+      '<input type="password" id="login-password" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" required autocomplete="current-password"></div>' +
+      '<button type="submit" class="btn btn-accent form-submit" id="login-btn">Sign in</button>' +
+      '</form>' +
+      '<p class="auth-link">Don\'t have an account? <a id="go-signup">Sign up</a></p>' +
+      '</div></div>';
+
+    document.getElementById("go-signup").onclick = function() { navigate("#/signup"); };
+
+    document.getElementById("login-form").onsubmit = function(e) {
+      e.preventDefault();
+      var btn = document.getElementById("login-btn");
+      var alertEl = document.getElementById("login-alert");
+      btn.disabled = true; btn.textContent = "Signing in\u2026";
+      alertEl.innerHTML = "";
+      api("POST", "/v1/auth/login", {
+        email: document.getElementById("login-email").value,
+        password: document.getElementById("login-password").value,
+      }).then(function(data) {
+        token = data.token;
+        return api("GET", "/v1/auth/me");
+      }).then(function(me) {
+        user = me;
+        navigate("#/agents");
+      }).catch(function(err) {
+        alertEl.innerHTML = '<div class="alert alert-error">' + esc(err.detail || "Network error. Check your connection.") + "</div>";
+        btn.disabled = false; btn.textContent = "Sign in";
+      });
+    };
+  }
+
+  // ── Signup Page ──
+  function renderSignup(app) {
+    app.innerHTML =
+      '<div class="auth-container"><div class="auth-card">' +
+      '<h1>Create account</h1>' +
+      '<p class="subtitle">Start building with MoltGrid \u2014 free</p>' +
+      '<div id="signup-alert"></div>' +
+      '<form id="signup-form">' +
+      '<div class="form-group"><label>Display Name</label>' +
+      '<input type="text" id="signup-name" placeholder="Your name" autocomplete="name"></div>' +
+      '<div class="form-group"><label>Email</label>' +
+      '<input type="email" id="signup-email" placeholder="you@example.com" required autocomplete="email">' +
+      '<div class="form-error" id="err-email"></div></div>' +
+      '<div class="form-group"><label>Password</label>' +
+      '<input type="password" id="signup-password" placeholder="Min 8 characters" required autocomplete="new-password">' +
+      '<div class="form-error" id="err-password"></div></div>' +
+      '<div class="form-group"><label>Confirm Password</label>' +
+      '<input type="password" id="signup-confirm" placeholder="Repeat password" required autocomplete="new-password">' +
+      '<div class="form-error" id="err-confirm"></div></div>' +
+      '<button type="submit" class="btn btn-accent form-submit" id="signup-btn">Create account</button>' +
+      '</form>' +
+      '<p class="auth-link">Already have an account? <a id="go-login">Sign in</a></p>' +
+      '</div></div>';
+
+    document.getElementById("go-login").onclick = function() { navigate("#/login"); };
+
+    document.getElementById("signup-form").onsubmit = function(e) {
+      e.preventDefault();
+      var email = document.getElementById("signup-email").value;
+      var pw = document.getElementById("signup-password").value;
+      var confirm = document.getElementById("signup-confirm").value;
+      var name = document.getElementById("signup-name").value;
+      var btn = document.getElementById("signup-btn");
+      var alertEl = document.getElementById("signup-alert");
+
+      ["err-email","err-password","err-confirm"].forEach(function(id) {
+        document.getElementById(id).textContent = "";
+      });
+      document.querySelectorAll(".auth-card input").forEach(function(el) { el.classList.remove("error"); });
+      alertEl.innerHTML = "";
+
+      var valid = true;
+      if (!/\S+@\S+\.\S+/.test(email)) {
+        document.getElementById("err-email").textContent = "Enter a valid email address";
+        document.getElementById("signup-email").classList.add("error"); valid = false;
+      }
+      if (pw.length < 8) {
+        document.getElementById("err-password").textContent = "Password must be at least 8 characters";
+        document.getElementById("signup-password").classList.add("error"); valid = false;
+      }
+      if (pw !== confirm) {
+        document.getElementById("err-confirm").textContent = "Passwords do not match";
+        document.getElementById("signup-confirm").classList.add("error"); valid = false;
+      }
+      if (!valid) return;
+
+      btn.disabled = true; btn.textContent = "Creating account\u2026";
+      api("POST", "/v1/auth/signup", {
+        email: email, password: pw, display_name: name || null,
+      }).then(function(data) {
+        token = data.token;
+        return api("GET", "/v1/auth/me");
+      }).then(function(me) {
+        user = me;
+        navigate("#/agents");
+      }).catch(function(err) {
+        alertEl.innerHTML = '<div class="alert alert-error">' + esc(err.detail || "Something went wrong.") + "</div>";
+        btn.disabled = false; btn.textContent = "Create account";
+      });
+    };
+
+    document.querySelectorAll(".auth-card input").forEach(function(inp) {
+      inp.addEventListener("input", function() { inp.classList.remove("error"); });
+    });
+  }
+
+  // ── Agents Dashboard ──
+  function renderAgents(app) {
+    if (!user) {
+      api("GET", "/v1/auth/me").then(function(me) {
+        user = me;
+        renderAgents(app);
+      }).catch(function() { token = null; navigate("#/login"); });
+      app.innerHTML = '<div class="loading-page"><span class="spinner"></span> Loading\u2026</div>';
+      return;
+    }
+
+    var tier = user.subscription_tier || "free";
+
+    app.innerHTML =
+      '<header>' +
+      '<a class="logo" id="logo-link">Molt<span>Grid</span></a>' +
+      '<div class="header-right">' +
+      '<span class="user-email">' + esc(user.email) + '</span>' +
+      '<span class="tier-badge tier-' + esc(tier) + '">' + esc(tier) + '</span>' +
+      '<button class="btn btn-ghost" id="logout-btn">Logout</button>' +
+      '</div></header>' +
+      '<div class="page">' +
+      '<div class="dash-header"><div><h1>Your Agents</h1></div>' +
+      '<div id="register-area"></div></div>' +
+      '<div id="agents-content"><div class="loading-page"><span class="spinner"></span> Loading agents\u2026</div></div>' +
+      '</div>' +
+      '<div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal-content"></div></div>';
+
+    document.getElementById("logo-link").onclick = function() { navigate("#/agents"); };
+    document.getElementById("logout-btn").onclick = function() { token = null; user = null; navigate("#/login"); };
+    document.getElementById("modal-overlay").onclick = function(e) {
+      if (e.target.id === "modal-overlay") e.target.classList.remove("active");
+    };
+
+    api("GET", "/v1/user/agents").then(function(data) {
+      var agents = data.agents || [];
+      var content = document.getElementById("agents-content");
+      var regArea = document.getElementById("register-area");
+
+      var atLimit = tier === "free" && agents.length >= 1;
+      if (atLimit) {
+        regArea.innerHTML = '<button class="btn btn-accent" id="upgrade-btn">Upgrade to add more</button>';
+        document.getElementById("upgrade-btn").onclick = showUpgradeModal;
+      } else {
+        regArea.innerHTML = '<button class="btn btn-accent" id="register-btn">+ Register New Agent</button>';
+        document.getElementById("register-btn").onclick = doRegister;
+      }
+
+      if (agents.length === 0) {
+        content.innerHTML =
+          '<div class="empty-state">' +
+          '<div class="icon">&#x1f916;</div>' +
+          '<p>No agents yet. Register your first agent to get started.</p></div>';
+        return;
+      }
+
+      var html = '<div class="agent-grid">';
+      agents.forEach(function(a) {
+        var isOn = a.heartbeat_status === "online" || a.heartbeat_status === "busy" || a.heartbeat_status === "idle";
+        html +=
+          '<div class="agent-card">' +
+          '<div class="agent-card-header"><div>' +
+          '<div class="agent-name">' + esc(a.name || "Unnamed Agent") + '</div>' +
+          '<div class="agent-id">' + esc(truncId(a.agent_id)) + '</div></div>' +
+          '<div class="status-indicator">' +
+          '<div class="status-dot ' + (isOn ? "online" : "offline") + '"></div>' +
+          esc(a.heartbeat_status || "unknown") + '</div></div>' +
+          '<div class="agent-stats">' +
+          '<div class="agent-stat"><div class="agent-stat-label">Requests</div>' +
+          '<div class="agent-stat-value">' + (a.request_count || 0).toLocaleString() + '</div></div>' +
+          '<div class="agent-stat"><div class="agent-stat-label">Last Seen</div>' +
+          '<div class="agent-stat-value">' + esc(timeAgo(a.last_seen)) + '</div></div>' +
+          '</div></div>';
+      });
+      html += '</div>';
+      content.innerHTML = html;
+    }).catch(function(err) {
+      document.getElementById("agents-content").innerHTML =
+        '<div class="alert alert-error">Failed to load agents: ' + esc(err.detail || "Unknown error") + "</div>";
+    });
+  }
+
+  // ── Register new agent ──
+  function doRegister() {
+    var btn = document.getElementById("register-btn");
+    btn.disabled = true; btn.textContent = "Registering\u2026";
+    var agentName = "agent-" + Date.now().toString(36);
+    api("POST", "/v1/register", { name: agentName }).then(function(data) {
+      showApiKeyModal(data.agent_id, data.api_key);
+      return api("GET", "/v1/auth/me");
+    }).then(function(me) {
+      user = me;
+      // Re-render after modal is closed — user will see the new agent
+    }).catch(function(err) {
+      window.alert("Failed: " + (err.detail || "Unknown error"));
+      btn.disabled = false; btn.textContent = "+ Register New Agent";
+    });
+  }
+
+  // ── Modals ──
+  function showApiKeyModal(agentId, apiKey) {
+    var overlay = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    overlay.classList.add("active");
+    mc.innerHTML =
+      '<h2>Agent Registered</h2>' +
+      '<p class="subtitle">Agent <strong>' + esc(agentId) + '</strong> is ready.</p>' +
+      '<p class="warning-text">\u26A0 Save this API key now \u2014 it cannot be recovered.</p>' +
+      '<div class="api-key-box"><span id="key-text">' + esc(apiKey) + '</span>' +
+      '<button class="copy-btn" id="copy-key">Copy</button></div>' +
+      '<div class="modal-actions">' +
+      '<button class="btn btn-accent" id="modal-done">Done</button></div>';
+
+    document.getElementById("copy-key").onclick = function() {
+      navigator.clipboard.writeText(apiKey);
+      this.textContent = "Copied!";
+      var self = this;
+      setTimeout(function() { self.textContent = "Copy"; }, 2000);
+    };
+    document.getElementById("modal-done").onclick = function() {
+      overlay.classList.remove("active");
+      renderAgents(document.getElementById("app"));
+    };
+  }
+
+  function showUpgradeModal() {
+    var overlay = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    overlay.classList.add("active");
+    mc.innerHTML =
+      '<h2>Upgrade Your Plan</h2>' +
+      '<p class="subtitle">Free tier is limited to 1 agent. Upgrade to unlock more.</p>' +
+      '<div style="display:grid;gap:0.75rem;margin:1.25rem 0">' +
+      '<div class="agent-card" style="cursor:pointer" id="ck-hobby">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<div><strong>Hobby</strong> \u2014 10 agents, 1M API calls</div>' +
+      '<div style="color:var(--accent);font-family:JetBrains Mono,monospace;font-weight:700">$5/mo</div></div></div>' +
+      '<div class="agent-card" style="cursor:pointer" id="ck-team">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<div><strong>Team</strong> \u2014 50 agents, 10M API calls</div>' +
+      '<div style="color:var(--purple);font-family:JetBrains Mono,monospace;font-weight:700">$25/mo</div></div></div>' +
+      '<div class="agent-card" style="cursor:pointer" id="ck-scale">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<div><strong>Scale</strong> \u2014 200 agents, unlimited</div>' +
+      '<div style="color:var(--yellow);font-family:JetBrains Mono,monospace;font-weight:700">$99/mo</div></div></div></div>' +
+      '<div class="modal-actions">' +
+      '<button class="btn btn-ghost" id="modal-cancel">Cancel</button></div>';
+
+    document.getElementById("modal-cancel").onclick = function() { overlay.classList.remove("active"); };
+    ["hobby","team","scale"].forEach(function(t) {
+      document.getElementById("ck-" + t).onclick = function() { startCheckout(t); };
+    });
+  }
+
+  function startCheckout(tier) {
+    api("POST", "/v1/billing/checkout", { tier: tier }).then(function(data) {
+      if (data.checkout_url) window.location.href = data.checkout_url;
+    }).catch(function(err) {
+      window.alert("Checkout error: " + (err.detail || "Stripe not configured"));
+    });
+  }
+
+  // ── Init ──
+  route();
+})();
+</script>
+</body>
+</html>

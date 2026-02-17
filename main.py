@@ -3082,6 +3082,28 @@ def admin_page():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# USER DASHBOARD (HTML)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_dashboard_html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
+
+def _serve_dashboard():
+    try:
+        with open(_dashboard_html_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(404, "Dashboard not found")
+
+@app.get("/dashboard", response_class=HTMLResponse, tags=["Dashboard"])
+def dashboard_root():
+    return _serve_dashboard()
+
+@app.get("/dashboard/{path:path}", response_class=HTMLResponse, tags=["Dashboard"])
+def dashboard_catchall(path: str):
+    return _serve_dashboard()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # HEALTH / METRICS
 # ═══════════════════════════════════════════════════════════════════════════════
 
