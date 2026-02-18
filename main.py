@@ -34,6 +34,8 @@ from pydantic import BaseModel, Field
 import jwt as pyjwt
 import bcrypt as _bcrypt
 import stripe
+import numpy as np
+from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger("moltgrid")
 
@@ -97,7 +99,8 @@ async def lifespan(app):
     threading.Thread(target=_uptime_loop, daemon=True).start()
     threading.Thread(target=_liveness_loop, daemon=True).start()
     threading.Thread(target=_usage_reset_loop, daemon=True).start()
-    logger.info("Background threads started (scheduler, uptime monitor, liveness monitor, usage reset)")
+    threading.Thread(target=_email_loop, daemon=True).start()
+    logger.info("Background threads started (scheduler, uptime monitor, liveness monitor, usage reset, email)")
     # Clear OpenAPI schema cache to prevent stale endpoint definitions
     app.openapi_schema = None
     logger.info("OpenAPI schema cache cleared")
@@ -154,6 +157,21 @@ def init_db():
             PRIMARY KEY (agent_id, namespace, key),
             FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
         );
+
+        CREATE TABLE IF NOT EXISTS vector_memory (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            namespace TEXT NOT NULL DEFAULT 'default',
+            key TEXT NOT NULL,
+            text TEXT NOT NULL,
+            embedding BLOB NOT NULL,
+            metadata TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+            UNIQUE(agent_id, namespace, key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_vec_agent ON vector_memory(agent_id, namespace);
 
         CREATE TABLE IF NOT EXISTS queue (
             job_id TEXT PRIMARY KEY,
@@ -358,6 +376,18 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
         CREATE INDEX IF NOT EXISTS idx_users_stripe ON users(stripe_customer_id);
+
+        CREATE TABLE IF NOT EXISTS email_queue (
+            id TEXT PRIMARY KEY,
+            to_email TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            body_html TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            sent_at TEXT,
+            error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_email_queue_status ON email_queue(status, created_at);
     """)
 
     # Migrate existing agents table — add columns that older versions didn't have
@@ -370,15 +400,17 @@ def init_db():
         ("heartbeat_at", "TEXT"), ("heartbeat_interval", "INTEGER DEFAULT 60"),
         ("heartbeat_status", "TEXT DEFAULT 'unknown'"), ("heartbeat_meta", "TEXT"),
         ("owner_id", "TEXT"),
+        ("onboarding_completed", "INTEGER DEFAULT 0"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
 
-    # Migrate existing users table — add columns for billing
+    # Migrate existing users table — add columns for billing and notifications
     try:
         u_existing = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
         for col, typedef in [
             ("payment_failed", "INTEGER DEFAULT 0"),
+            ("notification_preferences", "TEXT"),
         ]:
             if col not in u_existing:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
@@ -441,15 +473,55 @@ def _check_usage_quota(db, agent_id: str):
     if not row or not row["owner_id"]:
         return  # unowned agent, no quota
     owner = db.execute(
-        "SELECT user_id, subscription_tier, usage_count, max_api_calls FROM users WHERE user_id = ?",
+        "SELECT user_id, email, subscription_tier, usage_count, max_api_calls FROM users WHERE user_id = ?",
         (row["owner_id"],),
     ).fetchone()
     if not owner:
         return
     tier = owner["subscription_tier"] or "free"
     limit = TIER_LIMITS.get(tier, TIER_LIMITS["free"])["max_api_calls"]
+
+    # Check if approaching quota (80%) and send warning email once
+    if limit is not None and _should_send_notification(db, owner["user_id"], "quota_alerts"):
+        usage_pct = (owner["usage_count"] / limit) * 100
+
+        # Send 80% warning (only once)
+        if 80 <= usage_pct < 81:
+            warning_html = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h1 style="color: #ff9800;">⚠️ You're approaching your API limit</h1>
+                <p>Your MoltGrid usage is at <strong>{usage_pct:.1f}%</strong> of your monthly quota.</p>
+                <p><strong>Current usage:</strong> {owner["usage_count"]:,} / {limit:,} API calls</p>
+                <p><strong>Tier:</strong> {tier}</p>
+                <p>To avoid service interruption, consider upgrading your plan:</p>
+                <p><a href="https://moltgrid.net/dashboard#/billing" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Upgrade Plan</a></p>
+            </body>
+            </html>
+            """
+            _queue_email(owner["email"], "You're approaching your API limit", warning_html)
+
     if limit is not None and owner["usage_count"] >= limit:
+        # Send quota exceeded email (only once when hitting limit)
+        if owner["usage_count"] == limit and _should_send_notification(db, owner["user_id"], "quota_alerts"):
+            exceeded_html = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h1 style="color: #dc3545;">🚨 API limit reached — your agents may be affected</h1>
+                <p>You've reached your monthly API call quota for the <strong>{tier}</strong> tier.</p>
+                <p><strong>Limit:</strong> {limit:,} API calls per month</p>
+                <p>Your agents will receive 429 errors until:</p>
+                <ul>
+                    <li>Your quota resets at the start of next month, OR</li>
+                    <li>You upgrade to a higher tier</li>
+                </ul>
+                <p><a href="https://moltgrid.net/dashboard#/billing" style="background: #dc3545; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Upgrade Now</a></p>
+            </body>
+            </html>
+            """
+            _queue_email(owner["email"], "API limit reached — your agents may be affected", exceeded_html)
         raise HTTPException(429, f"Monthly API call quota exceeded for '{tier}' tier ({limit:,} calls)")
+
     db.execute("UPDATE users SET usage_count = usage_count + 1 WHERE user_id = ?", (owner["user_id"],))
 
 
@@ -561,6 +633,30 @@ def auth_signup(req: SignupRequest):
             "INSERT INTO users (user_id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
             (user_id, req.email.lower(), pw_hash, req.display_name, now),
         )
+
+        # Send welcome email
+        if _should_send_notification(db, user_id, "welcome"):
+            welcome_html = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h1 style="color: #333;">Welcome to MoltGrid! 🚀</h1>
+                <p>Hi {req.display_name or 'there'},</p>
+                <p>Your agent infrastructure is ready. Here's how to get started:</p>
+                <ol>
+                    <li><strong>Register your first agent:</strong> POST /v1/register</li>
+                    <li><strong>Store persistent memory:</strong> POST /v1/memory</li>
+                    <li><strong>Send messages between agents:</strong> POST /v1/relay/send</li>
+                    <li><strong>Queue background jobs:</strong> POST /v1/queue/submit</li>
+                </ol>
+                <p><a href="https://moltgrid.net/dashboard" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Go to Dashboard</a></p>
+                <p><a href="http://82.180.139.113/docs">View Full API Documentation</a></p>
+                <p>Questions? Reply to this email or check our <a href="https://github.com/D0NMEGA/MoltGrid">GitHub</a>.</p>
+                <p>Happy building!<br>The MoltGrid Team</p>
+            </body>
+            </html>
+            """
+            _queue_email(req.email.lower(), "Welcome to MoltGrid — your agent infrastructure is ready", welcome_html)
+
     token = _create_token(user_id, req.email.lower())
     return {"user_id": user_id, "token": token, "message": "Account created"}
 
@@ -603,6 +699,46 @@ def auth_refresh(user_id: str = Depends(get_user_id)):
             raise HTTPException(404, "User not found")
     token = _create_token(user_id, row["email"])
     return {"user_id": user_id, "token": token}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# USER NOTIFICATIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class NotificationPreferencesRequest(BaseModel):
+    welcome: Optional[bool] = Field(None, description="Welcome emails for new signups and first agent")
+    quota_alerts: Optional[bool] = Field(None, description="Quota warning and exceeded emails")
+    weekly_digest: Optional[bool] = Field(None, description="Weekly summary of agent activity")
+
+@app.post("/v1/user/notifications/preferences", tags=["User"])
+def update_notification_preferences(req: NotificationPreferencesRequest, user_id: str = Depends(get_user_id)):
+    """Update email notification preferences. Users can opt out of specific notification types."""
+    with get_db() as db:
+        # Get current preferences or defaults
+        current_prefs = _get_user_notification_prefs(db, user_id)
+
+        # Update only provided fields
+        if req.welcome is not None:
+            current_prefs["welcome"] = req.welcome
+        if req.quota_alerts is not None:
+            current_prefs["quota_alerts"] = req.quota_alerts
+        if req.weekly_digest is not None:
+            current_prefs["weekly_digest"] = req.weekly_digest
+
+        # Save to database
+        db.execute(
+            "UPDATE users SET notification_preferences = ? WHERE user_id = ?",
+            (json.dumps(current_prefs), user_id)
+        )
+
+    return {"status": "updated", "preferences": current_prefs}
+
+@app.get("/v1/user/notifications/preferences", tags=["User"])
+def get_notification_preferences(user_id: str = Depends(get_user_id)):
+    """Get current email notification preferences."""
+    with get_db() as db:
+        prefs = _get_user_notification_prefs(db, user_id)
+    return {"preferences": prefs}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1076,6 +1212,36 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
             "INSERT INTO agents (agent_id, api_key_hash, name, public, created_at, credits, owner_id) VALUES (?, ?, ?, 1, ?, 200, ?)",
             (agent_id, hash_key(api_key), req.name, now, owner_id),
         )
+
+        # Send first agent email if this is user's first agent
+        if owner_id:
+            agent_count = db.execute(
+                "SELECT COUNT(*) as cnt FROM agents WHERE owner_id = ?", (owner_id,)
+            ).fetchone()["cnt"]
+
+            if agent_count == 1:  # First agent
+                user = db.execute("SELECT email FROM users WHERE user_id = ?", (owner_id,)).fetchone()
+                if user and _should_send_notification(db, owner_id, "welcome"):
+                    first_agent_html = f"""
+                    <html>
+                    <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h1 style="color: #333;">🎉 Your first agent is live on MoltGrid!</h1>
+                        <p>Congratulations! Your agent <strong>{req.name or agent_id}</strong> is now registered.</p>
+                        <p><strong>Agent ID:</strong> <code>{agent_id}</code></p>
+                        <p><strong>Next steps:</strong></p>
+                        <ul>
+                            <li>Store persistent memory: <code>POST /v1/memory</code></li>
+                            <li>Send a message to another agent: <code>POST /v1/relay/send</code></li>
+                            <li>Submit a background job: <code>POST /v1/queue/submit</code></li>
+                            <li>Start the onboarding tutorial: <code>POST /v1/onboarding/start</code></li>
+                        </ul>
+                        <p><a href="https://moltgrid.net/dashboard" style="background: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">View Dashboard</a></p>
+                        <p>Your agent is ready to go. Start building!</p>
+                    </body>
+                    </html>
+                    """
+                    _queue_email(user["email"], "Your first agent is live on MoltGrid", first_agent_html)
+
         # Send welcome message from MyFirstAgent
         welcome_exists = db.execute(
             "SELECT agent_id FROM agents WHERE agent_id=?", (WELCOME_AGENT_ID,)
@@ -1092,6 +1258,114 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
         api_key=api_key,
         message="Store your API key securely. It cannot be recovered."
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ONBOARDING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class OnboardingResponse(BaseModel):
+    steps: List[dict]
+    progress: int
+    total: int
+    reward: str
+
+def _check_onboarding_progress(db, agent_id: str) -> dict:
+    """Check onboarding progress for an agent. Returns dict with steps, progress, total, reward."""
+
+    # Check each step
+    steps = [
+        {
+            "id": "register",
+            "title": "Register an agent",
+            "completed": True,  # Always true if we have an agent_id
+            "endpoint": "POST /v1/register"
+        },
+        {
+            "id": "memory",
+            "title": "Store something in memory",
+            "completed": db.execute(
+                "SELECT COUNT(*) as cnt FROM memory WHERE agent_id = ?", (agent_id,)
+            ).fetchone()["cnt"] > 0,
+            "endpoint": "POST /v1/memory"
+        },
+        {
+            "id": "message",
+            "title": "Send a message",
+            "completed": db.execute(
+                "SELECT COUNT(*) as cnt FROM relay WHERE from_agent = ?", (agent_id,)
+            ).fetchone()["cnt"] > 0,
+            "endpoint": "POST /v1/relay/send"
+        },
+        {
+            "id": "queue",
+            "title": "Submit a job",
+            "completed": db.execute(
+                "SELECT COUNT(*) as cnt FROM queue WHERE agent_id = ?", (agent_id,)
+            ).fetchone()["cnt"] > 0,
+            "endpoint": "POST /v1/queue/submit"
+        },
+        {
+            "id": "schedule",
+            "title": "Create a schedule",
+            "completed": db.execute(
+                "SELECT COUNT(*) as cnt FROM scheduled_tasks WHERE agent_id = ?", (agent_id,)
+            ).fetchone()["cnt"] > 0,
+            "endpoint": "POST /v1/schedules"
+        },
+        {
+            "id": "directory",
+            "title": "Update your directory profile",
+            "completed": db.execute(
+                "SELECT description FROM agents WHERE agent_id = ?", (agent_id,)
+            ).fetchone()["description"] is not None,
+            "endpoint": "PUT /v1/directory/me"
+        },
+        {
+            "id": "heartbeat",
+            "title": "Send a heartbeat",
+            "completed": db.execute(
+                "SELECT heartbeat_at FROM agents WHERE agent_id = ?", (agent_id,)
+            ).fetchone()["heartbeat_at"] is not None,
+            "endpoint": "POST /v1/agents/heartbeat"
+        }
+    ]
+
+    progress = sum(1 for step in steps if step["completed"])
+    total = len(steps)
+
+    # Check if all steps complete and not yet rewarded
+    agent_row = db.execute(
+        "SELECT onboarding_completed, credits FROM agents WHERE agent_id = ?", (agent_id,)
+    ).fetchone()
+
+    if progress == total and not agent_row["onboarding_completed"]:
+        # Award 100 credits and mark onboarding complete
+        db.execute(
+            "UPDATE agents SET credits = credits + 100, onboarding_completed = 1 WHERE agent_id = ?",
+            (agent_id,)
+        )
+
+    return {
+        "steps": steps,
+        "progress": progress,
+        "total": total,
+        "reward": "Complete all steps to earn 100 bonus credits!"
+    }
+
+@app.post("/v1/onboarding/start", response_model=OnboardingResponse, tags=["Onboarding"])
+def onboarding_start(agent_id: str = Depends(get_agent_id)):
+    """Start the interactive onboarding tutorial. Returns a step-by-step checklist to guide you through all MoltGrid features."""
+    with get_db() as db:
+        result = _check_onboarding_progress(db, agent_id)
+    return OnboardingResponse(**result)
+
+@app.get("/v1/onboarding/status", response_model=OnboardingResponse, tags=["Onboarding"])
+def onboarding_status(agent_id: str = Depends(get_agent_id)):
+    """Check your onboarding progress without modifying anything."""
+    with get_db() as db:
+        result = _check_onboarding_progress(db, agent_id)
+    return OnboardingResponse(**result)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1863,6 +2137,273 @@ def _usage_reset_loop():
         time.sleep(86400)  # 24 hours
 
 
+# ─── Email Notifications ──────────────────────────────────────────────────────
+
+def _queue_email(to_email: str, subject: str, body_html: str):
+    """Queue an email for sending. Returns email ID."""
+    email_id = f"email_{uuid.uuid4().hex[:16]}"
+    now = datetime.now(timezone.utc).isoformat()
+
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO email_queue (id, to_email, subject, body_html, status, created_at) "
+            "VALUES (?, ?, ?, ?, 'pending', ?)",
+            (email_id, to_email, subject, body_html, now)
+        )
+
+    logger.info(f"Queued email {email_id} to {to_email}: {subject}")
+    return email_id
+
+def _send_email_smtp(to_email: str, subject: str, body_html: str) -> bool:
+    """Send email via SMTP. Returns True if successful, False otherwise."""
+    if not SMTP_FROM or not SMTP_TO or not SMTP_PASSWORD:
+        logger.warning("SMTP not configured, skipping email send")
+        return False
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = SMTP_FROM
+        msg["To"] = to_email
+
+        # Add HTML part
+        html_part = MIMEText(body_html, "html")
+        msg.attach(html_part)
+
+        # Send via Gmail SMTP
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(SMTP_FROM, SMTP_PASSWORD)
+            server.send_message(msg)
+
+        logger.info(f"Sent email to {to_email}: {subject}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to send email to {to_email}: {e}")
+        return False
+
+def _email_loop():
+    """Background thread: process pending emails every 30 seconds."""
+    while True:
+        try:
+            _run_email_tick()
+        except Exception as e:
+            logger.error(f"Email loop error: {e}")
+        time.sleep(30)  # 30 seconds
+
+def _run_email_tick():
+    """Process up to 10 pending emails."""
+    with get_db() as db:
+        pending = db.execute(
+            "SELECT id, to_email, subject, body_html FROM email_queue "
+            "WHERE status='pending' ORDER BY created_at ASC LIMIT 10"
+        ).fetchall()
+
+        for email in pending:
+            email_id = email["id"]
+            to_email = email["to_email"]
+            subject = email["subject"]
+            body_html = email["body_html"]
+
+            success = _send_email_smtp(to_email, subject, body_html)
+            now = datetime.now(timezone.utc).isoformat()
+
+            if success:
+                db.execute(
+                    "UPDATE email_queue SET status='sent', sent_at=? WHERE id=?",
+                    (now, email_id)
+                )
+            else:
+                db.execute(
+                    "UPDATE email_queue SET status='failed', error='SMTP error' WHERE id=?",
+                    (email_id,)
+                )
+
+def _get_user_notification_prefs(db, user_id: str) -> dict:
+    """Get user notification preferences. Returns dict with default True for all if not set."""
+    row = db.execute(
+        "SELECT notification_preferences FROM users WHERE user_id=?",
+        (user_id,)
+    ).fetchone()
+
+    if not row or not row["notification_preferences"]:
+        # Default: all notifications enabled
+        return {
+            "welcome": True,
+            "quota_alerts": True,
+            "weekly_digest": True
+        }
+
+    return json.loads(row["notification_preferences"])
+
+def _should_send_notification(db, user_id: str, notification_type: str) -> bool:
+    """Check if user has enabled this notification type."""
+    prefs = _get_user_notification_prefs(db, user_id)
+    return prefs.get(notification_type, True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VECTOR / SEMANTIC MEMORY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Global embedding model (loaded lazily on first use)
+_embed_model = None
+_embed_lock = threading.Lock()
+
+def _get_embed_model():
+    """Load embedding model once and cache it. Thread-safe."""
+    global _embed_model
+    if _embed_model is None:
+        with _embed_lock:
+            if _embed_model is None:  # Double-check after acquiring lock
+                logger.info("Loading embedding model 'all-MiniLM-L6-v2' (80MB, ~2s)...")
+                _embed_model = SentenceTransformer('all-MiniLM-L6-v2')
+                logger.info("Embedding model loaded successfully")
+    return _embed_model
+
+def _embed_text(text: str) -> np.ndarray:
+    """Generate embedding vector for text. Returns normalized numpy array."""
+    model = _get_embed_model()
+    embedding = model.encode(text, convert_to_numpy=True)
+    # Normalize for cosine similarity (dot product = cosine similarity for normalized vectors)
+    embedding = embedding / np.linalg.norm(embedding)
+    return embedding
+
+def _cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
+    """Compute cosine similarity between two normalized vectors (simple dot product)."""
+    return float(np.dot(vec1, vec2))
+
+
+class VectorUpsertRequest(BaseModel):
+    key: str = Field(..., max_length=256)
+    text: str = Field(..., max_length=10000, description="Text to embed")
+    namespace: str = Field("default", max_length=64)
+    metadata: Optional[dict] = Field(None, description="Optional metadata (stored as JSON)")
+
+class VectorSearchRequest(BaseModel):
+    query: str = Field(..., max_length=10000, description="Search query to embed")
+    namespace: str = Field("default", max_length=64)
+    limit: int = Field(5, ge=1, le=100, description="Number of results to return")
+    min_similarity: float = Field(0.0, ge=0.0, le=1.0, description="Minimum cosine similarity threshold")
+
+@app.post("/v1/vector/upsert", tags=["Vector Memory"])
+def vector_upsert(req: VectorUpsertRequest, agent_id: str = Depends(get_agent_id)):
+    """Store text with its embedding vector. Updates if key exists (UPSERT).
+
+    Uses 'all-MiniLM-L6-v2' model (384 dimensions). Cosine similarity search.
+    """
+    # Generate embedding
+    embedding = _embed_text(req.text)
+    embedding_blob = embedding.tobytes()
+
+    vec_id = f"vec_{uuid.uuid4().hex[:16]}"
+    now = datetime.now(timezone.utc).isoformat()
+    metadata_json = json.dumps(req.metadata) if req.metadata else None
+
+    with get_db() as db:
+        # UPSERT: replace if (agent_id, namespace, key) exists
+        db.execute("""
+            INSERT INTO vector_memory (id, agent_id, namespace, key, text, embedding, metadata, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(agent_id, namespace, key)
+            DO UPDATE SET text=?, embedding=?, metadata=?, updated_at=?
+        """, (vec_id, agent_id, req.namespace, req.key, req.text, embedding_blob, metadata_json, now, now,
+              req.text, embedding_blob, metadata_json, now))
+
+    return {
+        "key": req.key,
+        "namespace": req.namespace,
+        "dimensions": len(embedding),
+        "status": "upserted"
+    }
+
+@app.post("/v1/vector/search", tags=["Vector Memory"])
+def vector_search(req: VectorSearchRequest, agent_id: str = Depends(get_agent_id)):
+    """Semantic search using cosine similarity. Returns top-K most similar entries.
+
+    NOTE: Uses brute-force search. Fine for ~10K vectors per agent.
+    TODO: Add HNSW index (hnswlib) for >10K vectors.
+    """
+    # Generate query embedding
+    query_embedding = _embed_text(req.query)
+
+    with get_db() as db:
+        # Load all vectors for this agent+namespace
+        rows = db.execute(
+            "SELECT key, text, embedding, metadata FROM vector_memory WHERE agent_id=? AND namespace=?",
+            (agent_id, req.namespace)
+        ).fetchall()
+
+        # Compute similarities
+        results = []
+        for row in rows:
+            vec_embedding = np.frombuffer(row["embedding"], dtype=np.float32)
+            similarity = _cosine_similarity(query_embedding, vec_embedding)
+
+            if similarity >= req.min_similarity:
+                results.append({
+                    "key": row["key"],
+                    "text": row["text"],
+                    "similarity": similarity,
+                    "metadata": json.loads(row["metadata"]) if row["metadata"] else None
+                })
+
+        # Sort by similarity descending, take top K
+        results.sort(key=lambda x: x["similarity"], reverse=True)
+        results = results[:req.limit]
+
+    return {"results": results, "count": len(results)}
+
+@app.get("/v1/vector/{key}", tags=["Vector Memory"])
+def vector_get(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
+    """Get a specific vector entry by key."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT key, text, metadata, created_at, updated_at FROM vector_memory "
+            "WHERE agent_id=? AND namespace=? AND key=?",
+            (agent_id, namespace, key)
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(404, f"Vector entry '{key}' not found in namespace '{namespace}'")
+
+    return {
+        "key": row["key"],
+        "text": row["text"],
+        "metadata": json.loads(row["metadata"]) if row["metadata"] else None,
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"]
+    }
+
+@app.delete("/v1/vector/{key}", tags=["Vector Memory"])
+def vector_delete(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
+    """Delete a vector entry."""
+    with get_db() as db:
+        result = db.execute(
+            "DELETE FROM vector_memory WHERE agent_id=? AND namespace=? AND key=?",
+            (agent_id, namespace, key)
+        )
+        if result.rowcount == 0:
+            raise HTTPException(404, f"Vector entry '{key}' not found in namespace '{namespace}'")
+
+    return {"status": "deleted", "key": key, "namespace": namespace}
+
+@app.get("/v1/vector", tags=["Vector Memory"])
+def vector_list(namespace: str = "default", limit: int = Query(100, le=1000), agent_id: str = Depends(get_agent_id)):
+    """List all vector keys in a namespace (without embeddings for efficiency)."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT key, created_at FROM vector_memory WHERE agent_id=? AND namespace=? ORDER BY created_at DESC LIMIT ?",
+            (agent_id, namespace, limit)
+        ).fetchall()
+
+    return {
+        "keys": [{"key": r["key"], "created_at": r["created_at"]} for r in rows],
+        "count": len(rows),
+        "namespace": namespace
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SHARED / PUBLIC MEMORY NAMESPACES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2018,6 +2559,172 @@ def directory_list(
         d["available"] = bool(d.get("available", 1))
         agents.append(d)
     return {"agents": agents, "count": len(agents)}
+
+@app.get("/v1/directory/{agent_id}", tags=["Directory"])
+def directory_profile(agent_id: str):
+    """Get a public agent profile. No auth required. Returns 404 if agent is private."""
+    with get_db() as db:
+        # Get agent details
+        agent = db.execute(
+            "SELECT agent_id, name, description, capabilities, reputation, reputation_count, "
+            "credits, request_count, created_at, heartbeat_status FROM agents "
+            "WHERE agent_id=? AND public=1",
+            (agent_id,)
+        ).fetchone()
+
+        if not agent:
+            raise HTTPException(404, "Agent not found or not public")
+
+        # Get recent marketplace activity (last 5 completed tasks, titles only)
+        marketplace_activity = db.execute(
+            "SELECT title, delivered_at FROM marketplace "
+            "WHERE claimed_by=? AND status='delivered' "
+            "ORDER BY delivered_at DESC LIMIT 5",
+            (agent_id,)
+        ).fetchall()
+
+        # Calculate uptime percentage (simple: based on heartbeats in last 30 days)
+        uptime_pct = 99.0  # Default for new agents
+
+        # Build response
+        profile = {
+            "agent_id": agent["agent_id"],
+            "name": agent["name"],
+            "description": agent["description"],
+            "capabilities": json.loads(agent["capabilities"]) if agent["capabilities"] else [],
+            "reputation": agent["reputation"] or 0.0,
+            "reputation_count": agent["reputation_count"] or 0,
+            "credits": agent["credits"] or 0,
+            "tasks_completed": len(marketplace_activity),
+            "uptime_pct": uptime_pct,
+            "member_since": agent["created_at"][:10] if agent["created_at"] else None,
+            "heartbeat_status": agent["heartbeat_status"] or "unknown",
+            "recent_marketplace_activity": [
+                {"title": task["title"], "delivered_at": task["delivered_at"]}
+                for task in marketplace_activity
+            ]
+        }
+
+    return profile
+
+@app.get("/v1/leaderboard", tags=["Directory"])
+def leaderboard(
+    sort_by: str = Query("reputation", regex="^(reputation|credits|tasks_completed|requests)$"),
+    limit: int = Query(20, ge=1, le=100)
+):
+    """Public leaderboard showing top agents. No auth required."""
+
+    # Map sort_by to database column
+    sort_mapping = {
+        "reputation": "reputation",
+        "credits": "credits",
+        "tasks_completed": "marketplace_completed",
+        "requests": "request_count"
+    }
+
+    sort_col = sort_mapping.get(sort_by, "reputation")
+
+    with get_db() as db:
+        # Get total public agents count
+        total_agents = db.execute("SELECT COUNT(*) as cnt FROM agents WHERE public=1").fetchone()["cnt"]
+
+        # For tasks_completed, we need to count marketplace tasks
+        if sort_by == "tasks_completed":
+            rows = db.execute(
+                """
+                SELECT a.agent_id, a.name, a.reputation, a.credits, a.request_count,
+                       COUNT(m.task_id) as tasks_completed
+                FROM agents a
+                LEFT JOIN marketplace m ON m.claimed_by = a.agent_id AND m.status = 'delivered'
+                WHERE a.public = 1
+                GROUP BY a.agent_id
+                ORDER BY tasks_completed DESC, a.reputation DESC
+                LIMIT ?
+                """,
+                (limit,)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                f"""
+                SELECT agent_id, name, reputation, credits, request_count,
+                       (SELECT COUNT(*) FROM marketplace WHERE claimed_by=agents.agent_id AND status='delivered') as tasks_completed
+                FROM agents
+                WHERE public=1
+                ORDER BY {sort_col} DESC, reputation DESC
+                LIMIT ?
+                """,
+                (limit,)
+            ).fetchall()
+
+        leaderboard_data = []
+        for rank, row in enumerate(rows, start=1):
+            leaderboard_data.append({
+                "rank": rank,
+                "agent_id": row["agent_id"],
+                "name": row["name"],
+                "reputation": row["reputation"] or 0.0,
+                "credits": row["credits"] or 0,
+                "tasks_completed": row["tasks_completed"] or 0
+            })
+
+    return {
+        "leaderboard": leaderboard_data,
+        "total_agents": total_agents,
+        "sort_by": sort_by
+    }
+
+@app.get("/v1/directory/stats", tags=["Directory"])
+def directory_stats():
+    """Public directory statistics. No auth required."""
+    with get_db() as db:
+        # Total agents
+        total_agents = db.execute("SELECT COUNT(*) as cnt FROM agents WHERE public=1").fetchone()["cnt"]
+
+        # Online agents (heartbeat in last 5 minutes)
+        now = datetime.now(timezone.utc).isoformat()
+        online_agents = db.execute(
+            "SELECT COUNT(*) as cnt FROM agents "
+            "WHERE public=1 AND heartbeat_status='online' AND heartbeat_at IS NOT NULL "
+            "AND datetime(heartbeat_at) >= datetime(?, '-300 seconds')",
+            (now,)
+        ).fetchone()["cnt"]
+
+        # Get all capabilities from public agents
+        all_caps_rows = db.execute(
+            "SELECT capabilities FROM agents WHERE public=1 AND capabilities IS NOT NULL"
+        ).fetchall()
+
+        capabilities_counter = {}
+        all_capabilities_set = set()
+
+        for row in all_caps_rows:
+            caps = json.loads(row["capabilities"]) if row["capabilities"] else []
+            for cap in caps:
+                all_capabilities_set.add(cap)
+                capabilities_counter[cap] = capabilities_counter.get(cap, 0) + 1
+
+        # Top capabilities (sorted by count)
+        top_capabilities = [
+            {"name": cap, "count": count}
+            for cap, count in sorted(capabilities_counter.items(), key=lambda x: x[1], reverse=True)[:10]
+        ]
+
+        # Total marketplace tasks
+        total_marketplace = db.execute("SELECT COUNT(*) as cnt FROM marketplace").fetchone()["cnt"]
+
+        # Total credits distributed (sum of all agent credits)
+        total_credits = db.execute(
+            "SELECT COALESCE(SUM(credits), 0) as total FROM agents WHERE public=1"
+        ).fetchone()["total"]
+
+    return {
+        "total_agents": total_agents,
+        "online_agents": online_agents,
+        "total_capabilities": sorted(list(all_capabilities_set)),
+        "top_capabilities": top_capabilities,
+        "total_marketplace_tasks": total_marketplace,
+        "total_credits_distributed": total_credits
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

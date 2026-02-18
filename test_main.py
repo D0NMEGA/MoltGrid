@@ -605,6 +605,204 @@ class TestDirectory:
         r = client.get("/v1/directory")
         assert r.json()["count"] == 0
 
+    def test_public_agent_profile(self):
+        """Test GET /v1/directory/{agent_id} public profile endpoint."""
+        agent_id, _, h = register_agent("profile-bot")
+
+        # Update profile to make it public with description
+        client.put("/v1/directory/me", json={
+            "description": "I am a helpful bot",
+            "capabilities": ["nlp", "search"],
+            "public": True,
+        }, headers=h)
+
+        # Create some marketplace activity
+        from main import get_db
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO marketplace (task_id, creator_agent, title, status, claimed_by, delivered_at, created_at) "
+                "VALUES (?, ?, ?, 'delivered', ?, ?, ?)",
+                ("task_001", agent_id, "Test Task 1", agent_id, "2025-01-15T10:00:00Z", "2025-01-15T09:00:00Z")
+            )
+            db.execute(
+                "INSERT INTO marketplace (task_id, creator_agent, title, status, claimed_by, delivered_at, created_at) "
+                "VALUES (?, ?, ?, 'delivered', ?, ?, ?)",
+                ("task_002", agent_id, "Test Task 2", agent_id, "2025-01-16T10:00:00Z", "2025-01-16T09:00:00Z")
+            )
+
+        # Test public profile access (no auth required)
+        r = client.get(f"/v1/directory/{agent_id}")
+        assert r.status_code == 200
+        data = r.json()
+
+        assert data["agent_id"] == agent_id
+        assert data["name"] == "profile-bot"
+        assert data["description"] == "I am a helpful bot"
+        assert data["capabilities"] == ["nlp", "search"]
+        assert data["reputation"] == 0.0
+        assert data["credits"] == 200  # Default credits
+        assert data["tasks_completed"] == 2
+        assert "member_since" in data
+        assert len(data["recent_marketplace_activity"]) == 2
+
+    def test_private_agent_profile_404(self):
+        """Test that private agents return 404."""
+        agent_id, _, h = register_agent("private-bot")
+
+        # Keep agent private (default is public=1, but let's make it private)
+        client.put("/v1/directory/me", json={"public": False}, headers=h)
+
+        # Should return 404
+        r = client.get(f"/v1/directory/{agent_id}")
+        assert r.status_code == 404
+
+    def test_nonexistent_agent_profile_404(self):
+        """Test that non-existent agents return 404."""
+        r = client.get("/v1/directory/agent_nonexistent")
+        assert r.status_code == 404
+
+    def test_leaderboard_default(self):
+        """Test GET /v1/leaderboard with default sorting (reputation)."""
+        # Register multiple agents with different stats
+        id1, _, h1 = register_agent("bot1")
+        id2, _, h2 = register_agent("bot2")
+        id3, _, h3 = register_agent("bot3")
+
+        # Make all public and set different reputations
+        client.put("/v1/directory/me", json={"public": True}, headers=h1)
+        client.put("/v1/directory/me", json={"public": True}, headers=h2)
+        client.put("/v1/directory/me", json={"public": True}, headers=h3)
+
+        # Update reputations directly
+        from main import get_db
+        with get_db() as db:
+            db.execute("UPDATE agents SET reputation=? WHERE agent_id=?", (5.0, id1))
+            db.execute("UPDATE agents SET reputation=? WHERE agent_id=?", (3.5, id2))
+            db.execute("UPDATE agents SET reputation=? WHERE agent_id=?", (4.2, id3))
+            db.execute("UPDATE agents SET credits=? WHERE agent_id=?", (500, id1))
+            db.execute("UPDATE agents SET credits=? WHERE agent_id=?", (1000, id2))
+
+        # Test leaderboard (no auth required)
+        r = client.get("/v1/leaderboard")
+        assert r.status_code == 200
+        data = r.json()
+
+        assert data["total_agents"] == 3
+        assert data["sort_by"] == "reputation"
+        assert len(data["leaderboard"]) == 3
+
+        # Check order (highest reputation first)
+        assert data["leaderboard"][0]["rank"] == 1
+        assert data["leaderboard"][0]["agent_id"] == id1
+        assert data["leaderboard"][0]["reputation"] == 5.0
+
+        assert data["leaderboard"][1]["rank"] == 2
+        assert data["leaderboard"][1]["agent_id"] == id3
+        assert data["leaderboard"][1]["reputation"] == 4.2
+
+    def test_leaderboard_sort_by_credits(self):
+        """Test leaderboard sorting by credits."""
+        id1, _, h1 = register_agent("rich-bot")
+        id2, _, h2 = register_agent("poor-bot")
+
+        client.put("/v1/directory/me", json={"public": True}, headers=h1)
+        client.put("/v1/directory/me", json={"public": True}, headers=h2)
+
+        from main import get_db
+        with get_db() as db:
+            db.execute("UPDATE agents SET credits=? WHERE agent_id=?", (10000, id1))
+            db.execute("UPDATE agents SET credits=? WHERE agent_id=?", (100, id2))
+
+        r = client.get("/v1/leaderboard?sort_by=credits")
+        assert r.status_code == 200
+        data = r.json()
+
+        assert data["sort_by"] == "credits"
+        assert data["leaderboard"][0]["agent_id"] == id1
+        assert data["leaderboard"][0]["credits"] == 10000
+
+    def test_leaderboard_limit(self):
+        """Test leaderboard limit parameter."""
+        # Register 5 agents
+        for i in range(5):
+            _, _, h = register_agent(f"bot{i}")
+            client.put("/v1/directory/me", json={"public": True}, headers=h)
+
+        r = client.get("/v1/leaderboard?limit=3")
+        assert r.status_code == 200
+        assert len(r.json()["leaderboard"]) == 3
+
+    def test_leaderboard_only_public_agents(self):
+        """Test that leaderboard only shows public agents."""
+        id1, _, h1 = register_agent("public")
+        id2, _, h2 = register_agent("private")
+
+        client.put("/v1/directory/me", json={"public": True}, headers=h1)
+        client.put("/v1/directory/me", json={"public": False}, headers=h2)
+
+        r = client.get("/v1/leaderboard")
+        assert r.status_code == 200
+        data = r.json()
+
+        assert data["total_agents"] == 1
+        assert len(data["leaderboard"]) == 1
+        assert data["leaderboard"][0]["agent_id"] == id1
+
+    def test_directory_stats(self):
+        """Test GET /v1/directory/stats endpoint."""
+        # Register multiple agents with capabilities
+        id1, _, h1 = register_agent("bot1")
+        id2, _, h2 = register_agent("bot2")
+        id3, _, h3 = register_agent("bot3")
+
+        client.put("/v1/directory/me", json={
+            "public": True,
+            "capabilities": ["nlp", "search"]
+        }, headers=h1)
+
+        client.put("/v1/directory/me", json={
+            "public": True,
+            "capabilities": ["nlp", "translation"]
+        }, headers=h2)
+
+        client.put("/v1/directory/me", json={
+            "public": False,  # Private agent
+            "capabilities": ["coding"]
+        }, headers=h3)
+
+        # Send heartbeat to mark one as online
+        client.post("/v1/agents/heartbeat", json={"status": "online"}, headers=h1)
+
+        # Add marketplace tasks
+        from main import get_db
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO marketplace (task_id, creator_agent, title, status, created_at) "
+                "VALUES (?, ?, ?, 'open', ?)",
+                ("task_001", id1, "Test Task", "2025-01-15T10:00:00Z")
+            )
+
+        # Test stats (no auth required)
+        r = client.get("/v1/directory/stats")
+        assert r.status_code == 200
+        data = r.json()
+
+        assert data["total_agents"] == 2  # Only public agents
+        assert data["online_agents"] == 1  # Only one sent heartbeat
+        assert "nlp" in data["total_capabilities"]
+        assert "search" in data["total_capabilities"]
+        assert "translation" in data["total_capabilities"]
+        assert "coding" not in data["total_capabilities"]  # Private agent
+
+        # Check top capabilities
+        assert len(data["top_capabilities"]) > 0
+        nlp_cap = next((c for c in data["top_capabilities"] if c["name"] == "nlp"), None)
+        assert nlp_cap is not None
+        assert nlp_cap["count"] == 2  # Both public agents have NLP
+
+        assert data["total_marketplace_tasks"] == 1
+        assert data["total_credits_distributed"] == 400  # 200 per public agent
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WEBSOCKET RELAY
@@ -1494,3 +1692,194 @@ class TestBilling:
         assert d["subscription_tier"] == "free"
         assert d["max_agents"] == 1
         assert d["max_api_calls"] == 10000
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VECTOR / SEMANTIC MEMORY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestVectorMemory:
+    def test_vector_upsert_and_search(self):
+        """Test storing docs and semantic search - most relevant should be first."""
+        _, _, h = register_agent("vector-bot")
+
+        # Store 3 documents about different topics
+        client.post("/v1/vector/upsert", json={
+            "key": "doc1",
+            "text": "Python is a programming language for data science and machine learning",
+        }, headers=h)
+
+        client.post("/v1/vector/upsert", json={
+            "key": "doc2",
+            "text": "Dogs are loyal pets that love to play fetch and go for walks",
+        }, headers=h)
+
+        client.post("/v1/vector/upsert", json={
+            "key": "doc3",
+            "text": "Machine learning models require training data and computational resources",
+        }, headers=h)
+
+        # Search for programming-related content
+        r = client.post("/v1/vector/search", json={
+            "query": "artificial intelligence and deep learning",
+            "limit": 3
+        }, headers=h)
+
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["results"]) == 3
+
+        # Most relevant should be doc3 or doc1 (ML-related), not doc2 (dogs)
+        top_result = data["results"][0]
+        assert top_result["key"] in ["doc3", "doc1"]
+        assert top_result["similarity"] > 0.3  # Should have decent similarity
+
+        # Verify doc2 (dogs) has lowest similarity
+        last_result = data["results"][-1]
+        assert last_result["key"] == "doc2"
+
+    def test_vector_namespaces(self):
+        """Test that different namespaces are isolated."""
+        _, _, h = register_agent("ns-bot")
+
+        # Store in different namespaces
+        client.post("/v1/vector/upsert", json={
+            "key": "shared_key",
+            "text": "Content in default namespace",
+            "namespace": "default"
+        }, headers=h)
+
+        client.post("/v1/vector/upsert", json={
+            "key": "shared_key",
+            "text": "Content in work namespace",
+            "namespace": "work"
+        }, headers=h)
+
+        # Search in default namespace
+        r1 = client.post("/v1/vector/search", json={
+            "query": "content",
+            "namespace": "default"
+        }, headers=h)
+        assert r1.json()["results"][0]["text"] == "Content in default namespace"
+
+        # Search in work namespace
+        r2 = client.post("/v1/vector/search", json={
+            "query": "content",
+            "namespace": "work"
+        }, headers=h)
+        assert r2.json()["results"][0]["text"] == "Content in work namespace"
+
+    def test_vector_delete(self):
+        """Test deleting vector entries."""
+        _, _, h = register_agent("del-bot")
+
+        # Create entry
+        client.post("/v1/vector/upsert", json={
+            "key": "temp",
+            "text": "Temporary content"
+        }, headers=h)
+
+        # Verify it exists
+        r = client.get("/v1/vector/temp", headers=h)
+        assert r.status_code == 200
+
+        # Delete it
+        d = client.delete("/v1/vector/temp", headers=h)
+        assert d.status_code == 200
+
+        # Verify it's gone
+        r2 = client.get("/v1/vector/temp", headers=h)
+        assert r2.status_code == 404
+
+    def test_vector_update(self):
+        """Test that upserting same key updates the embedding."""
+        _, _, h = register_agent("update-bot")
+
+        # Initial upsert
+        client.post("/v1/vector/upsert", json={
+            "key": "evolving",
+            "text": "Initial content about cats"
+        }, headers=h)
+
+        # Search for cats - should find it
+        r1 = client.post("/v1/vector/search", json={
+            "query": "feline animals",
+            "min_similarity": 0.2
+        }, headers=h)
+        assert len(r1.json()["results"]) == 1
+
+        # Update with completely different content
+        client.post("/v1/vector/upsert", json={
+            "key": "evolving",
+            "text": "Updated content about programming languages"
+        }, headers=h)
+
+        # Search for programming - should find the updated version
+        r2 = client.post("/v1/vector/search", json={
+            "query": "software development",
+            "min_similarity": 0.2
+        }, headers=h)
+        assert len(r2.json()["results"]) == 1
+        assert r2.json()["results"][0]["key"] == "evolving"
+        assert "programming" in r2.json()["results"][0]["text"]
+
+    def test_vector_list(self):
+        """Test listing vector keys."""
+        _, _, h = register_agent("list-bot")
+
+        # Create multiple entries
+        for i in range(5):
+            client.post("/v1/vector/upsert", json={
+                "key": f"item{i}",
+                "text": f"Content {i}"
+            }, headers=h)
+
+        # List all
+        r = client.get("/v1/vector", headers=h)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["count"] == 5
+        assert len(data["keys"]) == 5
+
+    def test_vector_metadata(self):
+        """Test storing and retrieving metadata."""
+        _, _, h = register_agent("meta-bot")
+
+        # Store with metadata
+        client.post("/v1/vector/upsert", json={
+            "key": "doc_with_meta",
+            "text": "Content with metadata",
+            "metadata": {"author": "Alice", "category": "tech", "rating": 5}
+        }, headers=h)
+
+        # Search and verify metadata is returned
+        r = client.post("/v1/vector/search", json={"query": "content"}, headers=h)
+        result = r.json()["results"][0]
+        assert result["metadata"]["author"] == "Alice"
+        assert result["metadata"]["rating"] == 5
+
+    def test_vector_min_similarity_filter(self):
+        """Test min_similarity threshold filtering."""
+        _, _, h = register_agent("sim-bot")
+
+        # Store unrelated documents
+        client.post("/v1/vector/upsert", json={
+            "key": "tech",
+            "text": "Machine learning and artificial intelligence"
+        }, headers=h)
+
+        client.post("/v1/vector/upsert", json={
+            "key": "food",
+            "text": "Pizza and pasta recipes from Italy"
+        }, headers=h)
+
+        # Search with high min_similarity - should filter out food
+        r = client.post("/v1/vector/search", json={
+            "query": "deep learning neural networks",
+            "min_similarity": 0.4
+        }, headers=h)
+
+        # Should only return tech doc (or none if threshold too high)
+        results = r.json()["results"]
+        if len(results) > 0:
+            assert results[0]["key"] == "tech"

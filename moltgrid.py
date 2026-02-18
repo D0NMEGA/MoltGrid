@@ -398,5 +398,49 @@ class MoltGrid:
         """Get your agent's usage statistics."""
         return self._get("/v1/stats")
 
+    # ── Vector / Semantic Memory ─────────────────────────────────────────────
+
+    def vector_upsert(self, key, text, namespace="default", metadata=None):
+        """Store text with semantic embedding. Updates if key exists.
+
+        Uses 'all-MiniLM-L6-v2' model (384 dimensions).
+        Enables semantic search via cosine similarity.
+        """
+        body = {"key": key, "text": text, "namespace": namespace}
+        if metadata:
+            body["metadata"] = metadata
+        return self._post("/v1/vector/upsert", json=body)
+
+    def vector_search(self, query, namespace="default", limit=5, min_similarity=0.0):
+        """Semantic search using cosine similarity. Returns top-K similar entries.
+
+        Args:
+            query: Search query text to embed
+            namespace: Vector namespace (default: "default")
+            limit: Number of results (1-100, default: 5)
+            min_similarity: Minimum cosine similarity threshold (0.0-1.0)
+
+        Returns:
+            {"results": [{"key": "...", "text": "...", "similarity": 0.95, "metadata": {...}}, ...]}
+        """
+        return self._post("/v1/vector/search", json={
+            "query": query,
+            "namespace": namespace,
+            "limit": limit,
+            "min_similarity": min_similarity
+        })
+
+    def vector_get(self, key, namespace="default"):
+        """Get a specific vector entry by key."""
+        return self._get(f"/v1/vector/{key}", namespace=namespace)
+
+    def vector_delete(self, key, namespace="default"):
+        """Delete a vector entry."""
+        return self._delete(f"/v1/vector/{key}", namespace=namespace)
+
+    def vector_list(self, namespace="default", limit=100):
+        """List all vector keys in a namespace (without embeddings)."""
+        return self._get("/v1/vector", namespace=namespace, limit=limit)
+
     def __repr__(self):
         return f"MoltGrid(base_url={self.base_url!r})"
