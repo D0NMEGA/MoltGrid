@@ -2250,3 +2250,126 @@ class TestResponseHeaders:
             "Access-Control-Request-Method": "GET",
         })
         assert "access-control-allow-origin" in r.headers
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PUB/SUB BROADCAST MESSAGING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPubSub:
+    def test_subscribe(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/pubsub/subscribe", json={"channel": "alerts"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["status"] == "subscribed"
+        assert r.json()["channel"] == "alerts"
+
+    def test_subscribe_idempotent(self):
+        _, _, h = register_agent()
+        client.post("/v1/pubsub/subscribe", json={"channel": "alerts"}, headers=h)
+        r = client.post("/v1/pubsub/subscribe", json={"channel": "alerts"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["status"] == "already_subscribed"
+
+    def test_unsubscribe(self):
+        _, _, h = register_agent()
+        client.post("/v1/pubsub/subscribe", json={"channel": "alerts"}, headers=h)
+        r = client.post("/v1/pubsub/unsubscribe", json={"channel": "alerts"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["status"] == "unsubscribed"
+
+    def test_unsubscribe_not_subscribed(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/pubsub/unsubscribe", json={"channel": "nope"}, headers=h)
+        assert r.status_code == 404
+
+    def test_list_subscriptions(self):
+        _, _, h = register_agent()
+        client.post("/v1/pubsub/subscribe", json={"channel": "ch1"}, headers=h)
+        client.post("/v1/pubsub/subscribe", json={"channel": "ch2"}, headers=h)
+        r = client.get("/v1/pubsub/subscriptions", headers=h)
+        assert r.status_code == 200
+        assert r.json()["count"] == 2
+        channels = [s["channel"] for s in r.json()["subscriptions"]]
+        assert "ch1" in channels
+        assert "ch2" in channels
+
+    def test_publish_delivers_to_subscribers(self):
+        _, _, h1 = register_agent()
+        _, _, h2 = register_agent()
+        # Both subscribe to same channel
+        client.post("/v1/pubsub/subscribe", json={"channel": "news"}, headers=h1)
+        client.post("/v1/pubsub/subscribe", json={"channel": "news"}, headers=h2)
+        # Agent 1 publishes
+        r = client.post("/v1/pubsub/publish", json={"channel": "news", "payload": "hello world"}, headers=h1)
+        assert r.status_code == 200
+        assert r.json()["subscribers_notified"] == 1  # excludes publisher
+        assert r.json()["channel"] == "news"
+
+    def test_publish_excludes_publisher(self):
+        _, _, h = register_agent()
+        client.post("/v1/pubsub/subscribe", json={"channel": "solo"}, headers=h)
+        r = client.post("/v1/pubsub/publish", json={"channel": "solo", "payload": "echo"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["subscribers_notified"] == 0
+
+    def test_publish_creates_relay_messages(self):
+        _, _, h1 = register_agent()
+        _, _, h2 = register_agent()
+        _, _, h3 = register_agent()
+        client.post("/v1/pubsub/subscribe", json={"channel": "updates"}, headers=h1)
+        client.post("/v1/pubsub/subscribe", json={"channel": "updates"}, headers=h2)
+        client.post("/v1/pubsub/subscribe", json={"channel": "updates"}, headers=h3)
+        # Agent 1 publishes
+        client.post("/v1/pubsub/publish", json={"channel": "updates", "payload": "data"}, headers=h1)
+        # Agent 2 should see the message in relay inbox
+        inbox = client.get("/v1/relay/inbox", params={"channel": "pubsub:updates"}, headers=h2)
+        assert inbox.status_code == 200
+        assert inbox.json()["count"] == 1
+        assert inbox.json()["messages"][0]["payload"] == "data"
+
+    def test_list_channels(self):
+        _, _, h1 = register_agent()
+        _, _, h2 = register_agent()
+        client.post("/v1/pubsub/subscribe", json={"channel": "ch-a"}, headers=h1)
+        client.post("/v1/pubsub/subscribe", json={"channel": "ch-a"}, headers=h2)
+        client.post("/v1/pubsub/subscribe", json={"channel": "ch-b"}, headers=h1)
+        r = client.get("/v1/pubsub/channels", headers=h1)
+        assert r.status_code == 200
+        assert r.json()["count"] == 2
+        ch_names = [c["channel"] for c in r.json()["channels"]]
+        assert "ch-a" in ch_names
+        assert "ch-b" in ch_names
+        # ch-a should have 2 subscribers and be first (ordered by count desc)
+        assert r.json()["channels"][0]["channel"] == "ch-a"
+        assert r.json()["channels"][0]["subscriber_count"] == 2
+
+    def test_publish_fires_webhooks(self):
+        from main import _run_webhook_delivery_tick
+        _, _, h1 = register_agent()
+        _, _, h2 = register_agent()
+        # Agent 2 registers a webhook for message.broadcast
+        client.post("/v1/webhooks", json={
+            "url": "https://example.com/hook",
+            "event_types": ["message.broadcast"],
+        }, headers=h2)
+        # Both subscribe
+        client.post("/v1/pubsub/subscribe", json={"channel": "wh-test"}, headers=h1)
+        client.post("/v1/pubsub/subscribe", json={"channel": "wh-test"}, headers=h2)
+        # Agent 1 publishes
+        r = client.post("/v1/pubsub/publish", json={"channel": "wh-test", "payload": "test"}, headers=h1)
+        assert r.json()["subscribers_notified"] == 1
+        # Verify webhook delivery was queued
+        with __import__("contextlib").closing(__import__("sqlite3").connect(DB_PATH)) as conn:
+            conn.row_factory = __import__("sqlite3").Row
+            row = conn.execute(
+                "SELECT * FROM webhook_deliveries WHERE event_type='message.broadcast'"
+            ).fetchone()
+            assert row is not None
+            assert row["status"] == "pending"
+
+    def test_publish_empty_channel(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/pubsub/publish", json={"channel": "empty", "payload": "hello"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["subscribers_notified"] == 0

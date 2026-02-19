@@ -483,5 +483,27 @@ class MoltGrid:
         """Delete a session."""
         return self._delete(f"/v1/sessions/{session_id}")
 
+    # ── Pub/Sub ────────────────────────────────────────────────────────────────
+
+    def pubsub_subscribe(self, channel):
+        """Subscribe to a broadcast channel."""
+        return self._post("/v1/pubsub/subscribe", json={"channel": channel})
+
+    def pubsub_unsubscribe(self, channel):
+        """Unsubscribe from a broadcast channel."""
+        return self._post("/v1/pubsub/unsubscribe", json={"channel": channel})
+
+    def pubsub_publish(self, channel, payload):
+        """Publish a message to all subscribers of a channel."""
+        return self._post("/v1/pubsub/publish", json={"channel": channel, "payload": payload})
+
+    def pubsub_subscriptions(self):
+        """List all channels this agent is subscribed to."""
+        return self._get("/v1/pubsub/subscriptions")
+
+    def pubsub_channels(self):
+        """List all active pub/sub channels with subscriber counts."""
+        return self._get("/v1/pubsub/channels")
+
     def __repr__(self):
         return f"MoltGrid(base_url={self.base_url!r})"

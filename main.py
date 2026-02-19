@@ -443,6 +443,16 @@ def init_db():
             FOREIGN KEY (webhook_id) REFERENCES webhooks(webhook_id)
         );
         CREATE INDEX IF NOT EXISTS idx_webhook_del_status ON webhook_deliveries(status, next_retry_at);
+
+        CREATE TABLE IF NOT EXISTS pubsub_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            subscribed_at TEXT NOT NULL,
+            UNIQUE(agent_id, channel),
+            FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pubsub_channel ON pubsub_subscriptions(channel);
     """)
 
     # Migrate existing agents table — add columns that older versions didn't have
@@ -1894,7 +1904,7 @@ def text_process(req: TextProcessRequest, agent_id: str = Depends(get_agent_id))
 # WEBHOOK CALLBACKS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-WEBHOOK_EVENT_TYPES = {"message.received", "job.completed", "job.failed", "marketplace.task.claimed", "marketplace.task.delivered", "marketplace.task.completed"}
+WEBHOOK_EVENT_TYPES = {"message.received", "message.broadcast", "job.completed", "job.failed", "marketplace.task.claimed", "marketplace.task.delivered", "marketplace.task.completed"}
 WEBHOOK_TIMEOUT = 5.0  # seconds
 
 class WebhookRegisterRequest(BaseModel):
@@ -3416,6 +3426,122 @@ def scenario_results(scenario_id: str, agent_id: str = Depends(get_agent_id)):
     d["success_criteria"] = json.loads(d["success_criteria"]) if d["success_criteria"] else None
     d["results"] = json.loads(_decrypt(d["results"])) if d["results"] else None
     return d
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PUB/SUB BROADCAST MESSAGING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PubSubSubscribeRequest(BaseModel):
+    channel: str = Field(..., min_length=1, max_length=128, description="Channel name to subscribe to")
+
+class PubSubPublishRequest(BaseModel):
+    channel: str = Field(..., min_length=1, max_length=128, description="Channel to publish to")
+    payload: str = Field(..., max_length=50_000, description="Message payload")
+
+@app.post("/v1/pubsub/subscribe", tags=["Pub/Sub"])
+def pubsub_subscribe(req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
+    """Subscribe to a broadcast channel."""
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        existing = db.execute(
+            "SELECT id FROM pubsub_subscriptions WHERE agent_id=? AND channel=?",
+            (agent_id, req.channel)
+        ).fetchone()
+        if existing:
+            return {"channel": req.channel, "status": "already_subscribed"}
+        db.execute(
+            "INSERT INTO pubsub_subscriptions (agent_id, channel, subscribed_at) VALUES (?,?,?)",
+            (agent_id, req.channel, now)
+        )
+    return {"channel": req.channel, "status": "subscribed", "subscribed_at": now}
+
+@app.post("/v1/pubsub/unsubscribe", tags=["Pub/Sub"])
+def pubsub_unsubscribe(req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
+    """Unsubscribe from a broadcast channel."""
+    with get_db() as db:
+        r = db.execute(
+            "DELETE FROM pubsub_subscriptions WHERE agent_id=? AND channel=?",
+            (agent_id, req.channel)
+        )
+        if r.rowcount == 0:
+            raise HTTPException(404, "Not subscribed to this channel")
+    return {"channel": req.channel, "status": "unsubscribed"}
+
+@app.get("/v1/pubsub/subscriptions", tags=["Pub/Sub"])
+def pubsub_list_subscriptions(agent_id: str = Depends(get_agent_id)):
+    """List all channels this agent is subscribed to."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT channel, subscribed_at FROM pubsub_subscriptions WHERE agent_id=? ORDER BY subscribed_at",
+            (agent_id,)
+        ).fetchall()
+    return {"subscriptions": [dict(r) for r in rows], "count": len(rows)}
+
+@app.post("/v1/pubsub/publish", tags=["Pub/Sub"])
+async def pubsub_publish(req: PubSubPublishRequest, agent_id: str = Depends(get_agent_id)):
+    """Publish a message to all subscribers of a channel."""
+    now = datetime.now(timezone.utc).isoformat()
+    message_id = f"ps_{uuid.uuid4().hex[:12]}"
+
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT agent_id FROM pubsub_subscriptions WHERE channel=?",
+            (req.channel,)
+        ).fetchall()
+    subscriber_ids = [r["agent_id"] for r in rows]
+
+    # Store a relay message for each subscriber (except the publisher)
+    recipients = [sid for sid in subscriber_ids if sid != agent_id]
+    with get_db() as db:
+        for sid in recipients:
+            db.execute(
+                "INSERT INTO relay (message_id, from_agent, to_agent, channel, payload, created_at) VALUES (?,?,?,?,?,?)",
+                (f"{message_id}_{sid[:8]}", agent_id, sid, f"pubsub:{req.channel}", _encrypt(req.payload), now)
+            )
+
+    # Push to WebSocket connections for each subscriber
+    broadcast_data = {
+        "event": "message.broadcast", "message_id": message_id,
+        "from_agent": agent_id, "channel": req.channel,
+        "payload": req.payload, "created_at": now,
+    }
+    async def _ws_broadcast():
+        for sid in recipients:
+            if sid in _ws_connections:
+                dead = set()
+                for peer in _ws_connections[sid]:
+                    try:
+                        await peer.send_json(broadcast_data)
+                    except Exception:
+                        dead.add(peer)
+                _ws_connections[sid] -= dead
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_ws_broadcast())
+    except RuntimeError:
+        pass
+
+    # Fire webhook notifications for each subscriber
+    for sid in recipients:
+        _fire_webhooks(sid, "message.broadcast", {
+            "message_id": message_id, "from_agent": agent_id,
+            "channel": req.channel, "payload": req.payload,
+        })
+
+    return {
+        "message_id": message_id, "channel": req.channel,
+        "subscribers_notified": len(recipients), "created_at": now,
+    }
+
+@app.get("/v1/pubsub/channels", tags=["Pub/Sub"])
+def pubsub_list_channels(agent_id: str = Depends(get_agent_id)):
+    """List all active pub/sub channels with subscriber counts."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT channel, COUNT(*) as subscriber_count FROM pubsub_subscriptions GROUP BY channel ORDER BY subscriber_count DESC"
+        ).fetchall()
+    return {"channels": [dict(r) for r in rows], "count": len(rows)}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
