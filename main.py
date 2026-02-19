@@ -1101,16 +1101,16 @@ def _get_or_create_stripe_customer(db, user_id: str, email: str) -> str:
 def get_pricing():
     """Public pricing info. No auth required."""
     return {
-        "tiers": [
-            {"name": "free", "price": 0, "agents": 1, "api_calls": 10000,
-             "features": ["Memory", "Queue", "Messaging", "Scheduling"]},
-            {"name": "hobby", "price": 5, "agents": 10, "api_calls": 1000000,
-             "features": ["Everything in Free", "Dead-letter queue", "Webhooks", "Marketplace", "Priority support"]},
-            {"name": "team", "price": 25, "agents": 50, "api_calls": 10000000,
-             "features": ["Everything in Hobby", "Team workspaces", "SSO (coming soon)", "SLA guarantee"]},
-            {"name": "scale", "price": 99, "agents": 200, "api_calls": -1,
-             "features": ["Everything in Team", "Unlimited API calls", "Dedicated support", "Custom integrations"]},
-        ],
+        "tiers": {
+            "free": {"name": "free", "price": 0, "max_agents": 1, "max_api_calls": 10000,
+                     "features": ["Memory", "Queue", "Messaging", "Scheduling"]},
+            "hobby": {"name": "hobby", "price": 5, "max_agents": 10, "max_api_calls": 1000000,
+                      "features": ["Everything in Free", "Dead-letter queue", "Webhooks", "Marketplace", "Priority support"]},
+            "team": {"name": "team", "price": 25, "max_agents": 50, "max_api_calls": 10000000,
+                     "features": ["Everything in Hobby", "Team workspaces", "SSO (coming soon)", "SLA guarantee"]},
+            "scale": {"name": "scale", "price": 99, "max_agents": 200, "max_api_calls": 999999999,
+                      "features": ["Everything in Team", "Unlimited API calls", "Dedicated support", "Custom integrations"]},
+        },
         "currency": "usd",
         "billing_period": "monthly",
     }
@@ -3893,7 +3893,7 @@ def admin_analytics(_: bool = Depends(_verify_admin_session)):
         tier_counts = db.execute(
             "SELECT subscription_tier, COUNT(*) as c FROM users WHERE subscription_tier IS NOT NULL AND subscription_tier != 'free' GROUP BY subscription_tier"
         ).fetchall()
-        tier_prices = {"hobby": 19, "team": 79, "scale": 299}
+        tier_prices = {"hobby": 5, "team": 25, "scale": 99}
         revenue_mrr = sum(tier_prices.get(r["subscription_tier"], 0) * r["c"] for r in tier_counts)
 
         # Churn: subscriptions cancelled in last 30d

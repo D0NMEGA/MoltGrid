@@ -433,7 +433,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
       var maxAgents = user.max_agents || 1;
       var atLimit = agents.length >= maxAgents;
       if (atLimit) {
-        regArea.innerHTML = '<button class="btn btn-accent" id="upgrade-btn">Upgrade to add more agents \u2192</button>';
+        regArea.innerHTML = '<button class="btn btn-accent" id="upgrade-btn">Upgrade plan \u2192</button>';
         document.getElementById("upgrade-btn").onclick = function() { navigate("#/billing"); };
       } else {
         regArea.innerHTML = '<button class="btn btn-accent" id="register-btn">+ Register New Agent</button>';
@@ -801,14 +801,24 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
     }).catch(function() {});
 
     // Load pricing
+    var tierOrder = ["free", "hobby", "team", "scale"];
+    function isTierHigher(a, b) { return tierOrder.indexOf(a) > tierOrder.indexOf(b); }
+
+    function openStripePortal() {
+      api("POST", "/v1/billing/portal").then(function(data) {
+        if (data.portal_url) window.location.href = data.portal_url;
+      }).catch(function(err) {
+        window.alert("Portal error: " + (err.detail || "Stripe not configured"));
+      });
+    }
+
     api("GET", "/v1/pricing").then(function(data) {
       var tiers = data.tiers || {};
       var container = document.getElementById("tiers-container");
-      var order = ["free", "hobby", "team", "scale"];
       var tierColors = { free: "var(--text-dim)", hobby: "var(--blue)", team: "var(--purple)", scale: "var(--yellow)" };
       var html = '<div class="tiers-grid">';
 
-      order.forEach(function(t) {
+      tierOrder.forEach(function(t) {
         var info = tiers[t];
         if (!info) return;
         var isCurrent = t === tier;
@@ -820,15 +830,20 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
           '<div class="tier-card-price">' + priceStr + '</div>' +
           '<ul class="tier-card-features">' +
           '<li>' + info.max_agents + ' agents</li>' +
-          '<li>' + callsStr + ' API calls/month</li>' +
-          '</ul>';
+          '<li>' + callsStr + ' API calls/month</li>';
+        (info.features || []).forEach(function(f) { html += '<li>' + esc(f) + '</li>'; });
+        html += '</ul>';
 
         if (isCurrent) {
           html += '<button class="btn btn-ghost" disabled>Current plan</button>';
+        } else if (t === "free" && tier !== "free") {
+          html += '<button class="btn btn-ghost tier-portal-btn" style="color:var(--red);border-color:rgba(255,68,68,0.3)">Downgrade to Free</button>';
         } else if (t === "free") {
-          html += '<button class="btn btn-ghost" disabled>Free tier</button>';
-        } else {
+          html += '<button class="btn btn-ghost" disabled>Current plan</button>';
+        } else if (isTierHigher(t, tier)) {
           html += '<button class="btn btn-accent tier-checkout-btn" data-tier="' + t + '">Upgrade to ' + esc(t.charAt(0).toUpperCase() + t.slice(1)) + '</button>';
+        } else {
+          html += '<button class="btn btn-ghost tier-portal-btn">Switch to ' + esc(t.charAt(0).toUpperCase() + t.slice(1)) + '</button>';
         }
         html += '</div>';
       });
@@ -836,13 +851,15 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
       html += '</div>';
 
       if (tier !== "free") {
-        html += '<div style="text-align:center;margin-top:1rem">' +
-          '<button class="btn btn-ghost" id="manage-sub-btn">Manage Subscription</button></div>';
+        html += '<div style="text-align:center;margin-top:1.25rem;display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap">' +
+          '<button class="btn btn-ghost" id="manage-sub-btn">Manage Subscription</button>' +
+          '<button class="btn btn-ghost" id="cancel-sub-btn" style="color:var(--red);border-color:rgba(255,68,68,0.3)">Cancel Subscription</button>' +
+          '</div>';
       }
 
       container.innerHTML = html;
 
-      // Wire checkout buttons
+      // Wire checkout buttons (upgrade via Stripe Checkout)
       document.querySelectorAll(".tier-checkout-btn").forEach(function(btn) {
         btn.onclick = function() {
           var t2 = this.getAttribute("data-tier");
@@ -851,21 +868,29 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
         };
       });
 
-      var manageBtn = document.getElementById("manage-sub-btn");
-      if (manageBtn) {
-        manageBtn.onclick = function() {
-          manageBtn.disabled = true; manageBtn.textContent = "Opening\u2026";
-          api("POST", "/v1/billing/portal").then(function(data) {
-            if (data.portal_url) window.location.href = data.portal_url;
-          }).catch(function(err) {
-            window.alert("Portal error: " + (err.detail || "Stripe not configured"));
-            manageBtn.disabled = false; manageBtn.textContent = "Manage Subscription";
-          });
+      // Wire portal buttons (downgrade/switch via Stripe Portal)
+      document.querySelectorAll(".tier-portal-btn").forEach(function(btn) {
+        btn.onclick = function() {
+          this.disabled = true; this.textContent = "Opening\u2026";
+          openStripePortal();
         };
-      }
-    }).catch(function() {
+      });
+
+      var manageBtn = document.getElementById("manage-sub-btn");
+      if (manageBtn) manageBtn.onclick = function() {
+        manageBtn.disabled = true; manageBtn.textContent = "Opening\u2026";
+        openStripePortal();
+      };
+
+      var cancelBtn = document.getElementById("cancel-sub-btn");
+      if (cancelBtn) cancelBtn.onclick = function() {
+        if (!window.confirm("Are you sure you want to cancel your subscription?")) return;
+        cancelBtn.disabled = true; cancelBtn.textContent = "Opening\u2026";
+        openStripePortal();
+      };
+    }).catch(function(err) {
       document.getElementById("tiers-container").innerHTML =
-        '<div class="alert alert-error">Failed to load pricing plans.</div>';
+        '<div class="alert alert-error">Failed to load pricing plans: ' + esc(err.detail || 'Unknown error') + '</div>';
     });
   }
 
@@ -923,9 +948,8 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
   // ── Shared header renderer ──
   function renderHeader(tier) {
     return '<header>' +
-      '<a class="logo" id="logo-link">Molt<span>Grid</span></a>' +
+      '<a class="logo" id="logo-link"><img src="https://moltgrid.net/public/logo-full.png" alt="MoltGrid" style="height:28px;vertical-align:middle"></a>' +
       '<div class="header-right">' +
-      (tier === "free" ? '<a class="header-upgrade" id="header-upgrade-link">Upgrade</a>' : '') +
       '<span class="user-email">' + esc(user.email) + '</span>' +
       '<span class="tier-badge tier-' + esc(tier) + '">' + esc(tier) + '</span>' +
       '<button class="btn btn-ghost" id="billing-link" style="font-size:0.7rem">Billing</button>' +
@@ -938,8 +962,6 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
     document.getElementById("logout-btn").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); token = null; user = null; navigate("#/login"); };
     var billingLink = document.getElementById("billing-link");
     if (billingLink) billingLink.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
-    var upgradeLink = document.getElementById("header-upgrade-link");
-    if (upgradeLink) upgradeLink.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
   }
 
   // ── Register new agent ──
