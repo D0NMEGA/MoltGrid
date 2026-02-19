@@ -453,6 +453,16 @@ def init_db():
             FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
         );
         CREATE INDEX IF NOT EXISTS idx_pubsub_channel ON pubsub_subscriptions(channel);
+
+        CREATE TABLE IF NOT EXISTS analytics_events (
+            id TEXT PRIMARY KEY,
+            event_name TEXT NOT NULL,
+            user_id TEXT,
+            agent_id TEXT,
+            metadata TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event_name, created_at);
     """)
 
     # Migrate existing agents table — add columns that older versions didn't have
@@ -532,6 +542,24 @@ def hash_key(key: str) -> str:
 def generate_api_key() -> str:
     return f"af_{uuid.uuid4().hex}"
 
+def _track_event(event_name: str, user_id: str = None, agent_id: str = None, metadata: dict = None):
+    """Insert a lightweight analytics event. Non-blocking best-effort."""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO analytics_events (id, event_name, user_id, agent_id, metadata, created_at) VALUES (?,?,?,?,?,?)",
+            (f"evt_{uuid.uuid4().hex[:16]}", event_name, user_id, agent_id,
+             json.dumps(metadata) if metadata else None,
+             datetime.now(timezone.utc).isoformat())
+        )
+        conn.commit()
+    except Exception:
+        pass  # Never let analytics break the app
+    finally:
+        if conn:
+            conn.close()
+
 def _check_usage_quota(db, agent_id: str):
     """Check if the agent's owner is within their monthly API call quota."""
     row = db.execute("SELECT owner_id FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
@@ -552,6 +580,7 @@ def _check_usage_quota(db, agent_id: str):
 
         # Send 80% warning (only once)
         if 80 <= usage_pct < 81:
+            _track_event("quota.warning_80pct", user_id=owner["user_id"], metadata={"tier": tier, "usage_pct": round(usage_pct, 1)})
             warning_html = f"""
             <html>
             <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -585,6 +614,7 @@ def _check_usage_quota(db, agent_id: str):
             </html>
             """
             _queue_email(owner["email"], "API limit reached — your agents may be affected", exceeded_html)
+        _track_event("quota.exceeded", user_id=owner["user_id"], metadata={"tier": tier, "limit": limit})
         raise HTTPException(429, f"Monthly API call quota exceeded for '{tier}' tier ({limit:,} calls)")
 
     db.execute("UPDATE users SET usage_count = usage_count + 1 WHERE user_id = ?", (owner["user_id"],))
@@ -726,6 +756,7 @@ def auth_signup(req: SignupRequest):
             _queue_email(req.email.lower(), "Welcome to MoltGrid — your agent infrastructure is ready", welcome_html)
 
     token = _create_token(user_id, req.email.lower())
+    _track_event("user.signup", user_id=user_id)
     return {"user_id": user_id, "token": token, "message": "Account created"}
 
 @app.post("/v1/auth/login", tags=["Auth"])
@@ -737,6 +768,7 @@ def auth_login(req: LoginRequest):
         now = datetime.now(timezone.utc).isoformat()
         db.execute("UPDATE users SET last_login = ? WHERE user_id = ?", (now, row["user_id"]))
     token = _create_token(row["user_id"], req.email.lower())
+    _track_event("user.login", user_id=row["user_id"])
     return {"user_id": row["user_id"], "token": token}
 
 @app.get("/v1/auth/me", tags=["Auth"])
@@ -1111,6 +1143,7 @@ def billing_checkout(req: CheckoutRequest, user_id: str = Depends(get_user_id)):
         cancel_url="https://moltgrid.net/billing/cancel",
         metadata={"moltgrid_user_id": user_id, "tier": req.tier},
     )
+    _track_event("billing.checkout_started", user_id=user_id, metadata={"tier": req.tier})
     return {"checkout_url": session.url}
 
 @app.post("/v1/billing/portal", tags=["Billing"])
@@ -1168,6 +1201,7 @@ async def stripe_webhook(request: Request):
             if user_id:
                 _apply_tier(db, user_id, tier)
                 db.execute("UPDATE users SET stripe_subscription_id = ? WHERE user_id = ?", (sub_id, user_id))
+                _track_event("billing.subscription_activated", user_id=user_id, metadata={"tier": tier})
 
         elif event_type == "customer.subscription.updated":
             cust_id = data_obj.get("customer")
@@ -1185,6 +1219,7 @@ async def stripe_webhook(request: Request):
             if user:
                 _apply_tier(db, user["user_id"], "free")
                 db.execute("UPDATE users SET stripe_subscription_id = NULL WHERE user_id = ?", (user["user_id"],))
+                _track_event("billing.subscription_cancelled", user_id=user["user_id"])
 
         elif event_type == "invoice.payment_failed":
             cust_id = data_obj.get("customer")
@@ -1321,6 +1356,7 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
                 (msg_id, WELCOME_AGENT_ID, agent_id, "welcome", _encrypt(WELCOME_MESSAGE), now)
             )
 
+    _track_event("agent.registered", agent_id=agent_id)
     return RegisterResponse(
         agent_id=agent_id,
         api_key=api_key,
@@ -1430,6 +1466,7 @@ def _check_onboarding_progress(db, agent_id: str) -> dict:
             "UPDATE agents SET credits = credits + 100, onboarding_completed = 1 WHERE agent_id = ?",
             (agent_id,)
         )
+        _track_event("onboarding.completed", agent_id=agent_id)
 
     return {
         "steps": steps,
@@ -1503,6 +1540,7 @@ def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
 
     enc_value = _encrypt(req.value)
     with get_db() as db:
+        is_first = db.execute("SELECT COUNT(*) as c FROM memory WHERE agent_id=?", (agent_id,)).fetchone()["c"] == 0
         db.execute("""
             INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at, expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1511,6 +1549,8 @@ def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
         """, (agent_id, req.namespace, req.key, enc_value, now.isoformat(), now.isoformat(), expires,
               enc_value, now.isoformat(), expires))
 
+    if is_first:
+        _track_event("agent.first_memory", agent_id=agent_id)
     return {"status": "stored", "key": req.key, "namespace": req.namespace}
 
 @app.get("/v1/memory/{key}", response_model=MemoryGetResponse, tags=["Memory"])
@@ -1590,10 +1630,13 @@ def queue_submit(req: QueueSubmitRequest, agent_id: str = Depends(get_agent_id))
     payload_str = json.dumps(req.payload) if isinstance(req.payload, dict) else req.payload
 
     with get_db() as db:
+        is_first = db.execute("SELECT COUNT(*) as c FROM queue WHERE agent_id=?", (agent_id,)).fetchone()["c"] == 0
         db.execute(
             "INSERT INTO queue (job_id, agent_id, queue_name, payload, priority, created_at, max_attempts, retry_delay_seconds) VALUES (?,?,?,?,?,?,?,?)",
             (job_id, agent_id, req.queue_name, _encrypt(payload_str), req.priority, now, req.max_attempts, req.retry_delay_seconds)
         )
+    if is_first:
+        _track_event("agent.first_job", agent_id=agent_id)
     return {"job_id": job_id, "status": "pending", "queue_name": req.queue_name, "max_attempts": req.max_attempts}
 
 @app.get("/v1/queue/dead_letter", tags=["Queue"])
@@ -1788,10 +1831,14 @@ def relay_send(msg: RelayMessage, agent_id: str = Depends(get_agent_id)):
         recip = db.execute("SELECT agent_id FROM agents WHERE agent_id=?", (msg.to_agent,)).fetchone()
         if not recip:
             raise HTTPException(404, "Recipient agent not found")
+        is_first_msg = db.execute("SELECT COUNT(*) as c FROM relay WHERE from_agent=?", (agent_id,)).fetchone()["c"] == 0
         db.execute(
             "INSERT INTO relay (message_id, from_agent, to_agent, channel, payload, created_at) VALUES (?,?,?,?,?,?)",
             (message_id, agent_id, msg.to_agent, msg.channel, _encrypt(msg.payload), now)
         )
+
+    if is_first_msg:
+        _track_event("agent.first_message", agent_id=agent_id)
 
     # Push to WebSocket connections
     async def _ws_push():
@@ -3811,6 +3858,60 @@ def admin_webhook_deliveries(
         ).fetchone()["c"]
 
     return {"deliveries": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+
+@app.get("/admin/api/analytics", tags=["Admin"])
+def admin_analytics(_: bool = Depends(_verify_admin_session)):
+    """Analytics dashboard: funnel metrics, signups, conversions, churn, MRR."""
+    now = datetime.now(timezone.utc)
+    t_24h = (now - timedelta(hours=24)).isoformat()
+    t_7d = (now - timedelta(days=7)).isoformat()
+    t_30d = (now - timedelta(days=30)).isoformat()
+
+    with get_db() as db:
+        # Signup counts
+        signups_24h = db.execute("SELECT COUNT(*) as c FROM analytics_events WHERE event_name='user.signup' AND created_at>=?", (t_24h,)).fetchone()["c"]
+        signups_7d = db.execute("SELECT COUNT(*) as c FROM analytics_events WHERE event_name='user.signup' AND created_at>=?", (t_7d,)).fetchone()["c"]
+        signups_30d = db.execute("SELECT COUNT(*) as c FROM analytics_events WHERE event_name='user.signup' AND created_at>=?", (t_30d,)).fetchone()["c"]
+
+        # Active users (any event in 24h)
+        active_24h = db.execute("SELECT COUNT(DISTINCT user_id) as c FROM analytics_events WHERE user_id IS NOT NULL AND created_at>=?", (t_24h,)).fetchone()["c"]
+
+        # Conversion funnel
+        total_signups = db.execute("SELECT COUNT(DISTINCT user_id) as c FROM analytics_events WHERE event_name='user.signup'").fetchone()["c"]
+        users_with_agent = db.execute("SELECT COUNT(DISTINCT agent_id) as c FROM agents WHERE owner_id IS NOT NULL").fetchone()["c"]
+        # Active = agents that have done at least one of: memory, message, or job
+        active_agents = db.execute(
+            "SELECT COUNT(DISTINCT agent_id) as c FROM analytics_events WHERE event_name IN ('agent.first_memory','agent.first_message','agent.first_job')"
+        ).fetchone()["c"]
+        paid_users = db.execute("SELECT COUNT(*) as c FROM users WHERE subscription_tier IS NOT NULL AND subscription_tier != 'free'").fetchone()["c"]
+
+        signup_to_agent = round(users_with_agent / total_signups, 2) if total_signups > 0 else 0
+        agent_to_active = round(active_agents / users_with_agent, 2) if users_with_agent > 0 else 0
+        active_to_paid = round(paid_users / active_agents, 2) if active_agents > 0 else 0
+
+        # MRR estimate: count paid users per tier
+        tier_counts = db.execute(
+            "SELECT subscription_tier, COUNT(*) as c FROM users WHERE subscription_tier IS NOT NULL AND subscription_tier != 'free' GROUP BY subscription_tier"
+        ).fetchall()
+        tier_prices = {"hobby": 19, "team": 79, "scale": 299}
+        revenue_mrr = sum(tier_prices.get(r["subscription_tier"], 0) * r["c"] for r in tier_counts)
+
+        # Churn: subscriptions cancelled in last 30d
+        churn_30d = db.execute("SELECT COUNT(*) as c FROM analytics_events WHERE event_name='billing.subscription_cancelled' AND created_at>=?", (t_30d,)).fetchone()["c"]
+
+    return {
+        "signups_24h": signups_24h,
+        "signups_7d": signups_7d,
+        "signups_30d": signups_30d,
+        "active_users_24h": active_24h,
+        "conversion_rate": {
+            "signup_to_agent": signup_to_agent,
+            "agent_to_active": agent_to_active,
+            "active_to_paid": active_to_paid,
+        },
+        "revenue_mrr": revenue_mrr,
+        "churn_30d": churn_30d,
+    }
 
 @app.get("/admin/api/memory", tags=["Admin"])
 def admin_memory(

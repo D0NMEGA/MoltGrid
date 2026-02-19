@@ -157,7 +157,7 @@ async function loadTab(tab, silent) {
   currentTab = tab;
   if (tab === 'overview') { render(); return; }
   if (!silent) render();
-  const map = { messages:'/admin/api/messages', memory:'/admin/api/memory', queue:'/admin/api/queue', webhooks:'/admin/api/webhooks', schedules:'/admin/api/schedules', shared:'/admin/api/shared-memory', sla:'/admin/api/sla', marketplace:'/admin/api/marketplace', collaborations:'/admin/api/collaborations', scenarios:'/admin/api/scenarios', contact:'/admin/api/contact' };
+  const map = { messages:'/admin/api/messages', memory:'/admin/api/memory', queue:'/admin/api/queue', webhooks:'/admin/api/webhooks', schedules:'/admin/api/schedules', shared:'/admin/api/shared-memory', sla:'/admin/api/sla', marketplace:'/admin/api/marketplace', collaborations:'/admin/api/collaborations', scenarios:'/admin/api/scenarios', contact:'/admin/api/contact', analytics:'/admin/api/analytics' };
   let url = map[tab] + `?limit=100&offset=${pageOffsets[tab]||0}`;
   if (S.filterAgent) url += `&agent_id=${S.filterAgent}`;
   if (tab==='queue' && S.filterStatus) url += `&status=${S.filterStatus}`;
@@ -227,13 +227,13 @@ function render() {
     ['shared','Shared Memory',s.shared_memory_keys],
     ['marketplace','Marketplace',s.marketplace_open],['collaborations','Collabs',s.collaborations],
     ['scenarios','Scenarios',s.test_scenarios],['contact','Contact',s.contact_submissions||0],
-    ['sla','SLA']
+    ['sla','SLA'],['analytics','Analytics']
   ];
   h += '<div class="tabs">';
   for (const [id,label,cnt] of tabs) h += `<button class="tab ${currentTab===id?'active':''}" onclick="loadTab('${id}')">${label}${cnt!==undefined?`<span class="tab-count">${cnt}</span>`:''}</button>`;
   h += '</div>';
 
-  const renderers = { overview:renderOverview, messages:renderMessages, memory:renderMemory, queue:renderQueue, webhooks:renderWebhooks, schedules:renderSchedules, shared:renderShared, sla:renderSLA, marketplace:renderMarketplace, collaborations:renderCollaborations, scenarios:renderScenarios, contact:renderContact };
+  const renderers = { overview:renderOverview, messages:renderMessages, memory:renderMemory, queue:renderQueue, webhooks:renderWebhooks, schedules:renderSchedules, shared:renderShared, sla:renderSLA, marketplace:renderMarketplace, collaborations:renderCollaborations, scenarios:renderScenarios, contact:renderContact, analytics:renderAnalytics };
   h += (renderers[currentTab] || renderOverview)(S.dashboard);
   h += '<div class="refresh-info">Auto-refresh every <span>15s</span></div>';
   document.getElementById('dashboard').innerHTML = h;
@@ -481,6 +481,29 @@ function renderSLA() {
     for (const c of data.recent_checks.slice(0,20)) { h += `<tr><td class="mono" style="color:var(--text-dim)">${ago(c.checked_at)}</td><td>${c.status==='up'?'<span class="badge badge-green">UP</span>':'<span class="badge badge-red">DOWN</span>'}</td><td class="mono">${c.response_ms.toFixed(1)}ms</td></tr>`; }
     h += '</tbody></table></div></div>';
   }
+  return h;
+}
+
+function renderAnalytics() {
+  const data = S.analytics;
+  if(!data) return '<div class="loading"><div class="spinner"></div>Loading analytics...</div>';
+  let h = '<div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:2rem">';
+  h += sc('Signups (24h)', data.signups_24h, 'accent');
+  h += sc('Signups (7d)', data.signups_7d, 'blue');
+  h += sc('Signups (30d)', data.signups_30d);
+  h += sc('Active (24h)', data.active_users_24h, 'yellow');
+  h += '</div>';
+  h += '<div style="margin-bottom:2rem"><div class="detail-label" style="margin-bottom:0.75rem">CONVERSION FUNNEL</div>';
+  h += '<div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">';
+  const cr = data.conversion_rate;
+  h += `<div class="stat-card" style="text-align:center"><div class="stat-label">Signup \u2192 Agent</div><div class="stat-value" style="font-size:1.8rem;color:var(--accent)">${(cr.signup_to_agent*100).toFixed(1)}%</div></div>`;
+  h += `<div class="stat-card" style="text-align:center"><div class="stat-label">Agent \u2192 Active</div><div class="stat-value" style="font-size:1.8rem;color:var(--yellow)">${(cr.agent_to_active*100).toFixed(1)}%</div></div>`;
+  h += `<div class="stat-card" style="text-align:center"><div class="stat-label">Active \u2192 Paid</div><div class="stat-value" style="font-size:1.8rem;color:var(--green)">${(cr.active_to_paid*100).toFixed(1)}%</div></div>`;
+  h += '</div></div>';
+  h += '<div class="stats-grid" style="grid-template-columns:repeat(2,1fr)">';
+  h += `<div class="stat-card" style="text-align:center"><div class="stat-label">MRR</div><div class="stat-value" style="font-size:2rem;color:var(--accent)">$${data.revenue_mrr}</div></div>`;
+  h += `<div class="stat-card" style="text-align:center"><div class="stat-label">Churn (30d)</div><div class="stat-value" style="font-size:2rem;${data.churn_30d>0?'color:var(--red)':'color:var(--text-dim)'}">${data.churn_30d}</div></div>`;
+  h += '</div>';
   return h;
 }
 

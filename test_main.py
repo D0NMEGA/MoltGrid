@@ -2373,3 +2373,64 @@ class TestPubSub:
         r = client.post("/v1/pubsub/publish", json={"channel": "empty", "payload": "hello"}, headers=h)
         assert r.status_code == 200
         assert r.json()["subscribers_notified"] == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ANALYTICS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAnalytics:
+    def _query_analytics(self, sql, params=()):
+        """Helper to query analytics_events without leaking connections on Windows."""
+        import sqlite3, contextlib
+        with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(sql, params).fetchall()
+
+    def test_agent_registered_event_tracked(self):
+        """Registering an agent creates an analytics event."""
+        register_agent()
+        rows = self._query_analytics("SELECT * FROM analytics_events WHERE event_name='agent.registered'")
+        assert len(rows) >= 1
+        assert rows[0]["agent_id"] is not None
+
+    def test_first_memory_event(self):
+        """First memory set triggers agent.first_memory event."""
+        _, _, h = register_agent()
+        client.post("/v1/memory", json={"key": "k1", "value": "v1"}, headers=h)
+        rows = self._query_analytics("SELECT * FROM analytics_events WHERE event_name='agent.first_memory'")
+        assert len(rows) == 1
+
+    def test_first_memory_only_once(self):
+        """Second memory set does NOT create another first_memory event."""
+        _, _, h = register_agent()
+        client.post("/v1/memory", json={"key": "k1", "value": "v1"}, headers=h)
+        client.post("/v1/memory", json={"key": "k2", "value": "v2"}, headers=h)
+        rows = self._query_analytics("SELECT * FROM analytics_events WHERE event_name='agent.first_memory'")
+        assert len(rows) == 1
+
+    def test_first_message_event(self):
+        """First relay send triggers agent.first_message event."""
+        _, _, h1 = register_agent()
+        aid2, _, _ = register_agent()
+        client.post("/v1/relay/send", json={"to_agent": aid2, "payload": "hi"}, headers=h1)
+        rows = self._query_analytics("SELECT * FROM analytics_events WHERE event_name='agent.first_message'")
+        assert len(rows) == 1
+
+    def test_first_job_event(self):
+        """First queue submit triggers agent.first_job event."""
+        _, _, h = register_agent()
+        client.post("/v1/queue/submit", json={"payload": "task1"}, headers=h)
+        rows = self._query_analytics("SELECT * FROM analytics_events WHERE event_name='agent.first_job'")
+        assert len(rows) == 1
+
+    def test_admin_analytics_endpoint_requires_auth(self):
+        """GET /admin/api/analytics requires admin session."""
+        register_agent()
+        r = client.get("/admin/api/analytics")
+        assert r.status_code in (401, 403, 307)
+
+    def test_analytics_events_table_exists(self):
+        """The analytics_events table is created by init_db."""
+        rows = self._query_analytics("SELECT name FROM sqlite_master WHERE type='table' AND name='analytics_events'")
+        assert len(rows) == 1
