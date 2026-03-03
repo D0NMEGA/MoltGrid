@@ -2958,3 +2958,275 @@ class TestMemoryAuditLog:
         assert row["old_visibility"] == "private"
         assert row["new_visibility"] == "public"
         assert row["actor_agent_id"] == aid
+
+
+# =============================================================================
+# MEMORY DASHBOARD ENDPOINTS (MEM-09, MEM-10, MEM-11)
+# =============================================================================
+
+def _register_user_and_agent(email="dashuser@example.com", password="testpass123", agent_name="dash-agent"):
+    """Helper — sign up a user, return (user_id, token, agent_id, agent_api_key).
+
+    Used by TestMemoryDashboardEndpoints to set up JWT-authenticated user + owned agent.
+    _queue_email is mocked throughout to avoid sqlite lock contention from the background
+    email thread (which runs every 30s and competes with test DB writes in WAL mode).
+    """
+    with patch("main._queue_email", return_value=None):
+        r = client.post("/v1/auth/signup", json={
+            "email": email, "password": password, "display_name": "DashUser",
+        })
+        assert r.status_code == 200, f"signup failed: {r.text}"
+        d = r.json()
+        token = d["token"]
+        user_id = d["user_id"]
+        auth_h = {"Authorization": f"Bearer {token}"}
+        reg = client.post("/v1/register", json={"name": agent_name}, headers=auth_h)
+    assert reg.status_code == 200, f"register agent failed: {reg.text}"
+    agent_id = reg.json()["agent_id"]
+    api_key = reg.json()["api_key"]
+    return user_id, token, agent_id, api_key
+
+
+class TestMemoryDashboardEndpoints:
+    """
+    Verifies the five user-dashboard memory endpoints introduced in plan 01-03:
+
+    - GET  /v1/user/agents/{id}/memory-list         (visibility field per key)
+    - GET  /v1/user/agents/{id}/memory-entry        (single entry + shared_agents)
+    - GET  /v1/user/agents/{id}/memory-entry 404    (key not found)
+    - PATCH /v1/user/agents/{id}/memory-entry/visibility  (MEM-10)
+    - POST /v1/user/agents/{id}/memory-bulk-visibility    (MEM-11)
+    - GET  /v1/user/agents/{id}/memory-access-log         (audit log)
+    """
+
+    def _auth_header(self, token):
+        return {"Authorization": f"Bearer {token}"}
+
+    def _write_memory(self, agent_id, api_key, key, value="testvalue", namespace="default", visibility="private"):
+        """Write a memory entry via the agent API key endpoint."""
+        h = {"X-API-Key": api_key}
+        r = client.post("/v1/memory", json={
+            "key": key, "value": value, "namespace": namespace, "visibility": visibility,
+        }, headers=h)
+        assert r.status_code == 200, f"memory write failed for key={key}: {r.text}"
+
+    def test_memory_list_includes_visibility(self):
+        """GET memory-list returns each key with a visibility field (not missing/null)."""
+        _, token, agent_id, api_key = _register_user_and_agent(
+            email="memlist@example.com", agent_name="memlist-agent"
+        )
+        self._write_memory(agent_id, api_key, "k1", visibility="private")
+        self._write_memory(agent_id, api_key, "k2", visibility="public")
+
+        r = client.get(
+            f"/v1/user/agents/{agent_id}/memory-list",
+            headers=self._auth_header(token),
+        )
+        assert r.status_code == 200
+        d = r.json()
+        assert "keys" in d, "Response must contain 'keys' array"
+        keys = d["keys"]
+        assert len(keys) == 2, f"Expected 2 keys, got {len(keys)}"
+        for item in keys:
+            assert "visibility" in item, f"Missing 'visibility' in {item}"
+            assert item["visibility"] in ("private", "public", "shared"), \
+                f"Unexpected visibility value: {item['visibility']}"
+
+    def test_memory_entry_fetch(self):
+        """GET memory-entry returns key, namespace, value, visibility, shared_agents, updated_at."""
+        _, token, agent_id, api_key = _register_user_and_agent(
+            email="entry@example.com", agent_name="entry-agent"
+        )
+        self._write_memory(agent_id, api_key, "mykey", value="myvalue", visibility="public")
+
+        r = client.get(
+            f"/v1/user/agents/{agent_id}/memory-entry",
+            params={"namespace": "default", "key": "mykey"},
+            headers=self._auth_header(token),
+        )
+        assert r.status_code == 200
+        d = r.json()
+        assert d["key"] == "mykey"
+        assert d["namespace"] == "default"
+        assert d["value"] == "myvalue"
+        assert d["visibility"] == "public"
+        assert "shared_agents" in d
+        assert "updated_at" in d
+
+    def test_memory_entry_fetch_not_found(self):
+        """GET memory-entry returns 404 when key does not exist."""
+        _, token, agent_id, api_key = _register_user_and_agent(
+            email="notfound@example.com", agent_name="notfound-agent"
+        )
+
+        r = client.get(
+            f"/v1/user/agents/{agent_id}/memory-entry",
+            params={"namespace": "default", "key": "does-not-exist"},
+            headers=self._auth_header(token),
+        )
+        assert r.status_code == 404
+
+    def test_user_set_visibility(self):
+        """PATCH memory-entry/visibility returns 200 and persists the change (MEM-10)."""
+        _, token, agent_id, api_key = _register_user_and_agent(
+            email="setvis@example.com", agent_name="setvis-agent"
+        )
+        self._write_memory(agent_id, api_key, "vkey", visibility="private")
+
+        patch_r = client.patch(
+            f"/v1/user/agents/{agent_id}/memory-entry/visibility",
+            json={"namespace": "default", "key": "vkey", "visibility": "public", "shared_agents": []},
+            headers=self._auth_header(token),
+        )
+        assert patch_r.status_code == 200
+        d = patch_r.json()
+        assert d["visibility"] == "public"
+
+        # Verify persistence via GET memory-entry
+        get_r = client.get(
+            f"/v1/user/agents/{agent_id}/memory-entry",
+            params={"namespace": "default", "key": "vkey"},
+            headers=self._auth_header(token),
+        )
+        assert get_r.status_code == 200
+        assert get_r.json()["visibility"] == "public"
+
+    def test_user_set_visibility_403_wrong_user(self):
+        """PATCH memory-entry/visibility returns 403 when user does not own the agent."""
+        _, token_owner, agent_id, api_key = _register_user_and_agent(
+            email="owner403@example.com", agent_name="owner403-agent"
+        )
+        self._write_memory(agent_id, api_key, "protectedkey", visibility="private")
+
+        # Second user tries to change visibility of first user's memory
+        with patch("main._queue_email", return_value=None):
+            r2 = client.post("/v1/auth/signup", json={
+                "email": "attacker403@example.com", "password": "testpass123",
+                "display_name": "Attacker",
+            })
+        token_attacker = r2.json()["token"]
+
+        patch_r = client.patch(
+            f"/v1/user/agents/{agent_id}/memory-entry/visibility",
+            json={"namespace": "default", "key": "protectedkey", "visibility": "public", "shared_agents": []},
+            headers=self._auth_header(token_attacker),
+        )
+        assert patch_r.status_code == 403
+
+    def test_bulk_visibility_change(self):
+        """POST memory-bulk-visibility updates visibility for multiple keys and returns count (MEM-11)."""
+        _, token, agent_id, api_key = _register_user_and_agent(
+            email="bulk@example.com", agent_name="bulk-agent"
+        )
+        self._write_memory(agent_id, api_key, "bk1", visibility="private")
+        self._write_memory(agent_id, api_key, "bk2", visibility="private")
+
+        r = client.post(
+            f"/v1/user/agents/{agent_id}/memory-bulk-visibility",
+            json={
+                "entries": [
+                    {"namespace": "default", "key": "bk1"},
+                    {"namespace": "default", "key": "bk2"},
+                ],
+                "visibility": "public",
+                "shared_agents": [],
+            },
+            headers=self._auth_header(token),
+        )
+        assert r.status_code == 200
+        d = r.json()
+        assert d["count"] == 2, f"Expected count=2, got {d}"
+
+        # Verify both keys are now public
+        for k in ("bk1", "bk2"):
+            get_r = client.get(
+                f"/v1/user/agents/{agent_id}/memory-entry",
+                params={"namespace": "default", "key": k},
+                headers=self._auth_header(token),
+            )
+            assert get_r.json()["visibility"] == "public", f"Key {k} should be public"
+
+    def test_bulk_visibility_caps_at_200(self):
+        """POST memory-bulk-visibility processes at most 200 entries (req.entries[:200])."""
+        _, token, agent_id, api_key = _register_user_and_agent(
+            email="bulkcap@example.com", agent_name="bulkcap-agent"
+        )
+        # Write 5 real keys; send 250 entries (most non-existent, confirming no crash)
+        for i in range(5):
+            self._write_memory(agent_id, api_key, f"capkey{i}", visibility="private")
+
+        entries = [{"namespace": "default", "key": f"capkey{i}"} for i in range(5)]
+        entries += [{"namespace": "default", "key": f"ghost{i}"} for i in range(245)]
+
+        r = client.post(
+            f"/v1/user/agents/{agent_id}/memory-bulk-visibility",
+            json={"entries": entries, "visibility": "public", "shared_agents": []},
+            headers=self._auth_header(token),
+        )
+        assert r.status_code == 200
+        # At most 200 entries processed — 5 real ones updated
+        assert r.json()["count"] == 5
+
+    def test_bulk_visibility_logs_each_change(self):
+        """POST memory-bulk-visibility logs each visibility change to memory_access_log."""
+        import sqlite3
+        from main import DB_PATH
+        _, token, agent_id, api_key = _register_user_and_agent(
+            email="bulklog@example.com", agent_name="bulklog-agent"
+        )
+        self._write_memory(agent_id, api_key, "logk1", visibility="private")
+        self._write_memory(agent_id, api_key, "logk2", visibility="private")
+
+        client.post(
+            f"/v1/user/agents/{agent_id}/memory-bulk-visibility",
+            json={
+                "entries": [
+                    {"namespace": "default", "key": "logk1"},
+                    {"namespace": "default", "key": "logk2"},
+                ],
+                "visibility": "public",
+                "shared_agents": [],
+            },
+            headers=self._auth_header(token),
+        )
+
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM memory_access_log WHERE agent_id=? AND action='visibility_changed'",
+            (agent_id,),
+        ).fetchall()
+        conn.close()
+
+        # Each bulk change generates one audit row per key
+        assert len(rows) >= 2, f"Expected at least 2 audit log rows, got {len(rows)}"
+        for row in rows:
+            assert dict(row)["actor_user_id"] is not None, "actor_user_id must be set"
+
+    def test_memory_access_log_endpoint(self):
+        """GET memory-access-log returns paginated audit log entries, newest first."""
+        _, token, agent_id, api_key = _register_user_and_agent(
+            email="accesslog@example.com", agent_name="accesslog-agent"
+        )
+        self._write_memory(agent_id, api_key, "akey", visibility="private")
+        # Trigger a visibility change so there's a log entry
+        client.patch(
+            f"/v1/user/agents/{agent_id}/memory-entry/visibility",
+            json={"namespace": "default", "key": "akey", "visibility": "public", "shared_agents": []},
+            headers=self._auth_header(token),
+        )
+
+        r = client.get(
+            f"/v1/user/agents/{agent_id}/memory-access-log",
+            headers=self._auth_header(token),
+        )
+        assert r.status_code == 200
+        d = r.json()
+        assert "logs" in d, "Response must have 'logs' key"
+        assert "total" in d
+        assert isinstance(d["logs"], list)
+        assert len(d["logs"]) >= 1, "Expected at least one log entry"
+        # Newest first — check the last log entry is the visibility_changed action
+        log_actions = [e["action"] for e in d["logs"]]
+        assert "visibility_changed" in log_actions, \
+            f"Expected visibility_changed in logs, got: {log_actions}"
