@@ -1254,6 +1254,9 @@ def user_memory_bulk_visibility(
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
     updated = 0
+    # Collect log entries to emit OUTSIDE the get_db() context to avoid transaction interference
+    # (documented pattern: _log_memory_access uses its own sqlite3 connection)
+    log_entries = []
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
         for entry in req.entries[:200]:
@@ -1272,11 +1275,15 @@ def user_memory_bulk_visibility(
                 "WHERE agent_id=? AND namespace=? AND key=?",
                 (vis, sa_json, agent_id, ns, k)
             )
-            _log_memory_access("visibility_changed", agent_id, ns, k,
-                               actor_user_id=user_id,
-                               old_visibility=old["visibility"] or "private",
-                               new_visibility=vis)
+            log_entries.append((ns, k, old["visibility"] or "private"))
             updated += 1
+    # Emit audit log entries after DB context is closed (Rule: _log_memory_access must be
+    # called outside with get_db() block to avoid transaction interference)
+    for ns, k, old_vis in log_entries:
+        _log_memory_access("visibility_changed", agent_id, ns, k,
+                           actor_user_id=user_id,
+                           old_visibility=old_vis,
+                           new_visibility=vis)
     return {"status": "updated", "count": updated, "visibility": vis}
 
 
