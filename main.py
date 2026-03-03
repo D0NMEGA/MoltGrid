@@ -1999,21 +1999,22 @@ def memory_get_cross_agent(
         if not row:
             raise HTTPException(404, "Key not found")
         allowed = _check_memory_visibility(db, target_agent_id, namespace, key, agent_id)
-        _log_memory_access("read", target_agent_id, namespace, key,
-                           actor_agent_id=agent_id, authorized=1 if allowed else 0)
-        if not allowed:
-            raise HTTPException(403, "Access denied: memory entry is private or not shared with you")
-        d = dict(row)
-        d["value"] = _decrypt(d["value"])
-        d.pop("shared_agents", None)
-        return {
-            "key": d["key"],
-            "value": d["value"],
-            "namespace": d["namespace"],
-            "visibility": d.get("visibility") or "private",
-            "updated_at": d["updated_at"],
-            "expires_at": d.get("expires_at"),
-        }
+        d = dict(row) if allowed else None
+    # Fire-and-forget audit log OUTSIDE the with get_db() block (MEM-08)
+    _log_memory_access("cross_agent_read", target_agent_id, namespace, key,
+                       actor_agent_id=agent_id, authorized=1 if allowed else 0)
+    if not allowed:
+        raise HTTPException(403, "Access denied: memory entry is private or not shared with you")
+    d["value"] = _decrypt(d["value"])
+    d.pop("shared_agents", None)
+    return {
+        "key": d["key"],
+        "value": d["value"],
+        "namespace": d["namespace"],
+        "visibility": d.get("visibility") or "private",
+        "updated_at": d["updated_at"],
+        "expires_at": d.get("expires_at"),
+    }
 
 
 @app.patch("/v1/memory/{key}/visibility", tags=["Memory"])
@@ -2080,8 +2081,9 @@ def memory_get(key: str, namespace: str = "default", agent_id: str = Depends(get
             raise HTTPException(404, "Key not found or expired")
         d = dict(row)
         d["value"] = _decrypt(d["value"])
-        _log_memory_access("read", agent_id, namespace, key, actor_agent_id=agent_id)
-        return MemoryGetResponse(**d)
+    # Fire-and-forget audit log OUTSIDE the with get_db() block (MEM-08)
+    _log_memory_access("read", agent_id, namespace, key, actor_agent_id=agent_id)
+    return MemoryGetResponse(**d)
 
 @app.delete("/v1/memory/{key}", tags=["Memory"])
 def memory_delete(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
@@ -2093,6 +2095,7 @@ def memory_delete(key: str, namespace: str = "default", agent_id: str = Depends(
         )
         if r.rowcount == 0:
             raise HTTPException(404, "Key not found")
+    _log_memory_access("delete", agent_id, namespace, key, actor_agent_id=agent_id)
     return {"status": "deleted", "key": key}
 
 @app.get("/v1/memory", tags=["Memory"])
