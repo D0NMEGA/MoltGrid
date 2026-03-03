@@ -502,6 +502,36 @@ def init_db():
         if col not in q_existing:
             conn.execute(f"ALTER TABLE queue ADD COLUMN {col} {typedef}")
 
+    # Migrate memory table — add visibility / shared_agents
+    m_existing = {row[1] for row in conn.execute('PRAGMA table_info(memory)').fetchall()}
+    for col, typedef in [
+        ('visibility', "TEXT DEFAULT 'private'"),
+        ('shared_agents', 'TEXT'),
+    ]:
+        if col not in m_existing:
+            conn.execute(f'ALTER TABLE memory ADD COLUMN {col} {typedef}')
+    conn.execute("UPDATE memory SET visibility='private' WHERE visibility IS NULL")
+
+    # Create memory audit log table
+    conn.execute(
+        'CREATE TABLE IF NOT EXISTS memory_access_log ('
+        '    id             TEXT PRIMARY KEY,'
+        '    agent_id       TEXT NOT NULL,'
+        '    namespace      TEXT NOT NULL,'
+        '    key            TEXT NOT NULL,'
+        '    action         TEXT NOT NULL,'
+        '    actor_agent_id TEXT,'
+        '    actor_user_id  TEXT,'
+        '    old_visibility TEXT,'
+        '    new_visibility TEXT,'
+        '    authorized     INTEGER DEFAULT 1,'
+        '    created_at     TEXT NOT NULL'
+        ')'
+    )
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_mal_agent ON memory_access_log(agent_id, created_at)'
+    )
+
     conn.commit()
     conn.close()
 
@@ -841,6 +871,20 @@ def get_notification_preferences(user_id: str = Depends(get_user_id)):
     return {"preferences": prefs}
 
 
+# ─── Memory Visibility Pydantic Models (used by Dashboard + Agent endpoints) ──
+
+class MemoryVisibilityRequest(BaseModel):
+    namespace: str = Field("default", max_length=64)
+    key: str = Field(..., max_length=256)
+    visibility: str = Field(..., description="private | public | shared")
+    shared_agents: List[str] = Field(default_factory=list)
+
+class MemoryBulkVisibilityRequest(BaseModel):
+    entries: List[dict]
+    visibility: str = Field(..., description="private | public | shared")
+    shared_agents: List[str] = Field(default_factory=list)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # USER DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1073,6 +1117,362 @@ def user_delete_account(user_id: str = Depends(get_user_id)):
         # Unlink agents (they become unowned, still functional)
         db.execute("UPDATE agents SET owner_id = NULL WHERE owner_id = ?", (user_id,))
     return {"user_id": user_id, "message": "Account deactivated. Agents unlinked."}
+
+
+# ── Messages list ────────────────────────────────────────────────────────────
+@app.get("/v1/user/agents/{agent_id}/messages-list", tags=["User Dashboard"])
+def user_messages_list(
+    agent_id: str,
+    offset: int = 0, limit: int = 20,
+    direction: str = "all",   # all | sent | received
+    search: str = "",
+    user_id: str = Depends(get_user_id),
+):
+    limit = max(1, min(limit, 100)); offset = max(0, offset)
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        if direction == "sent":
+            cond = "from_agent = ?"
+            params = [agent_id]
+        elif direction == "received":
+            cond = "to_agent = ?"
+            params = [agent_id]
+        else:
+            cond = "(from_agent = ? OR to_agent = ?)"
+            params = [agent_id, agent_id]
+        total = db.execute(f"SELECT COUNT(*) as c FROM relay WHERE {cond}", params).fetchone()["c"]
+        rows = db.execute(
+            f"SELECT message_id, from_agent, to_agent, channel, created_at FROM relay "
+            f"WHERE {cond} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            for col, aid in [("from_name", d["from_agent"]), ("to_name", d["to_agent"])]:
+                a = db.execute("SELECT name FROM agents WHERE agent_id=?", (aid,)).fetchone()
+                d[col] = a["name"] if a and a["name"] else aid
+            result.append(d)
+    return {"messages": result, "total": total, "offset": offset, "limit": limit}
+
+
+# ── Memory list ───────────────────────────────────────────────────────────────
+@app.get("/v1/user/agents/{agent_id}/memory-list", tags=["User Dashboard"])
+def user_memory_list(
+    agent_id: str,
+    offset: int = 0, limit: int = 30,
+    namespace: str = "",
+    search: str = "",
+    visibility: str = "",
+    user_id: str = Depends(get_user_id),
+):
+    limit = max(1, min(limit, 100)); offset = max(0, offset)
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        cond = "agent_id = ?"
+        params = [agent_id]
+        if namespace:
+            cond += " AND namespace = ?"; params.append(namespace)
+        if search:
+            cond += " AND key LIKE ?"; params.append(f"%{search}%")
+        if visibility in ("private", "public", "shared"):
+            cond += " AND COALESCE(visibility,'private') = ?"; params.append(visibility)
+        total = db.execute(f"SELECT COUNT(*) as c FROM memory WHERE {cond}", params).fetchone()["c"]
+        rows = db.execute(
+            f"SELECT namespace, key, created_at, updated_at, expires_at, "
+            f"COALESCE(visibility,'private') as visibility, shared_agents FROM memory "
+            f"WHERE {cond} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+        ns_rows = db.execute(
+            "SELECT DISTINCT namespace FROM memory WHERE agent_id=? ORDER BY namespace", (agent_id,)
+        ).fetchall()
+    return {
+        "keys": [dict(r) for r in rows], "total": total, "offset": offset, "limit": limit,
+        "namespaces": [r["namespace"] for r in ns_rows],
+    }
+
+
+@app.get("/v1/user/agents/{agent_id}/memory-entry", tags=["User Dashboard"])
+def user_memory_get(
+    agent_id: str, namespace: str = "default", key: str = "",
+    user_id: str = Depends(get_user_id),
+):
+    """Fetch a single memory entry including its value and visibility metadata."""
+    if not key:
+        raise HTTPException(400, "key is required")
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        row = db.execute(
+            "SELECT namespace, key, value, created_at, updated_at, expires_at, "
+            "COALESCE(visibility,'private') as visibility, shared_agents "
+            "FROM memory WHERE agent_id=? AND namespace=? AND key=? "
+            "AND (expires_at IS NULL OR expires_at > ?)",
+            (agent_id, namespace, key, now)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Memory key not found or expired")
+    d = dict(row)
+    d["value"] = _decrypt(d["value"])
+    d["shared_agents"] = json.loads(d["shared_agents"] or "[]")
+    return d
+
+
+@app.patch("/v1/user/agents/{agent_id}/memory-entry/visibility", tags=["User Dashboard"])
+def user_memory_set_visibility(
+    agent_id: str, req: MemoryVisibilityRequest,
+    user_id: str = Depends(get_user_id),
+):
+    vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
+    sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        old = db.execute(
+            "SELECT visibility FROM memory WHERE agent_id=? AND namespace=? AND key=?",
+            (agent_id, req.namespace, req.key)
+        ).fetchone()
+        if not old:
+            raise HTTPException(404, "Memory key not found")
+        db.execute(
+            "UPDATE memory SET visibility=?, shared_agents=? "
+            "WHERE agent_id=? AND namespace=? AND key=?",
+            (vis, sa_json, agent_id, req.namespace, req.key)
+        )
+    _log_memory_access("visibility_changed", agent_id, req.namespace, req.key,
+                       actor_user_id=user_id,
+                       old_visibility=old["visibility"] or "private",
+                       new_visibility=vis)
+    return {"status": "updated", "key": req.key, "namespace": req.namespace, "visibility": vis}
+
+
+@app.post("/v1/user/agents/{agent_id}/memory-bulk-visibility", tags=["User Dashboard"])
+def user_memory_bulk_visibility(
+    agent_id: str, req: MemoryBulkVisibilityRequest,
+    user_id: str = Depends(get_user_id),
+):
+    vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
+    sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
+    updated = 0
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        for entry in req.entries[:200]:
+            ns = entry.get("namespace", "default")
+            k = entry.get("key", "")
+            if not k:
+                continue
+            old = db.execute(
+                "SELECT visibility FROM memory WHERE agent_id=? AND namespace=? AND key=?",
+                (agent_id, ns, k)
+            ).fetchone()
+            if not old:
+                continue
+            db.execute(
+                "UPDATE memory SET visibility=?, shared_agents=? "
+                "WHERE agent_id=? AND namespace=? AND key=?",
+                (vis, sa_json, agent_id, ns, k)
+            )
+            _log_memory_access("visibility_changed", agent_id, ns, k,
+                               actor_user_id=user_id,
+                               old_visibility=old["visibility"] or "private",
+                               new_visibility=vis)
+            updated += 1
+    return {"status": "updated", "count": updated, "visibility": vis}
+
+
+@app.get("/v1/user/agents/{agent_id}/memory-access-log", tags=["User Dashboard"])
+def user_memory_access_log(
+    agent_id: str,
+    namespace: str = "", key: str = "",
+    offset: int = 0, limit: int = 50,
+    user_id: str = Depends(get_user_id),
+):
+    limit = max(1, min(limit, 100)); offset = max(0, offset)
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        cond = "agent_id = ?"
+        params = [agent_id]
+        if namespace:
+            cond += " AND namespace = ?"; params.append(namespace)
+        if key:
+            cond += " AND key = ?"; params.append(key)
+        total = db.execute(f"SELECT COUNT(*) as c FROM memory_access_log WHERE {cond}", params).fetchone()["c"]
+        rows = db.execute(
+            f"SELECT id, namespace, key, action, actor_agent_id, actor_user_id, "
+            f"old_visibility, new_visibility, authorized, created_at "
+            f"FROM memory_access_log WHERE {cond} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset]
+        ).fetchall()
+    return {"logs": [dict(r) for r in rows], "total": total, "offset": offset}
+
+
+# ── Memory delete ─────────────────────────────────────────────────────────────
+@app.delete("/v1/user/agents/{agent_id}/memory-entry", tags=["User Dashboard"])
+def user_memory_delete(
+    agent_id: str, namespace: str = "default", key: str = "",
+    user_id: str = Depends(get_user_id),
+):
+    if not key: raise HTTPException(400, "key is required")
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        deleted = db.execute(
+            "DELETE FROM memory WHERE agent_id=? AND namespace=? AND key=?",
+            (agent_id, namespace, key),
+        ).rowcount
+    if not deleted: raise HTTPException(404, "Memory key not found")
+    _log_memory_access("delete", agent_id, namespace, key, actor_user_id=user_id)
+    return {"status": "deleted"}
+
+
+# ── Jobs list ─────────────────────────────────────────────────────────────────
+@app.get("/v1/user/agents/{agent_id}/jobs-list", tags=["User Dashboard"])
+def user_jobs_list(
+    agent_id: str,
+    offset: int = 0, limit: int = 20,
+    status: str = "all",
+    user_id: str = Depends(get_user_id),
+):
+    limit = max(1, min(limit, 100)); offset = max(0, offset)
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        cond = "agent_id = ?"
+        params = [agent_id]
+        if status != "all":
+            cond += " AND status = ?"; params.append(status)
+        total = db.execute(f"SELECT COUNT(*) as c FROM queue WHERE {cond}", params).fetchone()["c"]
+        rows = db.execute(
+            f"SELECT job_id, queue_name, status, priority, created_at, started_at, "
+            f"completed_at, failed_at, fail_reason, attempt_count, max_attempts "
+            f"FROM queue WHERE {cond} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+    return {"jobs": [dict(r) for r in rows], "total": total, "offset": offset, "limit": limit}
+
+
+# ── Schedules list ────────────────────────────────────────────────────────────
+@app.get("/v1/user/agents/{agent_id}/schedules", tags=["User Dashboard"])
+def user_schedules_list(agent_id: str, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        rows = db.execute(
+            "SELECT task_id, cron_expr, queue_name, priority, enabled, "
+            "last_run_at, next_run_at, run_count, created_at FROM scheduled_tasks "
+            "WHERE agent_id=? ORDER BY created_at DESC", (agent_id,)
+        ).fetchall()
+    return {"schedules": [dict(r) for r in rows]}
+
+
+class UserScheduleRequest(BaseModel):
+    cron_expr: str = Field(..., max_length=128)
+    queue_name: str = Field("default", max_length=64)
+    payload: str = Field("{}", max_length=100_000)
+    priority: int = Field(0, ge=0, le=10)
+
+
+@app.post("/v1/user/agents/{agent_id}/schedules", tags=["User Dashboard"])
+def user_schedule_create(agent_id: str, req: UserScheduleRequest, user_id: str = Depends(get_user_id)):
+    try:
+        cron = croniter(req.cron_expr, datetime.now(timezone.utc))
+        next_run = cron.get_next(datetime).isoformat()
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, f"Invalid cron expression: {e}")
+    task_id = f"task_{uuid.uuid4().hex[:16]}"
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        db.execute(
+            "INSERT INTO scheduled_tasks (task_id, agent_id, cron_expr, queue_name, payload, "
+            "priority, enabled, created_at, next_run_at, run_count) VALUES (?,?,?,?,?,?,1,?,?,0)",
+            (task_id, agent_id, req.cron_expr, req.queue_name, _encrypt(req.payload),
+             req.priority, now, next_run),
+        )
+    return {"task_id": task_id, "cron_expr": req.cron_expr, "next_run_at": next_run, "enabled": True}
+
+
+class UserScheduleUpdateRequest(BaseModel):
+    enabled: Optional[bool] = None
+    cron_expr: Optional[str] = Field(None, max_length=128)
+
+
+@app.patch("/v1/user/agents/{agent_id}/schedules/{task_id}", tags=["User Dashboard"])
+def user_schedule_update(
+    agent_id: str, task_id: str,
+    req: UserScheduleUpdateRequest,
+    user_id: str = Depends(get_user_id),
+):
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        row = db.execute(
+            "SELECT * FROM scheduled_tasks WHERE task_id=? AND agent_id=?", (task_id, agent_id)
+        ).fetchone()
+        if not row: raise HTTPException(404, "Schedule not found")
+        updates = []
+        params = []
+        if req.enabled is not None:
+            updates.append("enabled=?"); params.append(1 if req.enabled else 0)
+        if req.cron_expr is not None:
+            try:
+                cron = croniter(req.cron_expr, datetime.now(timezone.utc))
+                next_run = cron.get_next(datetime).isoformat()
+            except (ValueError, KeyError) as e:
+                raise HTTPException(400, f"Invalid cron: {e}")
+            updates.append("cron_expr=?"); params.append(req.cron_expr)
+            updates.append("next_run_at=?"); params.append(next_run)
+        if not updates: raise HTTPException(400, "Nothing to update")
+        db.execute(f"UPDATE scheduled_tasks SET {', '.join(updates)} WHERE task_id=?", params + [task_id])
+        row = db.execute("SELECT * FROM scheduled_tasks WHERE task_id=?", (task_id,)).fetchone()
+    return dict(row)
+
+
+@app.delete("/v1/user/agents/{agent_id}/schedules/{task_id}", tags=["User Dashboard"])
+def user_schedule_delete(agent_id: str, task_id: str, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        deleted = db.execute(
+            "DELETE FROM scheduled_tasks WHERE task_id=? AND agent_id=?", (task_id, agent_id)
+        ).rowcount
+    if not deleted: raise HTTPException(404, "Schedule not found")
+    return {"status": "deleted"}
+
+
+# ── Webhooks list / create / delete (user-level) ─────────────────────────────
+@app.get("/v1/user/agents/{agent_id}/webhooks", tags=["User Dashboard"])
+def user_webhooks_list(agent_id: str, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        rows = db.execute(
+            "SELECT webhook_id, url, event_types, active, created_at FROM webhooks "
+            "WHERE agent_id=? ORDER BY created_at DESC", (agent_id,)
+        ).fetchall()
+    return {"webhooks": [dict(r) for r in rows]}
+
+
+@app.post("/v1/user/agents/{agent_id}/webhooks", tags=["User Dashboard"])
+def user_webhook_create(agent_id: str, req: "WebhookRegisterRequest", user_id: str = Depends(get_user_id)):
+    for et in req.event_types:
+        if et not in WEBHOOK_EVENT_TYPES:
+            raise HTTPException(400, f"Invalid event type: {et}")
+    webhook_id = f"wh_{uuid.uuid4().hex[:16]}"
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        db.execute(
+            "INSERT INTO webhooks (webhook_id, agent_id, url, event_types, secret, created_at, active) "
+            "VALUES (?,?,?,?,?,?,1)",
+            (webhook_id, agent_id, req.url, json.dumps(req.event_types), req.secret, now),
+        )
+    return {"webhook_id": webhook_id, "url": req.url, "event_types": req.event_types, "active": True}
+
+
+@app.delete("/v1/user/agents/{agent_id}/webhooks/{webhook_id}", tags=["User Dashboard"])
+def user_webhook_delete(agent_id: str, webhook_id: str, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        deleted = db.execute(
+            "DELETE FROM webhooks WHERE webhook_id=? AND agent_id=?", (webhook_id, agent_id)
+        ).rowcount
+    if not deleted: raise HTTPException(404, "Webhook not found")
+    return {"status": "deleted"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1522,6 +1922,8 @@ class MemorySetRequest(BaseModel):
     value: str = Field(..., max_length=MAX_MEMORY_VALUE_SIZE)
     namespace: str = Field("default", max_length=64)
     ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000, description="Auto-expire after N seconds (60s–30d)")
+    visibility: str = Field("private", description="private | public | shared")
+    shared_agents: List[str] = Field(default_factory=list)
 
 class MemoryGetResponse(BaseModel):
     key: str
@@ -1529,6 +1931,115 @@ class MemoryGetResponse(BaseModel):
     namespace: str
     updated_at: str
     expires_at: Optional[str]
+
+def _log_memory_access(action, agent_id, namespace, key,
+                       actor_agent_id=None, actor_user_id=None,
+                       old_visibility=None, new_visibility=None, authorized=1):
+    """Fire-and-forget audit log — never raises, uses direct connection to avoid transaction interference."""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO memory_access_log "
+            "(id, agent_id, namespace, key, action, actor_agent_id, actor_user_id, "
+            " old_visibility, new_visibility, authorized, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (f"mal_{uuid.uuid4().hex[:16]}", agent_id, namespace, key, action,
+             actor_agent_id, actor_user_id, old_visibility, new_visibility, authorized,
+             datetime.now(timezone.utc).isoformat())
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        if conn:
+            conn.close()
+
+
+def _check_memory_visibility(db, target_agent_id: str, namespace: str, key: str, requester_agent_id: str) -> bool:
+    """Return True if requester_agent_id is allowed to read this memory entry."""
+    row = db.execute(
+        "SELECT visibility, shared_agents FROM memory WHERE agent_id=? AND namespace=? AND key=?",
+        (target_agent_id, namespace, key)
+    ).fetchone()
+    if not row:
+        return False
+    vis = row["visibility"] or "private"
+    if vis == "public":
+        return True
+    if vis == "shared":
+        sa = json.loads(row["shared_agents"] or "[]")
+        return requester_agent_id in sa
+    return False  # private or unknown
+
+
+# Memory system note (MEM-07):
+# /v1/memory (this section) = per-agent, private-by-default key-value store with visibility controls.
+#   Access: private (owner only), public (any authenticated agent), shared (explicit agent ID list).
+# /v1/shared-memory = a separate, deliberately public namespace system where any authenticated agent
+#   can publish and read entries. No access controls. Different use case — do NOT apply visibility
+#   controls to /v1/shared-memory.
+
+@app.get("/v1/agents/{target_agent_id}/memory/{key}", tags=["Memory"])
+def memory_get_cross_agent(
+    target_agent_id: str,
+    key: str,
+    namespace: str = "default",
+    agent_id: str = Depends(get_agent_id),
+):
+    """Read another agent's memory — only if visibility is public or shared with requester.
+    Returns 403 (not 404) for private/shared-without-access to prevent enumeration."""
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM memory WHERE agent_id=? AND namespace=? AND key=? "
+            "AND (expires_at IS NULL OR expires_at > ?)",
+            (target_agent_id, namespace, key, now)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Key not found")
+        allowed = _check_memory_visibility(db, target_agent_id, namespace, key, agent_id)
+        _log_memory_access("read", target_agent_id, namespace, key,
+                           actor_agent_id=agent_id, authorized=1 if allowed else 0)
+        if not allowed:
+            raise HTTPException(403, "Access denied: memory entry is private or not shared with you")
+        d = dict(row)
+        d["value"] = _decrypt(d["value"])
+        d.pop("shared_agents", None)
+        return {
+            "key": d["key"],
+            "value": d["value"],
+            "namespace": d["namespace"],
+            "visibility": d.get("visibility") or "private",
+            "updated_at": d["updated_at"],
+            "expires_at": d.get("expires_at"),
+        }
+
+
+@app.patch("/v1/memory/{key}/visibility", tags=["Memory"])
+def memory_set_visibility(key: str, req: MemoryVisibilityRequest,
+                           agent_id: str = Depends(get_agent_id)):
+    """Update the visibility of one of your own memory entries."""
+    vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
+    sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
+    with get_db() as db:
+        old = db.execute(
+            "SELECT visibility FROM memory WHERE agent_id=? AND namespace=? AND key=?",
+            (agent_id, req.namespace, key)
+        ).fetchone()
+        if not old:
+            raise HTTPException(404, "Key not found")
+        db.execute(
+            "UPDATE memory SET visibility=?, shared_agents=? "
+            "WHERE agent_id=? AND namespace=? AND key=?",
+            (vis, sa_json, agent_id, req.namespace, key)
+        )
+    _log_memory_access("visibility_changed", agent_id, req.namespace, key,
+                       actor_agent_id=agent_id,
+                       old_visibility=old["visibility"] or "private",
+                       new_visibility=vis)
+    return {"status": "updated", "key": key, "visibility": vis}
+
 
 @app.post("/v1/memory", tags=["Memory"])
 def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
@@ -1539,19 +2050,22 @@ def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
         expires = (now + timedelta(seconds=req.ttl_seconds)).isoformat()
 
     enc_value = _encrypt(req.value)
+    vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
+    sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
     with get_db() as db:
         is_first = db.execute("SELECT COUNT(*) as c FROM memory WHERE agent_id=?", (agent_id,)).fetchone()["c"] == 0
         db.execute("""
-            INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at, expires_at, visibility, shared_agents)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_id, namespace, key)
-            DO UPDATE SET value=?, updated_at=?, expires_at=?
-        """, (agent_id, req.namespace, req.key, enc_value, now.isoformat(), now.isoformat(), expires,
-              enc_value, now.isoformat(), expires))
+            DO UPDATE SET value=?, updated_at=?, expires_at=?, visibility=?, shared_agents=?
+        """, (agent_id, req.namespace, req.key, enc_value, now.isoformat(), now.isoformat(), expires, vis, sa_json,
+              enc_value, now.isoformat(), expires, vis, sa_json))
 
+    _log_memory_access("write", agent_id, req.namespace, req.key, actor_agent_id=agent_id)
     if is_first:
         _track_event("agent.first_memory", agent_id=agent_id)
-    return {"status": "stored", "key": req.key, "namespace": req.namespace}
+    return {"status": "stored", "key": req.key, "namespace": req.namespace, "visibility": vis}
 
 @app.get("/v1/memory/{key}", response_model=MemoryGetResponse, tags=["Memory"])
 def memory_get(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
@@ -1566,6 +2080,7 @@ def memory_get(key: str, namespace: str = "default", agent_id: str = Depends(get
             raise HTTPException(404, "Key not found or expired")
         d = dict(row)
         d["value"] = _decrypt(d["value"])
+        _log_memory_access("read", agent_id, namespace, key, actor_agent_id=agent_id)
         return MemoryGetResponse(**d)
 
 @app.delete("/v1/memory/{key}", tags=["Memory"])
