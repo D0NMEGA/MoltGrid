@@ -94,6 +94,48 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
 .detail-header h1 { font-size:1.5rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.15rem; }
 .detail-header .agent-id { font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--text-dim); cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
 .detail-header .agent-id:hover { color:var(--accent); }
+.edit-name-btn { background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:0.85rem; padding:2px 6px; border-radius:4px; vertical-align:middle; transition:color 0.15s,background 0.15s; margin-left:4px; line-height:1; }
+.edit-name-btn:hover { color:var(--accent); background:rgba(255,51,51,0.08); }
+.name-error { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--red); margin-top:6px; min-height:1em; }
+.activity-item.clickable { cursor:pointer; }
+.activity-item.clickable:hover { background:rgba(255,255,255,0.04); border-radius:6px; }
+.activity-filter-bar { display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; }
+.filter-btn { background:none; border:1px solid var(--border); color:var(--text-dim); cursor:pointer; font-size:0.75rem; padding:4px 10px; border-radius:20px; font-family:'JetBrains Mono',monospace; transition:all 0.15s; }
+.filter-btn:hover { border-color:var(--accent); color:var(--accent); }
+.filter-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(255,51,51,0.1); }
+.load-more-btn { width:100%; background:none; border:1px dashed var(--border); color:var(--text-dim); cursor:pointer; padding:8px; border-radius:6px; font-size:0.8rem; margin-top:0.5rem; transition:all 0.15s; }
+.load-more-btn:hover { border-color:var(--accent); color:var(--accent); }
+.detail-field { margin-bottom:0.75rem; }
+.detail-field label { display:block; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:3px; }
+.detail-value { font-family:'JetBrains Mono',monospace; font-size:0.8rem; color:var(--text); word-break:break-all; background:var(--bg); padding:6px 8px; border-radius:4px; border:1px solid var(--border); white-space:pre-wrap; max-height:200px; overflow:auto; }
+.status-pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.7rem; font-family:'JetBrains Mono',monospace; }
+.status-pill.completed { background:rgba(0,255,136,0.1); color:#00ff88; }
+.status-pill.failed { background:rgba(255,51,51,0.1); color:var(--accent); }
+.status-pill.pending { background:rgba(255,255,0,0.1); color:#ffff00; }
+.status-pill.running { background:rgba(100,200,255,0.1); color:#64c8ff; }
+.detail-row { display:flex; gap:1rem; }
+.detail-row .detail-field { flex:1; }
+.agent-picker { position:relative; user-select:none; }
+.agent-picker-input { background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:6px; padding:8px 10px; color:var(--text); cursor:pointer; font-size:0.85rem; display:flex; align-items:center; gap:6px; min-height:38px; }
+.agent-picker-input:focus, .agent-picker-input.open { border-color:var(--accent); outline:none; }
+.agent-picker-input .ap-name { flex:1; }
+.agent-picker-input .ap-id-inline { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); }
+.agent-picker-input .chevron { color:var(--text-dim); font-size:0.65rem; margin-left:auto; }
+.agent-picker-list { display:none; position:absolute; z-index:200; top:calc(100% + 3px); left:0; right:0; background:#1a1a1a; border:1px solid var(--border); border-radius:6px; max-height:220px; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,0.5); flex-direction:column; }
+.agent-picker-list.open { display:flex; }
+.agent-picker-search { width:100%; box-sizing:border-box; background:rgba(255,255,255,0.04); border:none; border-bottom:1px solid var(--border); padding:8px 10px; color:var(--text); font-family:'JetBrains Mono',monospace; font-size:0.8rem; outline:none; flex-shrink:0; }
+.agent-picker-items { overflow-y:auto; }
+.agent-picker-item { padding:8px 10px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.04); }
+.agent-picker-item:last-child { border-bottom:none; }
+.agent-picker-item:hover, .agent-picker-item.focused { background:rgba(255,51,51,0.08); }
+.agent-picker-item .ap-name { font-size:0.85rem; color:var(--text); }
+.agent-picker-item .ap-id { font-size:0.7rem; color:var(--text-dim); font-family:'JetBrains Mono',monospace; margin-top:1px; }
+.agent-picker-empty { padding:12px 10px; color:var(--text-dim); font-size:0.8rem; text-align:center; }
+.toast { position:fixed; bottom:1.5rem; right:1.5rem; padding:12px 18px; border-radius:8px; font-size:0.85rem; font-family:'JetBrains Mono',monospace; z-index:9999; opacity:0; transform:translateY(8px); transition:opacity 0.2s,transform 0.2s; pointer-events:none; max-width:320px; }
+.toast.show { opacity:1; transform:translateY(0); }
+.toast.success { background:#0f2a1a; border:1px solid #00ff88; color:#00ff88; }
+.toast.error { background:#2a0f0f; border:1px solid var(--accent); color:var(--accent); }
+.toast.info { background:#0f1a2a; border:1px solid #64c8ff; color:#64c8ff; }
 .detail-meta { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); margin-top:4px; }
 .status-badge-lg { font-family:'JetBrains Mono',monospace; font-size:0.7rem; padding:4px 12px; border-radius:14px; display:inline-flex; align-items:center; gap:6px; }
 .status-online { color:var(--green); background:rgba(68,204,102,0.1); border:1px solid rgba(68,204,102,0.2); }
@@ -205,9 +247,70 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
   .auth-card { padding:1.5rem; }
   .user-email { display:none; }
 }
+/* ── Tabs ── */
+.tab-bar { display:flex; gap:0; border-bottom:1px solid var(--border); margin:1.25rem 0 0; overflow-x:auto; scrollbar-width:none; }
+.tab-btn { background:none; border:none; border-bottom:2px solid transparent; color:var(--text-dim); cursor:pointer; font-family:'JetBrains Mono',monospace; font-size:0.78rem; padding:10px 16px; white-space:nowrap; transition:color 0.15s,border-color 0.15s; }
+.tab-btn:hover { color:var(--text); }
+.tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+#tab-content { padding-top:1.25rem; min-height:200px; }
+.data-table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+.data-table th { text-align:left; color:var(--text-dim); font-size:0.68rem; text-transform:uppercase; letter-spacing:0.05em; padding:6px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+.data-table td { padding:8px 10px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:middle; }
+.data-table tr.clickable:hover td { background:rgba(255,255,255,0.025); cursor:pointer; }
+.data-table td.mono { font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--text-dim); }
+.data-table td.preview { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:'JetBrains Mono',monospace; font-size:0.72rem; color:var(--text-dim); }
+.tab-toolbar { display:flex; gap:0.5rem; align-items:center; margin-bottom:0.8rem; flex-wrap:wrap; }
+.tab-search { background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:6px; color:var(--text); font-family:'JetBrains Mono',monospace; font-size:0.8rem; padding:6px 10px; min-width:160px; outline:none; }
+.tab-search:focus { border-color:var(--accent); }
+.tab-empty { text-align:center; color:var(--text-dim); padding:2rem 0; font-size:0.85rem; }
+.tab-pagination { display:flex; align-items:center; gap:0.5rem; margin-top:0.75rem; font-size:0.8rem; color:var(--text-dim); }
+.settings-section { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.25rem; margin-bottom:1rem; }
+.settings-section h3 { font-family:'JetBrains Mono',monospace; font-size:0.82rem; font-weight:600; margin:0 0 0.5rem; }
+.settings-section p { font-size:0.8rem; color:var(--text-dim); margin:0 0 0.75rem; line-height:1.5; }
+.settings-danger { border-color:rgba(255,51,51,0.25); }
+.toggle-switch { position:relative; display:inline-block; width:36px; height:20px; vertical-align:middle; cursor:pointer; }
+.toggle-switch input { opacity:0; width:0; height:0; position:absolute; }
+.toggle-slider { position:absolute; inset:0; background:#333; border-radius:20px; transition:background 0.2s; }
+.toggle-slider:before { content:''; position:absolute; height:14px; width:14px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:transform 0.2s; }
+input:checked + .toggle-slider { background:var(--accent); }
+input:checked + .toggle-slider:before { transform:translateX(16px); }
+/* ── Memory visibility ── */
+.vis-badge { display:inline-block; padding:2px 7px; border-radius:10px; font-size:0.68rem; font-family:'JetBrains Mono',monospace; font-weight:500; letter-spacing:0.02em; }
+.vis-badge.private  { background:rgba(255,255,255,0.07); color:var(--text-dim); }
+.vis-badge.public   { background:rgba(0,255,136,0.12); color:#00ff88; }
+.vis-badge.shared   { background:rgba(0,170,255,0.12); color:#00aaff; }
+.mem-checkbox { accent-color:var(--accent); width:14px; height:14px; cursor:pointer; vertical-align:middle; }
+.bulk-action-bar { display:flex; align-items:center; gap:0.75rem; padding:6px 0; flex-wrap:wrap; }
+.audit-log-row { display:flex; align-items:center; gap:0.5rem; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.04); font-size:0.75rem; }
+.audit-action { font-family:'JetBrains Mono',monospace; font-size:0.68rem; padding:1px 6px; border-radius:8px; background:rgba(255,255,255,0.06); }
+/* ── Charts ── */
+.charts-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem; }
+@media(max-width:700px){ .charts-grid { grid-template-columns:1fr; } }
+.chart-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem; }
+.chart-card .chart-title { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.6rem; }
+.chart-wrap { position:relative; height:140px; }
+.chart-period-bar { display:flex; gap:0.4rem; margin-bottom:0.75rem; }
+.chart-period-btn { background:none; border:1px solid var(--border); color:var(--text-dim); cursor:pointer; font-size:0.72rem; padding:3px 10px; border-radius:4px; font-family:'JetBrains Mono',monospace; transition:all 0.15s; }
+.chart-period-btn:hover { border-color:var(--accent); color:var(--accent); }
+.chart-period-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(255,51,51,0.1); }
+/* ── Clickable stat cards ── */
+.stat-card.clickable { cursor:pointer; transition:border-color 0.15s, background 0.15s; }
+.stat-card.clickable:hover { border-color:rgba(255,51,51,0.3); background:rgba(255,51,51,0.03); }
+/* ── Overview page ── */
+.overview-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:1rem; margin-bottom:1.5rem; }
+.ov-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem; text-align:center; }
+.ov-card .ov-val { font-size:2rem; font-weight:700; font-family:'JetBrains Mono',monospace; line-height:1.1; }
+.ov-card .ov-label { font-size:0.7rem; color:var(--text-dim); margin-top:4px; }
+.agents-table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+.agents-table th { text-align:left; color:var(--text-dim); font-size:0.68rem; text-transform:uppercase; letter-spacing:0.05em; padding:6px 10px; border-bottom:1px solid var(--border); }
+.agents-table td { padding:8px 10px; border-bottom:1px solid rgba(255,255,255,0.04); }
+.agents-table tr:hover td { background:rgba(255,255,255,0.02); }
+.agents-table td:last-child { text-align:right; }
+.heartbeat-time { font-size:0.7rem; color:var(--text-dim); margin-top:1px; }
 </style>
 </head>
 <body>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <div class="noise"></div>
 <div class="grid-bg"></div>
 <div id="app"></div>
@@ -217,7 +320,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
   "use strict";
 
   // ── State ──
-  var token = null;
+  var token = localStorage.getItem("mg_token") || null;
   var user = null;
   var API = window.location.origin;
 
@@ -250,6 +353,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
     // Auth guard
     if (!token) return navigate("#/login");
     if (hash === "#/agents") return renderAgents(app);
+    if (hash === "#/overview") return renderOverview(app);
     if (hash === "#/billing") return renderBilling(app);
     if (hash === "#/billing/success") return renderBillingSuccess(app);
     if (hash === "#/billing/cancel") return renderBillingCancel(app);
@@ -311,6 +415,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
         password: document.getElementById("login-password").value,
       }).then(function(data) {
         token = data.token;
+        localStorage.setItem("mg_token", token);
         return api("GET", "/v1/auth/me");
       }).then(function(me) {
         user = me;
@@ -383,6 +488,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
         email: email, password: pw, display_name: name || null,
       }).then(function(data) {
         token = data.token;
+        localStorage.setItem("mg_token", token);
         return api("GET", "/v1/auth/me");
       }).then(function(me) {
         user = me;
@@ -525,45 +631,37 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
       dc.innerHTML =
         // Header
         '<div class="detail-header"><div>' +
-        '<h1>' + esc(s.name || "Unnamed Agent") + '</h1>' +
+        '<h1>' + esc(s.name || "Unnamed Agent") + ' <button class="edit-name-btn" id="rename-btn" title="Rename agent">&#9998;</button></h1>' +
         '<div class="agent-id" id="copy-agent-id" title="Click to copy">' + esc(agentId) + ' \u2398</div>' +
         '<div class="detail-meta">Created ' + esc(timeAgo(s.created_at)) + ' \u00b7 ' + (s.request_count || 0).toLocaleString() + ' total requests</div>' +
         '</div><div>' +
+        '<div>' +
         '<span class="status-badge-lg status-' + statusCls + '">' +
         '<span class="status-dot ' + (isOn ? "online" : "offline") + '"></span> ' + esc(statusLabel) + '</span>' +
+        '<div class="heartbeat-time">' + (s.heartbeat_at ? 'Last seen ' + esc(timeAgo(s.heartbeat_at)) : 'Never connected') + '</div>' +
+        '</div>' +
         '</div></div>' +
 
-        // Stats row
+        // Stats row (clickable — jump to filtered activity)
         '<div class="stats-row">' +
-        '<div class="stat-card"><div class="label">Memory Keys</div><div class="value blue">' + s.memory_keys + '</div></div>' +
-        '<div class="stat-card"><div class="label">Jobs</div><div class="value red">' + (s.jobs_pending + s.jobs_completed) + '</div>' +
+        '<div class="stat-card clickable" data-tab="memory" title="View memory"><div class="label">Memory Keys</div><div class="value blue">' + s.memory_keys + '</div><div class="sub">click to view</div></div>' +
+        '<div class="stat-card clickable" data-tab="jobs" title="View jobs"><div class="label">Jobs</div><div class="value red">' + (s.jobs_pending + s.jobs_completed) + '</div>' +
         '<div class="sub">' + s.jobs_pending + ' pending \u00b7 ' + s.jobs_completed + ' done' + (s.jobs_failed ? ' \u00b7 ' + s.jobs_failed + ' failed' : '') + '</div></div>' +
-        '<div class="stat-card"><div class="label">Messages</div><div class="value purple">' + (s.messages_sent + s.messages_received) + '</div>' +
+        '<div class="stat-card clickable" data-tab="messages" title="View messages"><div class="label">Messages</div><div class="value purple">' + (s.messages_sent + s.messages_received) + '</div>' +
         '<div class="sub">' + s.messages_sent + ' sent \u00b7 ' + s.messages_received + ' received</div></div>' +
-        '<div class="stat-card"><div class="label">Schedules</div><div class="value yellow">' + s.schedules_active + '</div><div class="sub">active</div></div>' +
+        '<div class="stat-card clickable" data-tab="schedules" title="View schedules"><div class="label">Schedules</div><div class="value yellow">' + s.schedules_active + '</div><div class="sub">active</div></div>' +
         '</div>' +
 
-        // Usage bar
-        '<div class="usage-bar-wrap">' +
-        '<div class="usage-bar-header">' +
-        '<span class="label">API Usage This Month</span>' +
-        '<span class="count">' + (user.usage_count || 0).toLocaleString() + ' / ' + (maxCalls > 999999998 ? '\u221e' : maxCalls.toLocaleString()) + '</span></div>' +
-        '<div class="usage-track"><div class="usage-fill ' + barCls + '" style="width:' + usagePct + '%"></div></div>' +
-        (usagePct >= 80 ? '<div style="margin-top:8px;text-align:right"><button class="btn btn-accent btn-sm" id="usage-upgrade">Upgrade plan</button></div>' : '') +
+        // Tabs
+        '<div class="tab-bar" id="agent-tab-bar">' +
+        '<button class="tab-btn active" data-tab="overview">Overview</button>' +
+        '<button class="tab-btn" data-tab="messages">Messages</button>' +
+        '<button class="tab-btn" data-tab="memory">Memory</button>' +
+        '<button class="tab-btn" data-tab="jobs">Jobs</button>' +
+        '<button class="tab-btn" data-tab="schedules">Schedules</button>' +
+        '<button class="tab-btn" data-tab="settings">Settings</button>' +
         '</div>' +
-
-        // Activity feed
-        '<div class="section-title"><span class="refresh-dot"></span> Activity Feed</div>' +
-        '<div id="activity-feed"><div class="loading-page" style="min-height:10vh"><span class="spinner"></span> Loading\u2026</div></div>' +
-
-        // Quick actions
-        '<div class="section-title" style="margin-top:1.75rem">Quick Actions</div>' +
-        '<div class="actions-row">' +
-        '<div class="action-btn" id="act-message"><div class="action-icon">\uD83D\uDCE8</div><div class="action-label">Send Test Message</div><div class="action-desc">Send a message to another agent</div></div>' +
-        '<div class="action-btn" id="act-job"><div class="action-icon">\uD83D\uDCE6</div><div class="action-label">Submit Test Job</div><div class="action-desc">Add a job to the queue</div></div>' +
-        '<div class="action-btn disabled"><div class="action-icon">\uD83D\uDD11</div><div class="action-label">View API Key</div><div class="action-desc">Keys cannot be recovered</div></div>' +
-        '<div class="action-btn action-btn-danger" id="act-delete"><div class="action-icon">\uD83D\uDDD1\uFE0F</div><div class="action-label">Delete Agent</div><div class="action-desc">Permanently remove this agent</div></div>' +
-        '</div>';
+        '<div id="tab-content"></div>';
 
       // Copy agent ID
       document.getElementById("copy-agent-id").onclick = function() {
@@ -573,18 +671,35 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
         setTimeout(function() { self.innerHTML = esc(agentId) + " \u2398"; }, 1500);
       };
 
-      // Upgrade button
-      var ub = document.getElementById("usage-upgrade");
-      if (ub) ub.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
+      // Rename btn in header
+      document.getElementById("rename-btn").onclick = function() { showRenameModal(agentId, s.name || ""); };
 
-      // Quick action handlers
-      document.getElementById("act-message").onclick = function() { showMessageModal(agentId); };
-      document.getElementById("act-job").onclick = function() { showJobModal(agentId); };
-      document.getElementById("act-delete").onclick = function() { showDeleteModal(agentId); };
+      // Tab bar wiring
+      function switchTab(tabName) {
+        if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+        document.querySelectorAll("#agent-tab-bar .tab-btn").forEach(function(b) {
+          b.classList.toggle("active", b.getAttribute("data-tab") === tabName);
+        });
+        if (tabName === "overview") renderTabOverview(agentId, s);
+        else if (tabName === "messages") renderTabMessages(agentId);
+        else if (tabName === "memory") renderTabMemory(agentId);
+        else if (tabName === "jobs") renderTabJobs(agentId);
+        else if (tabName === "schedules") renderTabSchedules(agentId);
+        else if (tabName === "settings") renderTabSettings(agentId, s);
+      }
 
-      // Load activity feed
-      loadActivity(agentId);
-      _activityTimer = setInterval(function() { loadActivity(agentId); }, 10000);
+      document.querySelectorAll("#agent-tab-bar .tab-btn").forEach(function(btn) {
+        btn.onclick = function() { switchTab(this.getAttribute("data-tab")); };
+      });
+
+      document.querySelectorAll(".stat-card.clickable").forEach(function(card) {
+        card.onclick = function() {
+          var t = this.getAttribute("data-tab");
+          if (t) switchTab(t);
+        };
+      });
+
+      switchTab("overview");
 
     }).catch(function(err) {
       document.getElementById("detail-content").innerHTML =
@@ -592,45 +707,959 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
     });
   }
 
-  function loadActivity(agentId) {
-    api("GET", "/v1/user/agents/" + agentId + "/activity").then(function(data) {
-      var feed = document.getElementById("activity-feed");
+  function loadActivity(agentId, filterType, offset, replace) {
+    filterType = filterType || "all";
+    offset = offset || 0;
+    replace = (replace !== false);
+    var feed = document.getElementById("activity-feed");
+    if (!feed) return;
+    if (replace) feed.innerHTML = '<div class="loading-page" style="min-height:6vh"><span class="spinner"></span></div>';
+    var qs = "?limit=20&offset=" + offset + "&type=" + encodeURIComponent(filterType);
+    api("GET", "/v1/user/agents/" + agentId + "/activity" + qs).then(function(data) {
+      feed = document.getElementById("activity-feed");
       if (!feed) return;
       var events = data.events || [];
-      if (events.length === 0) {
-        feed.innerHTML = '<div class="activity-list"><div class="activity-item"><div class="activity-text dim">No activity yet</div></div></div>';
-        return;
+      var total = data.total || 0;
+      var nextOffset = offset + events.length;
+      if (replace) {
+        if (events.length === 0) {
+          feed.innerHTML = '<div class="activity-list"><div class="activity-item"><div class="activity-text dim">No activity yet</div></div></div>';
+          return;
+        }
+        feed.innerHTML = '<div class="activity-list" id="activity-list"></div>';
+      } else {
+        if (!document.getElementById("activity-list")) {
+          feed.innerHTML = '<div class="activity-list" id="activity-list"></div>';
+        }
+        var oldLm = document.getElementById("lm-btn");
+        if (oldLm) oldLm.remove();
       }
-      var html = '<div class="activity-list">';
+      var list = document.getElementById("activity-list");
       events.forEach(function(ev) {
-        var icon = "\uD83D\uDCCB"; // default clipboard
+        var icon = "&#128203;";
         var text = "";
+        var clickType = null;
+        var clickId = null;
         var t = ev.event_type || "";
         if (t === "message_received") {
-          icon = "\uD83D\uDCE8"; text = "Message received from <span class=\"dim\">" + esc(ev.source || "unknown") + "</span>";
+          icon = "&#128232;"; text = "Message received from <span class=\"dim\">" + esc(ev.source || "unknown") + "</span>";
+          clickType = "message"; clickId = ev.message_id;
         } else if (t === "message_sent") {
-          icon = "\uD83D\uDCE4"; text = "Message sent to <span class=\"dim\">" + esc(ev.target || "unknown") + "</span>";
+          icon = "&#128228;"; text = "Message sent to <span class=\"dim\">" + esc(ev.target || "unknown") + "</span>";
+          clickType = "message"; clickId = ev.message_id;
         } else if (t.indexOf("job_completed") === 0) {
-          icon = "\u2705"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> completed";
+          icon = "&#9989;"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> completed";
+          clickType = "job"; clickId = ev.job_id;
         } else if (t.indexOf("job_failed") === 0) {
-          icon = "\u274C"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> failed";
+          icon = "&#10060;"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> failed";
+          clickType = "job"; clickId = ev.job_id;
         } else if (t.indexOf("job_pending") === 0) {
-          icon = "\uD83D\uDCE6"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> submitted";
+          icon = "&#128230;"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> submitted";
+          clickType = "job"; clickId = ev.job_id;
         } else if (t.indexOf("job_") === 0) {
-          icon = "\u23F3"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> " + esc(t.replace("job_", ""));
+          icon = "&#9203;"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> " + esc(t.replace("job_", ""));
+          clickType = "job"; clickId = ev.job_id;
         } else if (t === "memory_update") {
-          icon = "\uD83D\uDCBE"; text = "Memory key <span class=\"dim\">\"" + esc(ev.key || "") + "\"</span> updated";
+          icon = "&#128190;"; text = "Memory key <span class=\"dim\">\"" + esc(ev.key || "") + "\"</span> updated";
+          clickType = "memory";
+        } else if (t === "schedule") {
+          icon = "&#9200;"; text = "Schedule <span class=\"dim\">" + esc(ev.task_id || "") + "</span>";
+        } else if (t === "key_rotated") {
+          icon = "&#128273;"; text = "API key regenerated";
         } else {
           text = esc(t);
         }
-        html += '<div class="activity-item">' +
+        var div = document.createElement("div");
+        div.className = "activity-item" + (clickType ? " clickable" : "");
+        div.innerHTML =
           '<div class="activity-icon">' + icon + '</div>' +
           '<div class="activity-text">' + text + '</div>' +
-          '<div class="activity-time">' + esc(timeAgo(ev.timestamp)) + '</div></div>';
+          '<div class="activity-time">' + esc(timeAgo(ev.timestamp)) + '</div>';
+        if (clickType === "message" && clickId) {
+          (function(mid) { div.onclick = function() { showActivityDetail(agentId, "message", mid); }; })(clickId);
+        } else if (clickType === "job" && clickId) {
+          (function(jid) { div.onclick = function() { showActivityDetail(agentId, "job", jid); }; })(clickId);
+        } else if (clickType === "memory") {
+          (function(ns, k) { div.onclick = function() { showActivityDetail(agentId, "memory", null, ns, k); }; })(ev.namespace || "default", ev.key || "");
+        }
+        list.appendChild(div);
       });
-      html += '</div>';
-      feed.innerHTML = html;
+      if (nextOffset < total) {
+        var lm = document.createElement("button");
+        lm.className = "load-more-btn";
+        lm.id = "lm-btn";
+        lm.textContent = "Load more (" + (total - nextOffset) + " remaining)";
+        lm.onclick = function() {
+          lm.disabled = true; lm.textContent = "Loading\u2026";
+          loadActivity(agentId, filterType, nextOffset, false);
+        };
+        feed.appendChild(lm);
+      }
     }).catch(function() {});
+  }
+
+  var _chartInstances = {};
+  function loadCharts(agentId, days) {
+    api("GET", "/v1/user/agents/" + agentId + "/charts?days=" + days).then(function(data) {
+      // Destroy previous instances
+      ["messages", "jobs"].forEach(function(k) {
+        if (_chartInstances[k]) { _chartInstances[k].destroy(); delete _chartInstances[k]; }
+      });
+      var labels = data.messages.map(function(m) { return m.date.slice(5); });
+
+      var msgCtx = document.getElementById("chart-messages");
+      if (msgCtx) {
+        _chartInstances.messages = new Chart(msgCtx, {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [
+              { label: "Sent", data: data.messages.map(function(m) { return m.sent; }), backgroundColor: "rgba(180,100,255,0.75)", borderRadius: 2 },
+              { label: "Received", data: data.messages.map(function(m) { return m.received; }), backgroundColor: "rgba(100,180,255,0.75)", borderRadius: 2 },
+            ],
+          },
+          options: _chartOpts(true),
+        });
+      }
+
+      var jobCtx = document.getElementById("chart-jobs");
+      if (jobCtx) {
+        _chartInstances.jobs = new Chart(jobCtx, {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [
+              { label: "Completed", data: data.jobs.map(function(j) { return j.completed; }), backgroundColor: "rgba(0,220,100,0.75)", borderRadius: 2 },
+              { label: "Failed", data: data.jobs.map(function(j) { return j.failed; }), backgroundColor: "rgba(255,51,51,0.75)", borderRadius: 2 },
+              { label: "Pending", data: data.jobs.map(function(j) { return j.pending; }), backgroundColor: "rgba(255,200,0,0.5)", borderRadius: 2 },
+            ],
+          },
+          options: _chartOpts(true),
+        });
+      }
+    }).catch(function() {});
+  }
+
+  function _chartOpts(stacked) {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      plugins: {
+        legend: { labels: { color: "#888", font: { family: "JetBrains Mono, monospace", size: 10 }, boxWidth: 10, padding: 10 } },
+      },
+      scales: {
+        x: { stacked: stacked, ticks: { color: "#555", font: { size: 9 }, maxRotation: 0 }, grid: { color: "rgba(255,255,255,0.04)" } },
+        y: { stacked: stacked, ticks: { color: "#555", precision: 0, font: { size: 9 } }, grid: { color: "rgba(255,255,255,0.06)" }, beginAtZero: true },
+      },
+    };
+  }
+
+  // ── Tab render functions ──
+
+  function renderTabOverview(agentId, stats) {
+    var tc = document.getElementById("tab-content");
+    if (!tc) return;
+    var maxCalls = (user.max_api_calls) || 10000;
+    var usagePct = maxCalls > 0 ? Math.min(100, Math.round((user.usage_count / maxCalls) * 100)) : 0;
+    var barCls = usagePct >= 95 ? "red" : (usagePct >= 80 ? "yellow" : "green");
+    var _curFilter = "all";
+    tc.innerHTML =
+      '<div class="usage-bar-wrap">' +
+      '<div class="usage-bar-header"><span class="label">API Usage This Month</span>' +
+      '<span class="count">' + (user.usage_count || 0).toLocaleString() + ' / ' + (maxCalls > 999999998 ? '\u221e' : maxCalls.toLocaleString()) + '</span></div>' +
+      '<div class="usage-track"><div class="usage-fill ' + barCls + '" style="width:' + usagePct + '%"></div></div>' +
+      (usagePct >= 80 ? '<div style="margin-top:8px;text-align:right"><button class="btn btn-accent btn-sm" id="usage-upgrade">Upgrade plan</button></div>' : '') +
+      '</div>' +
+      '<div class="section-title" style="margin-top:1.5rem">Activity Charts</div>' +
+      '<div class="chart-period-bar" id="chart-period-bar">' +
+      '<button class="chart-period-btn active" data-days="7">7d</button>' +
+      '<button class="chart-period-btn" data-days="14">14d</button>' +
+      '<button class="chart-period-btn" data-days="30">30d</button>' +
+      '</div>' +
+      '<div class="charts-grid">' +
+      '<div class="chart-card"><div class="chart-title">Message Volume</div><div class="chart-wrap"><canvas id="chart-messages"></canvas></div></div>' +
+      '<div class="chart-card"><div class="chart-title">Job Outcomes</div><div class="chart-wrap"><canvas id="chart-jobs"></canvas></div></div>' +
+      '</div>' +
+      '<div class="section-title"><span class="refresh-dot"></span> Activity Feed</div>' +
+      '<div id="activity-filters" class="activity-filter-bar">' +
+      '<button class="filter-btn active" data-type="all">All</button>' +
+      '<button class="filter-btn" data-type="messages">Messages</button>' +
+      '<button class="filter-btn" data-type="jobs">Jobs</button>' +
+      '<button class="filter-btn" data-type="memory">Memory</button>' +
+      '<button class="filter-btn" data-type="schedules">Schedules</button>' +
+      '<button class="filter-btn" data-type="security">Security</button>' +
+      '</div>' +
+      '<div id="activity-feed"><div class="loading-page" style="min-height:10vh"><span class="spinner"></span> Loading\u2026</div></div>' +
+      '<div class="section-title" style="margin-top:1.75rem">Quick Actions</div>' +
+      '<div class="actions-row">' +
+      '<div class="action-btn" id="act-message"><div class="action-icon">&#128232;</div><div class="action-label">Send Test Message</div><div class="action-desc">Send a message to another agent</div></div>' +
+      '<div class="action-btn" id="act-job"><div class="action-icon">&#128230;</div><div class="action-label">Submit Test Job</div><div class="action-desc">Add a job to the queue</div></div>' +
+      '</div>';
+    var ub = document.getElementById("usage-upgrade");
+    if (ub) ub.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
+    document.getElementById("act-message").onclick = function() { showMessageModal(agentId); };
+    document.getElementById("act-job").onclick = function() { showJobModal(agentId); };
+    loadCharts(agentId, 7);
+    document.querySelectorAll("#chart-period-bar .chart-period-btn").forEach(function(btn) {
+      btn.onclick = function() {
+        document.querySelectorAll("#chart-period-bar .chart-period-btn").forEach(function(b) { b.classList.remove("active"); });
+        this.classList.add("active");
+        loadCharts(agentId, parseInt(this.getAttribute("data-days"), 10));
+      };
+    });
+    document.querySelectorAll("#activity-filters .filter-btn").forEach(function(btn) {
+      btn.onclick = function() {
+        _curFilter = this.getAttribute("data-type");
+        document.querySelectorAll("#activity-filters .filter-btn").forEach(function(b) { b.classList.remove("active"); });
+        this.classList.add("active");
+        loadActivity(agentId, _curFilter, 0, true);
+      };
+    });
+    loadActivity(agentId, "all", 0, true);
+    _activityTimer = setInterval(function() { loadActivity(agentId, _curFilter, 0, true); }, 10000);
+  }
+
+  function renderTabMessages(agentId) {
+    var tc = document.getElementById("tab-content");
+    if (!tc) return;
+    var _dir = "all", _search = "", _offset = 0, _total = 0;
+    function load(offset, replace) {
+      offset = offset || 0;
+      var qs = "?limit=20&offset=" + offset + "&direction=" + encodeURIComponent(_dir) + (_search ? "&search=" + encodeURIComponent(_search) : "");
+      api("GET", "/v1/user/agents/" + agentId + "/messages-list" + qs).then(function(data) {
+        _total = data.total || 0;
+        _offset = offset + (data.messages || []).length;
+        var tbody = document.getElementById("msg-tbody");
+        if (!tbody) return;
+        if (replace) tbody.innerHTML = "";
+        if ((data.messages || []).length === 0 && replace) {
+          tbody.innerHTML = '<tr><td colspan="5" class="tab-empty">No messages found</td></tr>';
+        } else {
+          (data.messages || []).forEach(function(m) {
+            var tr = document.createElement("tr");
+            tr.className = "clickable";
+            tr.innerHTML =
+              '<td style="font-family:monospace;font-size:0.75rem">' + esc(m.message_id.slice(0,16)) + '\u2026</td>' +
+              '<td>' + esc(m.from_name || m.from_agent) + '</td>' +
+              '<td>' + esc(m.to_name || m.to_agent) + '</td>' +
+              '<td><span class="status-pill">' + esc(m.channel) + '</span></td>' +
+              '<td style="color:var(--text-dim);font-size:0.75rem">' + esc(timeAgo(m.created_at)) + '</td>';
+            tr.onclick = function() { showActivityDetail(agentId, "message", m.message_id); };
+            tbody.appendChild(tr);
+          });
+        }
+        var pg = document.getElementById("msg-pagination");
+        if (pg) {
+          pg.innerHTML = _offset < _total ? '<button class="load-more-btn" id="msg-load-more">Load more (' + (_total - _offset) + ' remaining)</button>' : "";
+          var lm = document.getElementById("msg-load-more");
+          if (lm) lm.onclick = function() { load(_offset, false); };
+        }
+      }).catch(function(e) {
+        var tbody = document.getElementById("msg-tbody");
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="tab-empty">' + esc(e.detail || "Error loading") + '</td></tr>';
+      });
+    }
+    tc.innerHTML =
+      '<div class="tab-toolbar">' +
+      '<select id="msg-dir-filter" style="background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:0.8rem;cursor:pointer">' +
+      '<option value="all">All Messages</option><option value="sent">Sent</option><option value="received">Received</option>' +
+      '</select>' +
+      '<input id="msg-search" class="tab-search" type="text" placeholder="Search\u2026">' +
+      '<button class="btn btn-sm" id="msg-refresh" style="margin-left:auto">&#8635; Refresh</button>' +
+      '</div>' +
+      '<table class="data-table"><thead><tr><th>Message ID</th><th>From</th><th>To</th><th>Channel</th><th>Time</th></tr></thead>' +
+      '<tbody id="msg-tbody"><tr><td colspan="5" class="tab-empty"><span class="spinner"></span></td></tr></tbody></table>' +
+      '<div id="msg-pagination"></div>';
+    load(0, true);
+    document.getElementById("msg-dir-filter").onchange = function() { _dir = this.value; load(0, true); };
+    var _msgST;
+    document.getElementById("msg-search").oninput = function() {
+      clearTimeout(_msgST); var val = this.value;
+      _msgST = setTimeout(function() { _search = val; load(0, true); }, 400);
+    };
+    document.getElementById("msg-refresh").onclick = function() { load(0, true); };
+  }
+
+  function renderTabMemory(agentId) {
+    var tc = document.getElementById("tab-content");
+    if (!tc) return;
+    var _ns = "", _search = "", _vis = "", _offset = 0, _total = 0;
+    var _selected = {};  // {ns+"|"+key: {namespace, key}}
+
+    function visBadge(v) {
+      v = v || "private";
+      return '<span class="vis-badge ' + esc(v) + '">' + esc(v) + '</span>';
+    }
+
+    function updateBulkBtn() {
+      var n = Object.keys(_selected).length;
+      var btn = document.getElementById("mem-bulk-btn");
+      if (btn) { btn.disabled = n === 0; btn.textContent = "Change Visibility" + (n ? " (" + n + ")" : ""); }
+    }
+
+    function load(offset, replace) {
+      offset = offset || 0;
+      var qs = "?limit=30&offset=" + offset +
+        (_ns ? "&namespace=" + encodeURIComponent(_ns) : "") +
+        (_search ? "&search=" + encodeURIComponent(_search) : "") +
+        (_vis ? "&visibility=" + encodeURIComponent(_vis) : "");
+      api("GET", "/v1/user/agents/" + agentId + "/memory-list" + qs).then(function(data) {
+        _total = data.total || 0;
+        _offset = offset + (data.keys || []).length;
+        var nsSel = document.getElementById("mem-ns-filter");
+        if (nsSel && replace) {
+          var cur = nsSel.value;
+          nsSel.innerHTML = '<option value="">All Namespaces</option>';
+          (data.namespaces || []).forEach(function(n) {
+            var opt = document.createElement("option");
+            opt.value = n; opt.textContent = n;
+            if (n === cur) opt.selected = true;
+            nsSel.appendChild(opt);
+          });
+        }
+        var tbody = document.getElementById("mem-tbody");
+        if (!tbody) return;
+        if (replace) { tbody.innerHTML = ""; _selected = {}; updateBulkBtn(); }
+        if ((data.keys || []).length === 0 && replace) {
+          tbody.innerHTML = '<tr><td colspan="7" class="tab-empty">No memory keys found</td></tr>';
+        } else {
+          (data.keys || []).forEach(function(m) {
+            var rowKey = m.namespace + "|" + m.key;
+            var tr = document.createElement("tr");
+            tr.className = "clickable";
+            tr.innerHTML =
+              '<td><input type="checkbox" class="mem-checkbox mem-row-cb" data-ns="' + esc(m.namespace) + '" data-key="' + esc(m.key) + '"' + (_selected[rowKey] ? ' checked' : '') + '></td>' +
+              '<td style="font-family:monospace;font-size:0.8rem">' + esc(m.namespace) + '</td>' +
+              '<td style="font-family:monospace;font-size:0.8rem">' + esc(m.key) + '</td>' +
+              '<td>' + visBadge(m.visibility) + '</td>' +
+              '<td style="color:var(--text-dim);font-size:0.75rem">' + esc(timeAgo(m.updated_at)) + '</td>' +
+              '<td style="color:var(--text-dim);font-size:0.75rem">' + (m.expires_at ? esc(timeAgo(m.expires_at)) : "never") + '</td>' +
+              '<td><button class="btn btn-sm btn-danger mem-del-btn" data-ns="' + esc(m.namespace) + '" data-key="' + esc(m.key) + '" style="font-size:0.7rem;padding:3px 8px">Delete</button></td>';
+            tr.onclick = function(e) {
+              if (e.target.classList.contains("mem-del-btn") || e.target.classList.contains("mem-row-cb")) return;
+              showMemoryDetailModal(agentId, m.namespace, m.key, load);
+            };
+            tbody.appendChild(tr);
+          });
+          tbody.querySelectorAll(".mem-row-cb").forEach(function(cb) {
+            cb.onchange = function() {
+              var rk = this.getAttribute("data-ns") + "|" + this.getAttribute("data-key");
+              if (this.checked) _selected[rk] = {namespace: this.getAttribute("data-ns"), key: this.getAttribute("data-key")};
+              else delete _selected[rk];
+              updateBulkBtn();
+              var selAll = document.getElementById("mem-select-all");
+              if (selAll) {
+                var all = tbody.querySelectorAll(".mem-row-cb");
+                selAll.checked = all.length > 0 && Array.from(all).every(function(x) { return x.checked; });
+              }
+            };
+          });
+          tbody.querySelectorAll(".mem-del-btn").forEach(function(btn) {
+            btn.onclick = function(e) {
+              e.stopPropagation();
+              var ns = this.getAttribute("data-ns"), key = this.getAttribute("data-key");
+              if (!confirm("Delete memory key '" + ns + "/" + key + "'?")) return;
+              api("DELETE", "/v1/user/agents/" + agentId + "/memory-entry?namespace=" + encodeURIComponent(ns) + "&key=" + encodeURIComponent(key))
+                .then(function() { showToast("Memory key deleted", "success"); load(0, true); })
+                .catch(function(e) { showToast(e.detail || "Delete failed", "error"); });
+            };
+          });
+        }
+        var pg = document.getElementById("mem-pagination");
+        if (pg) {
+          pg.innerHTML = _offset < _total ? '<button class="load-more-btn" id="mem-load-more">Load more (' + (_total - _offset) + ' remaining)</button>' : "";
+          var lm = document.getElementById("mem-load-more");
+          if (lm) lm.onclick = function() { load(_offset, false); };
+        }
+      }).catch(function(e) {
+        var tbody = document.getElementById("mem-tbody");
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="tab-empty">' + esc(e.detail || "Error loading") + '</td></tr>';
+      });
+    }
+
+    var selStyle = "background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:0.8rem;cursor:pointer";
+    tc.innerHTML =
+      '<div class="tab-toolbar">' +
+      '<select id="mem-ns-filter" style="' + selStyle + '"><option value="">All Namespaces</option></select>' +
+      '<select id="mem-vis-filter" style="' + selStyle + '">' +
+      '<option value="">All Visibility</option>' +
+      '<option value="private">Private</option>' +
+      '<option value="public">Public</option>' +
+      '<option value="shared">Shared</option>' +
+      '</select>' +
+      '<input id="mem-search" class="tab-search" type="text" placeholder="Search keys\u2026">' +
+      '<button class="btn btn-sm" id="mem-refresh" style="margin-left:auto">&#8635; Refresh</button>' +
+      '</div>' +
+      '<div class="bulk-action-bar">' +
+      '<button class="btn btn-sm" id="mem-bulk-btn" disabled>Change Visibility</button>' +
+      '<span id="mem-sel-count" style="font-size:0.75rem;color:var(--text-dim)"></span>' +
+      '</div>' +
+      '<table class="data-table"><thead><tr>' +
+      '<th style="width:24px"><input type="checkbox" class="mem-checkbox" id="mem-select-all"></th>' +
+      '<th>Namespace</th><th>Key</th><th>Visibility</th><th>Updated</th><th>Expires</th><th></th>' +
+      '</tr></thead>' +
+      '<tbody id="mem-tbody"><tr><td colspan="7" class="tab-empty"><span class="spinner"></span></td></tr></tbody></table>' +
+      '<div id="mem-pagination"></div>';
+
+    load(0, true);
+
+    document.getElementById("mem-ns-filter").onchange = function() { _ns = this.value; load(0, true); };
+    document.getElementById("mem-vis-filter").onchange = function() { _vis = this.value; load(0, true); };
+    var _memST;
+    document.getElementById("mem-search").oninput = function() {
+      clearTimeout(_memST); var val = this.value;
+      _memST = setTimeout(function() { _search = val; load(0, true); }, 400);
+    };
+    document.getElementById("mem-refresh").onclick = function() { load(0, true); };
+    document.getElementById("mem-select-all").onchange = function() {
+      var checked = this.checked;
+      document.querySelectorAll("#mem-tbody .mem-row-cb").forEach(function(cb) {
+        cb.checked = checked;
+        var rk = cb.getAttribute("data-ns") + "|" + cb.getAttribute("data-key");
+        if (checked) _selected[rk] = {namespace: cb.getAttribute("data-ns"), key: cb.getAttribute("data-key")};
+        else delete _selected[rk];
+      });
+      updateBulkBtn();
+    };
+    document.getElementById("mem-bulk-btn").onclick = function() {
+      var entries = Object.values(_selected);
+      if (entries.length === 0) return;
+      showBulkVisibilityModal(agentId, entries, function() { load(0, true); });
+    };
+  }
+
+  function showMemoryDetailModal(agentId, namespace, key, onRefresh) {
+    var ov = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    ov.classList.add("active");
+    mc.innerHTML = '<div style="text-align:center;padding:2rem"><span class="spinner"></span></div>';
+    api("GET", "/v1/user/agents/" + agentId + "/memory-entry?namespace=" + encodeURIComponent(namespace) + "&key=" + encodeURIComponent(key))
+      .then(function(d) {
+        var sharedList = (d.shared_agents || []).join(", ");
+        mc.innerHTML =
+          '<h2 style="margin-top:0">&#128190; Memory Entry</h2>' +
+          '<div class="detail-row">' +
+          '<div class="detail-field"><label>Namespace</label><div class="detail-value">' + esc(d.namespace) + '</div></div>' +
+          '<div class="detail-field"><label>Key</label><div class="detail-value">' + esc(d.key) + '</div></div>' +
+          '</div>' +
+          '<div class="detail-field" style="margin-top:0.5rem"><label>Value</label><div class="detail-value" style="max-height:160px;overflow:auto">' + esc(d.value) + '</div></div>' +
+          '<div class="detail-row" style="margin-top:0.75rem">' +
+          '<div class="detail-field"><label>Updated</label><div class="detail-value">' + esc(d.updated_at) + '</div></div>' +
+          '<div class="detail-field"><label>Expires</label><div class="detail-value">' + esc(d.expires_at || "never") + '</div></div>' +
+          '</div>' +
+          '<div style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--border)">' +
+          '<div class="section-title" style="margin:0 0 0.5rem;font-size:0.75rem">Visibility Settings</div>' +
+          '<div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">' +
+          '<select id="md-vis" style="background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:0.82rem">' +
+          '<option value="private"' + (d.visibility === "private" ? " selected" : "") + '>&#128274; Private — owning agent only</option>' +
+          '<option value="public"' + (d.visibility === "public" ? " selected" : "") + '>&#127760; Public — readable by any agent</option>' +
+          '<option value="shared"' + (d.visibility === "shared" ? " selected" : "") + '>&#128101; Shared — specific agents only</option>' +
+          '</select>' +
+          '<button class="btn btn-accent btn-sm" id="md-save-vis">Save</button>' +
+          '</div>' +
+          '<div id="md-shared-wrap" style="margin-top:0.5rem;' + (d.visibility === "shared" ? "" : "display:none") + '">' +
+          '<label style="font-size:0.7rem;color:var(--text-dim);display:block;margin-bottom:3px">Agent IDs (comma-separated)</label>' +
+          '<input class="input" id="md-shared-agents" value="' + esc(sharedList) + '" placeholder="agent_abc123, agent_xyz456">' +
+          '</div>' +
+          '<div id="md-vis-err" class="name-error"></div>' +
+          '</div>' +
+          '<details style="margin-top:1rem">' +
+          '<summary style="cursor:pointer;font-size:0.75rem;color:var(--text-dim)">Audit Log</summary>' +
+          '<div id="md-audit" style="margin-top:0.5rem"><span class="spinner"></span></div>' +
+          '</details>' +
+          '<button class="btn btn-ghost" style="margin-top:1rem;width:100%" id="md-close">Close</button>';
+
+        document.getElementById("md-close").onclick = function() { ov.classList.remove("active"); };
+        document.getElementById("md-vis").onchange = function() {
+          document.getElementById("md-shared-wrap").style.display = this.value === "shared" ? "block" : "none";
+        };
+        document.getElementById("md-save-vis").onclick = function() {
+          var vis = document.getElementById("md-vis").value;
+          var sharedRaw = document.getElementById("md-shared-agents").value;
+          var sharedArr = vis === "shared" ? sharedRaw.split(",").map(function(s) { return s.trim(); }).filter(Boolean) : [];
+          var errEl = document.getElementById("md-vis-err");
+          if (vis === "shared" && sharedArr.length === 0) { errEl.textContent = "Add at least one agent ID for shared visibility"; return; }
+          errEl.textContent = "";
+          api("PATCH", "/v1/user/agents/" + agentId + "/memory-entry/visibility", {namespace: namespace, key: key, visibility: vis, shared_agents: sharedArr})
+            .then(function() {
+              showToast("Visibility updated to " + vis, "success");
+              d.visibility = vis;
+              if (onRefresh) onRefresh(0, true);
+            })
+            .catch(function(e) { errEl.textContent = e.detail || "Failed to update"; });
+        };
+        // Load audit log lazily when details opened
+        mc.querySelector("details").addEventListener("toggle", function() {
+          if (!this.open) return;
+          var el = document.getElementById("md-audit");
+          if (!el || el.querySelector("table")) return;
+          api("GET", "/v1/user/agents/" + agentId + "/memory-access-log?namespace=" + encodeURIComponent(namespace) + "&key=" + encodeURIComponent(key) + "&limit=20")
+            .then(function(data) {
+              var logs = data.logs || [];
+              if (!logs.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:0.78rem;padding:4px 0">No access events recorded yet.</div>'; return; }
+              el.innerHTML = logs.map(function(lg) {
+                var who = lg.actor_user_id ? "User" : (lg.actor_agent_id ? lg.actor_agent_id.slice(0, 16) + "\u2026" : "system");
+                var auth = lg.authorized === 0 ? ' <span style="color:var(--accent);font-size:0.68rem">DENIED</span>' : "";
+                var vis_change = (lg.old_visibility && lg.new_visibility) ? (' ' + esc(lg.old_visibility) + ' \u2192 ' + esc(lg.new_visibility)) : "";
+                return '<div class="audit-log-row">' +
+                  '<span class="audit-action">' + esc(lg.action) + '</span>' +
+                  '<span style="flex:1;color:var(--text-dim)">' + esc(who) + vis_change + auth + '</span>' +
+                  '<span style="color:var(--text-dim);font-size:0.68rem">' + esc(timeAgo(lg.created_at)) + '</span>' +
+                  '</div>';
+              }).join("");
+            })
+            .catch(function() { el.innerHTML = '<div style="color:var(--text-dim);font-size:0.78rem">Could not load audit log.</div>'; });
+        });
+      })
+      .catch(function(err) {
+        mc.innerHTML = '<h2>Error</h2><p style="color:var(--accent)">' + esc(err.detail || "Failed to load") + '</p><button class="btn btn-ghost" id="md-close" style="width:100%">Close</button>';
+        document.getElementById("md-close").onclick = function() { ov.classList.remove("active"); };
+      });
+  }
+
+  function showBulkVisibilityModal(agentId, entries, onSuccess) {
+    var ov = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    ov.classList.add("active");
+    mc.innerHTML =
+      '<h2 style="margin-top:0">Change Visibility</h2>' +
+      '<div style="color:var(--text-dim);font-size:0.82rem;margin-bottom:1rem">Applying to ' + entries.length + ' selected key' + (entries.length === 1 ? '' : 's') + '.</div>' +
+      '<div class="form-group"><label>New Visibility</label>' +
+      '<select class="input" id="bv-vis" style="font-size:0.85rem">' +
+      '<option value="private">&#128274; Private — owning agent only</option>' +
+      '<option value="public">&#127760; Public — readable by any agent</option>' +
+      '<option value="shared">&#128101; Shared — specific agents only</option>' +
+      '</select></div>' +
+      '<div id="bv-shared-wrap" style="display:none" class="form-group"><label>Agent IDs (comma-separated)</label>' +
+      '<input class="input" id="bv-shared-agents" placeholder="agent_abc123, agent_xyz456"></div>' +
+      '<div id="bv-err" class="name-error"></div>' +
+      '<div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">' +
+      '<button class="btn" id="bv-cancel">Cancel</button>' +
+      '<button class="btn btn-accent" id="bv-apply">Apply</button>' +
+      '</div>';
+    document.getElementById("bv-cancel").onclick = function() { ov.classList.remove("active"); };
+    document.getElementById("bv-vis").onchange = function() {
+      document.getElementById("bv-shared-wrap").style.display = this.value === "shared" ? "block" : "none";
+    };
+    document.getElementById("bv-apply").onclick = function() {
+      var vis = document.getElementById("bv-vis").value;
+      var sharedRaw = document.getElementById("bv-shared-agents").value;
+      var sharedArr = vis === "shared" ? sharedRaw.split(",").map(function(s) { return s.trim(); }).filter(Boolean) : [];
+      var errEl = document.getElementById("bv-err");
+      if (vis === "shared" && sharedArr.length === 0) { errEl.textContent = "Add at least one agent ID"; return; }
+      errEl.textContent = "";
+      api("POST", "/v1/user/agents/" + agentId + "/memory-bulk-visibility", {entries: entries, visibility: vis, shared_agents: sharedArr})
+        .then(function(data) {
+          ov.classList.remove("active");
+          showToast("Updated " + data.count + " key" + (data.count === 1 ? "" : "s") + " to " + vis, "success");
+          if (onSuccess) onSuccess();
+        })
+        .catch(function(e) { errEl.textContent = e.detail || "Failed to update"; });
+    };
+  }
+
+  function renderTabJobs(agentId) {
+    var tc = document.getElementById("tab-content");
+    if (!tc) return;
+    var _status = "all", _offset = 0, _total = 0;
+    function load(offset, replace) {
+      offset = offset || 0;
+      var qs = "?limit=20&offset=" + offset + "&status=" + encodeURIComponent(_status);
+      api("GET", "/v1/user/agents/" + agentId + "/jobs-list" + qs).then(function(data) {
+        _total = data.total || 0;
+        _offset = offset + (data.jobs || []).length;
+        var tbody = document.getElementById("job-tbody");
+        if (!tbody) return;
+        if (replace) tbody.innerHTML = "";
+        if ((data.jobs || []).length === 0 && replace) {
+          tbody.innerHTML = '<tr><td colspan="6" class="tab-empty">No jobs found</td></tr>';
+        } else {
+          (data.jobs || []).forEach(function(j) {
+            var tr = document.createElement("tr");
+            tr.className = "clickable";
+            var stCls = j.status === "completed" ? "completed" : j.status === "failed" ? "failed" : "";
+            tr.innerHTML =
+              '<td style="font-family:monospace;font-size:0.75rem">' + esc(j.job_id.slice(0,16)) + '\u2026</td>' +
+              '<td>' + esc(j.queue_name) + '</td>' +
+              '<td><span class="status-pill ' + stCls + '">' + esc(j.status) + '</span></td>' +
+              '<td>' + j.priority + '</td>' +
+              '<td>' + j.attempt_count + '/' + j.max_attempts + '</td>' +
+              '<td style="color:var(--text-dim);font-size:0.75rem">' + esc(timeAgo(j.created_at)) + '</td>';
+            tr.onclick = function() { showActivityDetail(agentId, "job", j.job_id); };
+            tbody.appendChild(tr);
+          });
+        }
+        var pg = document.getElementById("job-pagination");
+        if (pg) {
+          pg.innerHTML = _offset < _total ? '<button class="load-more-btn" id="job-load-more">Load more (' + (_total - _offset) + ' remaining)</button>' : "";
+          var lm = document.getElementById("job-load-more");
+          if (lm) lm.onclick = function() { load(_offset, false); };
+        }
+      }).catch(function(e) {
+        var tbody = document.getElementById("job-tbody");
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="tab-empty">' + esc(e.detail || "Error loading") + '</td></tr>';
+      });
+    }
+    tc.innerHTML =
+      '<div class="tab-toolbar">' +
+      '<div class="activity-filter-bar" style="margin:0">' +
+      '<button class="filter-btn active" data-st="all">All</button>' +
+      '<button class="filter-btn" data-st="pending">Pending</button>' +
+      '<button class="filter-btn" data-st="running">Running</button>' +
+      '<button class="filter-btn" data-st="completed">Completed</button>' +
+      '<button class="filter-btn" data-st="failed">Failed</button>' +
+      '</div>' +
+      '<button class="btn btn-sm" id="job-refresh" style="margin-left:auto">&#8635; Refresh</button>' +
+      '</div>' +
+      '<table class="data-table"><thead><tr><th>Job ID</th><th>Queue</th><th>Status</th><th>Priority</th><th>Attempts</th><th>Created</th></tr></thead>' +
+      '<tbody id="job-tbody"><tr><td colspan="6" class="tab-empty"><span class="spinner"></span></td></tr></tbody></table>' +
+      '<div id="job-pagination"></div>';
+    load(0, true);
+    tc.querySelectorAll(".filter-btn[data-st]").forEach(function(btn) {
+      btn.onclick = function() {
+        _status = this.getAttribute("data-st");
+        tc.querySelectorAll(".filter-btn[data-st]").forEach(function(b) { b.classList.remove("active"); });
+        this.classList.add("active");
+        load(0, true);
+      };
+    });
+    document.getElementById("job-refresh").onclick = function() { load(0, true); };
+  }
+
+  function renderTabSchedules(agentId) {
+    var tc = document.getElementById("tab-content");
+    if (!tc) return;
+    function loadSchedules() {
+      api("GET", "/v1/user/agents/" + agentId + "/schedules").then(function(data) {
+        var list = document.getElementById("sched-list");
+        if (!list) return;
+        var rows = data.schedules || [];
+        if (rows.length === 0) {
+          list.innerHTML = '<div class="tab-empty" style="padding:1.5rem 0">No schedules. Click "Add Schedule" to create one.</div>';
+          return;
+        }
+        list.innerHTML = "";
+        rows.forEach(function(sc) {
+          var div = document.createElement("div");
+          div.className = "settings-section";
+          div.style.cssText = "display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:0.8rem 1.25rem;margin-bottom:0.5rem";
+          div.innerHTML =
+            '<div style="flex:1;min-width:0">' +
+            '<div style="font-family:monospace;font-size:0.85rem;margin-bottom:2px">' + esc(sc.cron_expr) + '</div>' +
+            '<div style="font-size:0.75rem;color:var(--text-dim)">Queue: ' + esc(sc.queue_name) + ' &middot; Runs: ' + sc.run_count + (sc.next_run_at ? ' &middot; Next: ' + esc(timeAgo(sc.next_run_at)) : '') + '</div>' +
+            '</div>' +
+            '<label class="toggle-switch" title="' + (sc.enabled ? "Enabled" : "Disabled") + '">' +
+            '<input type="checkbox" ' + (sc.enabled ? "checked" : "") + ' data-task-id="' + esc(sc.task_id) + '">' +
+            '<span class="toggle-slider"></span></label>' +
+            '<button class="btn btn-sm btn-danger sched-del-btn" data-task-id="' + esc(sc.task_id) + '" style="font-size:0.7rem;padding:3px 8px">Delete</button>';
+          list.appendChild(div);
+          div.querySelector("input[type=checkbox]").onchange = function() {
+            var tid = this.getAttribute("data-task-id");
+            api("PATCH", "/v1/user/agents/" + agentId + "/schedules/" + tid, { enabled: this.checked })
+              .then(function() { showToast("Schedule updated", "success"); })
+              .catch(function(e) { showToast(e.detail || "Update failed", "error"); loadSchedules(); });
+          };
+          div.querySelector(".sched-del-btn").onclick = function() {
+            var tid = this.getAttribute("data-task-id");
+            if (!confirm("Delete this schedule?")) return;
+            api("DELETE", "/v1/user/agents/" + agentId + "/schedules/" + tid)
+              .then(function() { showToast("Schedule deleted", "success"); loadSchedules(); })
+              .catch(function(e) { showToast(e.detail || "Delete failed", "error"); });
+          };
+        });
+      }).catch(function(e) {
+        var list = document.getElementById("sched-list");
+        if (list) list.innerHTML = '<div class="tab-empty">' + esc(e.detail || "Error loading schedules") + '</div>';
+      });
+    }
+    tc.innerHTML =
+      '<div class="tab-toolbar">' +
+      '<button class="btn btn-accent btn-sm" id="sched-add-btn">+ Add Schedule</button>' +
+      '</div>' +
+      '<div id="sched-list"><div class="loading-page" style="min-height:8vh"><span class="spinner"></span></div></div>';
+    loadSchedules();
+    document.getElementById("sched-add-btn").onclick = function() { showAddScheduleModal(agentId, loadSchedules); };
+  }
+
+  function renderTabSettings(agentId, stats) {
+    var tc = document.getElementById("tab-content");
+    if (!tc) return;
+    function loadWebhooks() {
+      api("GET", "/v1/user/agents/" + agentId + "/webhooks").then(function(data) {
+        var wlist = document.getElementById("webhook-list");
+        if (!wlist) return;
+        var whs = data.webhooks || [];
+        if (whs.length === 0) {
+          wlist.innerHTML = '<div style="color:var(--text-dim);font-size:0.82rem;padding:0.5rem 0">No webhooks registered.</div>';
+        } else {
+          wlist.innerHTML = whs.map(function(w) {
+            return '<div style="display:flex;align-items:center;gap:0.75rem;padding:6px 0;border-bottom:1px solid var(--border)">' +
+              '<div style="flex:1;min-width:0;font-size:0.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(w.url) + '">' + esc(w.url) + '</div>' +
+              '<span class="status-pill ' + (w.active ? "completed" : "") + '" style="font-size:0.68rem">' + (w.active ? "active" : "inactive") + '</span>' +
+              '<button class="btn btn-sm btn-danger wh-del-btn" data-wh-id="' + esc(w.webhook_id) + '" style="font-size:0.7rem;padding:3px 8px">Delete</button>' +
+              '</div>';
+          }).join("");
+          wlist.querySelectorAll(".wh-del-btn").forEach(function(btn) {
+            btn.onclick = function() {
+              var wid = this.getAttribute("data-wh-id");
+              if (!confirm("Delete this webhook?")) return;
+              api("DELETE", "/v1/user/agents/" + agentId + "/webhooks/" + wid)
+                .then(function() { showToast("Webhook deleted", "success"); loadWebhooks(); })
+                .catch(function(e) { showToast(e.detail || "Delete failed", "error"); });
+            };
+          });
+        }
+      }).catch(function() {});
+    }
+    tc.innerHTML =
+      '<div class="settings-section">' +
+      '<div class="section-title" style="margin:0 0 0.75rem">Rename Agent</div>' +
+      '<div style="display:flex;gap:0.5rem;align-items:center">' +
+      '<input class="input" id="set-name-input" value="' + esc(stats.name || "") + '" style="flex:1" maxlength="64">' +
+      '<button class="btn btn-accent btn-sm" id="set-name-save">Save</button>' +
+      '</div><div id="set-name-err" class="name-error"></div>' +
+      '</div>' +
+      '<div class="settings-section">' +
+      '<div class="section-title" style="margin:0 0 0.5rem">API Key</div>' +
+      '<div style="color:var(--text-dim);font-size:0.82rem;margin-bottom:0.75rem">Regenerating creates a new key and immediately invalidates the old one.</div>' +
+      '<button class="btn btn-sm" id="set-regen-btn">&#128273; Regenerate API Key</button>' +
+      '</div>' +
+      '<div class="settings-section">' +
+      '<div class="section-title" style="margin:0 0 0.75rem">Webhooks</div>' +
+      '<div id="webhook-list"><span class="spinner"></span></div>' +
+      '<div style="margin-top:0.75rem"><button class="btn btn-sm" id="set-add-webhook-btn">+ Add Webhook</button></div>' +
+      '</div>' +
+      '<div class="settings-section" style="border-color:var(--accent)">' +
+      '<div class="section-title" style="margin:0 0 0.5rem;color:var(--accent)">Danger Zone</div>' +
+      '<div style="color:var(--text-dim);font-size:0.82rem;margin-bottom:0.75rem">Permanently deletes this agent, all its memory, jobs, and schedules. This cannot be undone.</div>' +
+      '<button class="btn btn-accent btn-sm" id="set-delete-btn">Delete Agent</button>' +
+      '</div>';
+    loadWebhooks();
+    document.getElementById("set-name-save").onclick = function() {
+      var newName = document.getElementById("set-name-input").value.trim();
+      var errEl = document.getElementById("set-name-err");
+      if (!newName) { errEl.textContent = "Name cannot be empty"; return; }
+      api("PATCH", "/v1/user/agents/" + agentId, { name: newName })
+        .then(function() { showToast("Agent renamed", "success"); stats.name = newName; errEl.textContent = ""; })
+        .catch(function(e) { errEl.textContent = e.detail || "Failed to rename"; });
+    };
+    document.getElementById("set-regen-btn").onclick = function() { showRotateKeyModal(agentId); };
+    document.getElementById("set-delete-btn").onclick = function() { showDeleteModal(agentId); };
+    document.getElementById("set-add-webhook-btn").onclick = function() { showAddWebhookModal(agentId, loadWebhooks); };
+  }
+
+  function showAddScheduleModal(agentId, onSuccess) {
+    var ov = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    ov.classList.add("active");
+    mc.innerHTML =
+      '<h2 style="margin-top:0">Add Schedule</h2>' +
+      '<div class="form-group"><label>Cron Expression</label>' +
+      '<input class="input" id="sched-cron" placeholder="e.g. 0 * * * *" style="font-family:monospace"></div>' +
+      '<div class="form-group"><label>Queue Name</label>' +
+      '<input class="input" id="sched-queue" value="default"></div>' +
+      '<div class="form-group"><label>Priority (0\u201310)</label>' +
+      '<input class="input" id="sched-priority" type="number" value="0" min="0" max="10"></div>' +
+      '<div id="sched-err" class="name-error"></div>' +
+      '<div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">' +
+      '<button class="btn" id="sched-cancel">Cancel</button>' +
+      '<button class="btn btn-accent" id="sched-save">Create Schedule</button>' +
+      '</div>';
+    document.getElementById("sched-cancel").onclick = function() { ov.classList.remove("active"); };
+    document.getElementById("sched-save").onclick = function() {
+      var cron = document.getElementById("sched-cron").value.trim();
+      var queue = document.getElementById("sched-queue").value.trim() || "default";
+      var priority = parseInt(document.getElementById("sched-priority").value, 10) || 0;
+      var errEl = document.getElementById("sched-err");
+      if (!cron) { errEl.textContent = "Cron expression is required"; return; }
+      errEl.textContent = "";
+      api("POST", "/v1/user/agents/" + agentId + "/schedules", { cron_expr: cron, queue_name: queue, priority: priority, payload: "{}" })
+        .then(function() { ov.classList.remove("active"); showToast("Schedule created", "success"); if (onSuccess) onSuccess(); })
+        .catch(function(e) { errEl.textContent = e.detail || "Failed to create schedule"; });
+    };
+  }
+
+  function showAddWebhookModal(agentId, onSuccess) {
+    var ov = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    ov.classList.add("active");
+    mc.innerHTML =
+      '<h2 style="margin-top:0">Add Webhook</h2>' +
+      '<div class="form-group"><label>URL</label>' +
+      '<input class="input" id="wh-url" placeholder="https://your-server.com/webhook"></div>' +
+      '<div class="form-group"><label>Event Types</label>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:4px" id="wh-event-types">' +
+      ['message.received','job.completed','job.failed','agent.heartbeat','key.rotated'].map(function(et) {
+        return '<label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer"><input type="checkbox" value="' + et + '">' + et + '</label>';
+      }).join("") +
+      '</div></div>' +
+      '<div class="form-group"><label>Secret (optional)</label>' +
+      '<input class="input" id="wh-secret" placeholder="HMAC signing secret"></div>' +
+      '<div id="wh-err" class="name-error"></div>' +
+      '<div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">' +
+      '<button class="btn" id="wh-cancel">Cancel</button>' +
+      '<button class="btn btn-accent" id="wh-save">Add Webhook</button>' +
+      '</div>';
+    document.getElementById("wh-cancel").onclick = function() { ov.classList.remove("active"); };
+    document.getElementById("wh-save").onclick = function() {
+      var url = document.getElementById("wh-url").value.trim();
+      var secret = document.getElementById("wh-secret").value.trim();
+      var types = Array.from(document.querySelectorAll("#wh-event-types input:checked")).map(function(cb) { return cb.value; });
+      var errEl = document.getElementById("wh-err");
+      if (!url) { errEl.textContent = "URL is required"; return; }
+      if (types.length === 0) { errEl.textContent = "Select at least one event type"; return; }
+      errEl.textContent = "";
+      api("POST", "/v1/user/agents/" + agentId + "/webhooks", { url: url, event_types: types, secret: secret })
+        .then(function() { ov.classList.remove("active"); showToast("Webhook added", "success"); if (onSuccess) onSuccess(); })
+        .catch(function(e) { errEl.textContent = e.detail || "Failed to add webhook"; });
+    };
+  }
+
+  function showActivityDetail(agentId, type, id, ns, key) {
+    var overlay = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    overlay.classList.add("active");
+    mc.innerHTML = '<div style="text-align:center;padding:2rem"><span class="spinner"></span></div>';
+    var p;
+    if (type === "message") {
+      p = api("GET", "/v1/user/agents/" + agentId + "/messages/" + id);
+    } else if (type === "job") {
+      p = api("GET", "/v1/user/agents/" + agentId + "/jobs/" + id);
+    } else if (type === "memory") {
+      p = api("GET", "/v1/user/agents/" + agentId + "/memory-entry?namespace=" + encodeURIComponent(ns || "default") + "&key=" + encodeURIComponent(key || ""));
+    } else {
+      overlay.classList.remove("active"); return;
+    }
+    p.then(function(d) {
+      var html = '<h2 style="margin-bottom:1rem">';
+      if (type === "message") {
+        html += (d.from_agent === agentId ? "&#128228; Message Sent" : "&#128232; Message Received") + "</h2>";
+        html += '<div class="detail-row"><div class="detail-field"><label>From</label><div class="detail-value">' + esc(d.from_name || d.from_agent) + '</div></div>';
+        html += '<div class="detail-field"><label>To</label><div class="detail-value">' + esc(d.to_name || d.to_agent) + '</div></div></div>';
+        html += '<div class="detail-field"><label>Channel</label><div class="detail-value">' + esc(d.channel || "default") + '</div></div>';
+        html += '<div class="detail-field"><label>Time</label><div class="detail-value">' + esc(d.created_at || "") + '</div></div>';
+        html += '<div class="detail-field"><label>Payload</label><div class="detail-value">' + esc(formatJson(d.payload)) + '</div></div>';
+      } else if (type === "job") {
+        var sc = (d.status || "").toLowerCase();
+        html += "&#128230; Job Detail</h2>";
+        html += '<div class="detail-row"><div class="detail-field"><label>Queue</label><div class="detail-value">' + esc(d.queue_name || "") + '</div></div>';
+        html += '<div class="detail-field"><label>Status</label><div class="detail-value"><span class="status-pill ' + esc(sc) + '">' + esc(d.status || "") + '</span></div></div></div>';
+        html += '<div class="detail-row"><div class="detail-field"><label>Created</label><div class="detail-value">' + esc(d.created_at || "") + '</div></div>';
+        html += '<div class="detail-field"><label>Completed</label><div class="detail-value">' + esc(d.completed_at || d.failed_at || "\u2014") + '</div></div></div>';
+        html += '<div class="detail-field"><label>Payload</label><div class="detail-value">' + esc(formatJson(d.payload)) + '</div></div>';
+        if (d.result) html += '<div class="detail-field"><label>Result</label><div class="detail-value">' + esc(formatJson(d.result)) + '</div></div>';
+        if (d.error) html += '<div class="detail-field"><label>Error</label><div class="detail-value" style="color:var(--accent)">' + esc(d.error) + '</div></div>';
+      } else if (type === "memory") {
+        html += "&#128190; Memory Entry</h2>";
+        html += '<div class="detail-row"><div class="detail-field"><label>Namespace</label><div class="detail-value">' + esc(d.namespace || "") + '</div></div>';
+        html += '<div class="detail-field"><label>Key</label><div class="detail-value">' + esc(d.key || "") + '</div></div></div>';
+        html += '<div class="detail-field"><label>Updated</label><div class="detail-value">' + esc(d.updated_at || "") + '</div></div>';
+        html += '<div class="detail-field"><label>Value</label><div class="detail-value">' + esc(formatJson(d.value)) + '</div></div>';
+      }
+      html += '<button class="btn btn-ghost" style="margin-top:1rem;width:100%" id="detail-close">Close</button>';
+      mc.innerHTML = html;
+      document.getElementById("detail-close").onclick = function() { overlay.classList.remove("active"); };
+    }).catch(function(err) {
+      mc.innerHTML = '<h2>Error</h2><p class="subtitle" style="color:var(--accent)">' + esc(err.detail || "Failed to load details") + '</p><div class="modal-actions"><button class="btn btn-ghost" id="detail-close">Close</button></div>';
+      document.getElementById("detail-close").onclick = function() { overlay.classList.remove("active"); };
+    });
+  }
+
+  function formatJson(val) {
+    if (!val) return "";
+    if (typeof val === "object") { try { return JSON.stringify(val, null, 2); } catch(e) { return String(val); } }
+    try { return JSON.stringify(JSON.parse(val), null, 2); } catch(e) { return String(val); }
+  }
+
+  function showToast(message, type) {
+    type = type || "info";
+    var el = document.createElement("div");
+    el.className = "toast " + type;
+    el.textContent = message;
+    document.body.appendChild(el);
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() { el.classList.add("show"); });
+    });
+    setTimeout(function() {
+      el.classList.remove("show");
+      setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 300);
+    }, 3000);
+  }
+
+  function buildAgentPicker(wrapEl, agents, defaultId) {
+    var selected = null;
+    for (var i = 0; i < agents.length; i++) {
+      if (agents[i].agent_id === defaultId) { selected = agents[i]; break; }
+    }
+    if (!selected && agents.length) selected = agents[0];
+
+    function label(a) { return a ? (a.name || a.agent_id) : "Select agent\u2026"; }
+
+    wrapEl.innerHTML =
+      '<div class="agent-picker-input" tabindex="0">' +
+      '<span class="ap-name">' + esc(label(selected)) + '</span>' +
+      (selected ? '<span class="ap-id-inline">' + esc(selected.agent_id) + '</span>' : '') +
+      '<span class="chevron">&#9660;</span>' +
+      '</div>' +
+      '<div class="agent-picker-list">' +
+      '<input class="agent-picker-search" placeholder="Search\u2026" autocomplete="off">' +
+      '<div class="agent-picker-items"></div>' +
+      '</div>';
+
+    var displayBtn = wrapEl.querySelector(".agent-picker-input");
+    var listEl = wrapEl.querySelector(".agent-picker-list");
+    var searchEl = wrapEl.querySelector(".agent-picker-search");
+    var itemsEl = wrapEl.querySelector(".agent-picker-items");
+
+    function renderItems(filter) {
+      var q = (filter || "").toLowerCase();
+      var filtered = agents.filter(function(a) {
+        return !q || (a.name || "").toLowerCase().indexOf(q) !== -1 || a.agent_id.toLowerCase().indexOf(q) !== -1;
+      });
+      if (!filtered.length) {
+        itemsEl.innerHTML = '<div class="agent-picker-empty">No agents found</div>';
+        return;
+      }
+      itemsEl.innerHTML = "";
+      filtered.forEach(function(a) {
+        var div = document.createElement("div");
+        div.className = "agent-picker-item";
+        div.innerHTML = '<div class="ap-name">' + esc(a.name || a.agent_id) + '</div><div class="ap-id">' + esc(a.agent_id) + '</div>';
+        div.onclick = function() {
+          selected = a;
+          displayBtn.querySelector(".ap-name").textContent = label(a);
+          var idSpan = displayBtn.querySelector(".ap-id-inline");
+          if (idSpan) idSpan.textContent = a.agent_id;
+          else displayBtn.insertBefore(Object.assign(document.createElement("span"), { className:"ap-id-inline", textContent:a.agent_id }), displayBtn.querySelector(".chevron"));
+          listEl.classList.remove("open");
+          displayBtn.classList.remove("open");
+        };
+        itemsEl.appendChild(div);
+      });
+    }
+    renderItems("");
+
+    displayBtn.onclick = function(e) {
+      e.stopPropagation();
+      var opening = !listEl.classList.contains("open");
+      listEl.classList.toggle("open");
+      displayBtn.classList.toggle("open");
+      if (opening) { searchEl.value = ""; renderItems(""); searchEl.focus(); }
+    };
+    searchEl.oninput = function() { renderItems(this.value); };
+    searchEl.onclick = function(e) { e.stopPropagation(); };
+
+    document.addEventListener("click", function _close(e) {
+      if (!wrapEl.contains(e.target)) {
+        listEl.classList.remove("open");
+        displayBtn.classList.remove("open");
+        document.removeEventListener("click", _close);
+      }
+    });
+
+    wrapEl._getSelected = function() { return selected ? selected.agent_id : null; };
+    wrapEl._getAgent = function() { return selected; };
   }
 
   // ── Action Modals ──
@@ -640,30 +1669,81 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
     overlay.classList.add("active");
     mc.innerHTML =
       '<h2>Send Test Message</h2>' +
-      '<p class="subtitle">Send from ' + esc(fromAgentId) + '</p>' +
-      '<div class="form-group"><label>Recipient Agent ID</label>' +
-      '<input type="text" id="msg-to" placeholder="agent_xxxxxxxxxxxx"></div>' +
-      '<div class="form-group"><label>Payload</label>' +
-      '<textarea id="msg-payload" placeholder=\'{"hello": "world"}\'></textarea></div>' +
-      '<div id="msg-result"></div>' +
-      '<div class="modal-actions">' +
-      '<button class="btn btn-ghost" id="msg-cancel">Cancel</button>' +
-      '<button class="btn btn-accent" id="msg-send">Send</button></div>';
+      '<div class="loading-page" style="min-height:6vh"><span class="spinner"></span></div>';
 
-    document.getElementById("msg-cancel").onclick = function() { overlay.classList.remove("active"); };
-    document.getElementById("msg-send").onclick = function() {
-      var to = document.getElementById("msg-to").value.trim();
-      var payload = document.getElementById("msg-payload").value.trim() || "test";
-      if (!to) return;
-      var btn = document.getElementById("msg-send");
-      btn.disabled = true; btn.textContent = "Sending\u2026";
-      // We need to use the agent's API key, but we don't have it.
-      // Instead, use the relay/send endpoint description to explain this.
-      document.getElementById("msg-result").innerHTML =
-        '<div class="alert alert-error">Messages must be sent using the agent\'s API key via POST /v1/relay/send. ' +
-        'Use your agent\'s key in code or curl.</div>';
-      btn.disabled = false; btn.textContent = "Send";
-    };
+    api("GET", "/v1/user/agents").then(function(data) {
+      var agents = data.agents || [];
+      mc.innerHTML =
+        '<h2>Send Test Message</h2>' +
+        '<div class="form-group"><label>From Agent</label>' +
+        '<div class="agent-picker" id="msg-from-picker"></div></div>' +
+        '<div class="form-group"><label>To Agent</label>' +
+        '<div class="agent-picker" id="msg-to-picker"></div></div>' +
+        '<div class="form-group"><label>Channel</label>' +
+        '<input type="text" id="msg-channel" value="direct" maxlength="64" autocomplete="off"></div>' +
+        '<div class="form-group"><label>Payload</label>' +
+        '<textarea id="msg-payload" placeholder=\'{"hello": "world"}\'></textarea></div>' +
+        '<div id="msg-err" style="min-height:1em;font-size:0.8rem;color:var(--accent);margin-bottom:0.5rem"></div>' +
+        '<div class="modal-actions">' +
+        '<button class="btn btn-ghost" id="msg-cancel">Cancel</button>' +
+        '<button class="btn btn-accent" id="msg-send">Send &#128228;</button></div>';
+
+      buildAgentPicker(document.getElementById("msg-from-picker"), agents, fromAgentId);
+      var defaultTo = fromAgentId;
+      for (var i = 0; i < agents.length; i++) {
+        if (agents[i].agent_id !== fromAgentId) { defaultTo = agents[i].agent_id; break; }
+      }
+      buildAgentPicker(document.getElementById("msg-to-picker"), agents, defaultTo);
+
+      document.getElementById("msg-cancel").onclick = function() { overlay.classList.remove("active"); };
+
+      document.getElementById("msg-send").onclick = function() {
+        var fromPicker = document.getElementById("msg-from-picker");
+        var toPicker = document.getElementById("msg-to-picker");
+        var fromId = fromPicker._getSelected();
+        var toId = toPicker._getSelected();
+        var toAgent = toPicker._getAgent();
+        var channel = document.getElementById("msg-channel").value.trim() || "direct";
+        var payload = document.getElementById("msg-payload").value.trim() || "{}";
+        var errEl = document.getElementById("msg-err");
+        errEl.textContent = "";
+        if (!fromId) { errEl.textContent = "Select a sender agent."; return; }
+        if (!toId) { errEl.textContent = "Select a recipient agent."; return; }
+        var btn = this;
+        btn.disabled = true; btn.innerHTML = "Sending\u2026";
+        api("POST", "/v1/user/agents/" + fromId + "/send", {
+          to_agent: toId, channel: channel, payload: payload,
+        }).then(function(resp) {
+          overlay.classList.remove("active");
+          showToast("Message sent successfully!", "success");
+          // Prepend to activity feed immediately
+          var list = document.getElementById("activity-list");
+          if (list) {
+            var toLabel = toAgent ? (toAgent.name || toId) : toId;
+            var div = document.createElement("div");
+            div.className = "activity-item clickable";
+            div.innerHTML =
+              '<div class="activity-icon">&#128228;</div>' +
+              '<div class="activity-text">Message sent to <span class="dim">' + esc(toLabel) + '</span></div>' +
+              '<div class="activity-time">just now</div>';
+            var mid = resp.message_id;
+            var aid = fromId;
+            div.onclick = function() { showActivityDetail(aid, "message", mid); };
+            list.insertBefore(div, list.firstChild);
+          }
+        }).catch(function(err) {
+          errEl.textContent = err.detail || "Failed to send message.";
+          btn.disabled = false; btn.innerHTML = "Send &#128228;";
+          showToast(err.detail || "Send failed", "error");
+        });
+      };
+    }).catch(function(err) {
+      mc.innerHTML =
+        '<h2>Send Test Message</h2>' +
+        '<p class="subtitle" style="color:var(--accent)">' + esc(err.detail || "Failed to load agents") + '</p>' +
+        '<div class="modal-actions"><button class="btn btn-ghost" id="msg-cancel">Close</button></div>';
+      document.getElementById("msg-cancel").onclick = function() { overlay.classList.remove("active"); };
+    });
   }
 
   function showJobModal(agentId) {
@@ -717,6 +1797,96 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
         window.alert("Failed: " + (err.detail || "Unknown error"));
       });
     };
+  }
+
+  // ── Overview Page ──
+  function renderOverview(app) {
+    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+    if (!user) {
+      api("GET", "/v1/auth/me").then(function(me) { user = me; renderOverview(app); })
+        .catch(function() { token = null; navigate("#/login"); });
+      app.innerHTML = '<div class="loading-page"><span class="spinner"></span></div>';
+      return;
+    }
+    var tier = user.subscription_tier || "free";
+    app.innerHTML =
+      renderHeader(tier) +
+      '<div class="page">' +
+      '<h1 style="margin-bottom:1.5rem">Account Overview</h1>' +
+      '<div id="ov-content"><div class="loading-page"><span class="spinner"></span> Loading\u2026</div></div>' +
+      '</div>' +
+      '<div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal-content"></div></div>';
+    wireHeader();
+    document.getElementById("modal-overlay").onclick = function(e) {
+      if (e.target.id === "modal-overlay") e.target.classList.remove("active");
+    };
+
+    api("GET", "/v1/user/overview").then(function(d) {
+      var t = d.totals || {};
+      var ov = document.getElementById("ov-content");
+
+      var agentRows = (d.agents || []).map(function(a) {
+        var isOn = a.heartbeat_status === "online" || a.heartbeat_status === "busy" || a.heartbeat_status === "idle";
+        var dotCls = isOn ? "online" : "offline";
+        return '<tr style="cursor:pointer" onclick="window.location.hash=\'#/agents/' + esc(a.agent_id) + '\'">' +
+          '<td><span class="status-dot ' + dotCls + '" style="display:inline-block;margin-right:6px"></span>' + esc(a.name || a.agent_id) + '</td>' +
+          '<td><span class="status-pill ' + (isOn ? "completed" : "failed") + '">' + esc(a.heartbeat_status || "unknown") + '</span></td>' +
+          '<td>' + (a.heartbeat_at ? esc(timeAgo(a.heartbeat_at)) : '\u2014') + '</td>' +
+          '<td>' + (a.request_count || 0).toLocaleString() + '</td>' +
+          '</tr>';
+      }).join("");
+
+      ov.innerHTML =
+        '<div class="overview-grid">' +
+        '<div class="ov-card"><div class="ov-val" style="color:var(--accent)">' + (d.total_agents || 0) + '</div><div class="ov-label">Total Agents</div></div>' +
+        '<div class="ov-card"><div class="ov-val" style="color:#00ff88">' + (d.online_count || 0) + '</div><div class="ov-label">Online Now</div></div>' +
+        '<div class="ov-card"><div class="ov-val" style="color:var(--purple)">' + ((t.messages_sent || 0) + (t.messages_received || 0)) + '</div><div class="ov-label">Total Messages</div></div>' +
+        '<div class="ov-card"><div class="ov-val" style="color:#64c8ff">' + (t.jobs_completed || 0) + '</div><div class="ov-label">Jobs Completed</div></div>' +
+        '<div class="ov-card"><div class="ov-val" style="color:var(--red)">' + (t.jobs_failed || 0) + '</div><div class="ov-label">Jobs Failed</div></div>' +
+        '<div class="ov-card"><div class="ov-val" style="color:var(--yellow)">' + (t.memory_keys || 0) + '</div><div class="ov-label">Memory Keys</div></div>' +
+        '</div>' +
+
+        '<div class="section-title">30-Day Message Volume</div>' +
+        '<div class="chart-card" style="margin-bottom:1.5rem"><div class="chart-wrap" style="height:160px"><canvas id="ov-chart-msg"></canvas></div></div>' +
+
+        '<div class="section-title">30-Day Job Outcomes</div>' +
+        '<div class="chart-card" style="margin-bottom:1.5rem"><div class="chart-wrap" style="height:160px"><canvas id="ov-chart-jobs"></canvas></div></div>' +
+
+        '<div class="section-title">Agents</div>' +
+        '<div class="chart-card" style="overflow-x:auto">' +
+        '<table class="agents-table"><thead><tr>' +
+        '<th>Agent</th><th>Status</th><th>Last Seen</th><th style="text-align:right">Requests</th>' +
+        '</tr></thead><tbody>' + (agentRows || '<tr><td colspan="4" style="color:var(--text-dim);text-align:center">No agents yet</td></tr>') + '</tbody></table>' +
+        '</div>';
+
+      // Overview charts
+      var msgLabels = (d.msg_chart || []).map(function(r) { return r.date.slice(5); });
+      var ovMsgCtx = document.getElementById("ov-chart-msg");
+      if (ovMsgCtx) {
+        new Chart(ovMsgCtx, {
+          type: "bar",
+          data: { labels: msgLabels, datasets: [{ label: "Messages", data: (d.msg_chart || []).map(function(r) { return r.count; }), backgroundColor: "rgba(180,100,255,0.7)", borderRadius: 2 }] },
+          options: _chartOpts(false),
+        });
+      }
+      var ovJobCtx = document.getElementById("ov-chart-jobs");
+      if (ovJobCtx) {
+        new Chart(ovJobCtx, {
+          type: "bar",
+          data: {
+            labels: (d.job_chart || []).map(function(r) { return r.date.slice(5); }),
+            datasets: [
+              { label: "Completed", data: (d.job_chart || []).map(function(r) { return r.completed; }), backgroundColor: "rgba(0,220,100,0.7)", borderRadius: 2 },
+              { label: "Failed", data: (d.job_chart || []).map(function(r) { return r.failed; }), backgroundColor: "rgba(255,51,51,0.7)", borderRadius: 2 },
+            ],
+          },
+          options: _chartOpts(true),
+        });
+      }
+    }).catch(function(err) {
+      document.getElementById("ov-content").innerHTML =
+        '<div class="alert alert-error">' + esc(err.detail || "Failed to load overview") + '</div>';
+    });
   }
 
   // ── Billing Page ──
@@ -952,6 +2122,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
       '<div class="header-right">' +
       '<span class="user-email">' + esc(user.email) + '</span>' +
       '<span class="tier-badge tier-' + esc(tier) + '">' + esc(tier) + '</span>' +
+      '<button class="btn btn-ghost" id="overview-link" style="font-size:0.7rem">Overview</button>' +
       '<button class="btn btn-ghost" id="billing-link" style="font-size:0.7rem">Billing</button>' +
       '<button class="btn btn-ghost" id="logout-btn">Logout</button>' +
       '</div></header>';
@@ -959,36 +2130,204 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
 
   function wireHeader() {
     document.getElementById("logo-link").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/agents"); };
-    document.getElementById("logout-btn").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); token = null; user = null; navigate("#/login"); };
+    document.getElementById("logout-btn").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); localStorage.removeItem("mg_token"); token = null; user = null; navigate("#/login"); };
+    var overviewLink = document.getElementById("overview-link");
+    if (overviewLink) overviewLink.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/overview"); };
     var billingLink = document.getElementById("billing-link");
     if (billingLink) billingLink.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
   }
 
   // ── Register new agent ──
   function doRegister() {
-    var btn = document.getElementById("register-btn");
-    btn.disabled = true; btn.textContent = "Registering\u2026";
-    var agentName = "agent-" + Date.now().toString(36);
-    api("POST", "/v1/register", { name: agentName }).then(function(data) {
-      showApiKeyModal(data.agent_id, data.api_key);
-      return api("GET", "/v1/auth/me");
-    }).then(function(me) {
-      user = me;
-      // Re-render after modal is closed — user will see the new agent
-    }).catch(function(err) {
-      window.alert("Failed: " + (err.detail || "Unknown error"));
-      btn.disabled = false; btn.textContent = "+ Register New Agent";
-    });
+    var overlay = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    overlay.classList.add("active");
+    mc.innerHTML =
+      '<h2>Register New Agent</h2>' +
+      '<p class="subtitle">Give your agent a name. You can rename it later from the agent page.</p>' +
+      '<div class="form-group">' +
+      '<label>Agent Name</label>' +
+      '<input type="text" id="new-agent-name" maxlength="64" placeholder="e.g. my-data-agent" autocomplete="off">' +
+      '<div class="name-error" id="name-err"></div>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+      '<button class="btn btn-ghost" id="reg-cancel">Cancel</button>' +
+      '<button class="btn btn-accent" id="reg-confirm">Create Agent</button>' +
+      '</div>';
+
+    var inp = document.getElementById("new-agent-name");
+    var errEl = document.getElementById("name-err");
+    inp.focus();
+
+    document.getElementById("reg-cancel").onclick = function() {
+      overlay.classList.remove("active");
+    };
+
+    function validateName(n) {
+      if (!n) return "Name is required";
+      if (n.length > 64) return "Max 64 characters";
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9 _\-]{0,63}$/.test(n)) return "Letters, numbers, spaces, hyphens, underscores only \u2014 must start with a letter or number";
+      return "";
+    }
+
+    inp.oninput = function() { errEl.textContent = validateName(this.value.trim()); };
+
+    document.getElementById("reg-confirm").onclick = function() {
+      var name = inp.value.trim();
+      var err = validateName(name);
+      if (err) { errEl.textContent = err; inp.focus(); return; }
+      var confirmBtn = this;
+      confirmBtn.disabled = true; confirmBtn.textContent = "Registering\u2026";
+      api("POST", "/v1/register", { name: name }).then(function(data) {
+        overlay.classList.remove("active");
+        showApiKeyModal(data.agent_id, data.api_key, name);
+        return api("GET", "/v1/auth/me");
+      }).then(function(me) {
+        user = me;
+      }).catch(function(e) {
+        errEl.textContent = e.detail || "Registration failed";
+        confirmBtn.disabled = false; confirmBtn.textContent = "Create Agent";
+      });
+    };
+
+    inp.onkeydown = function(e) { if (e.key === "Enter") document.getElementById("reg-confirm").click(); };
   }
 
   // ── Modals ──
-  function showApiKeyModal(agentId, apiKey) {
+  function showRotateKeyModal(agentId) {
+    var overlay = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    overlay.classList.add("active");
+
+    // Step 1: Confirmation
+    mc.innerHTML =
+      '<h2>&#128273; Regenerate API Key</h2>' +
+      '<p class="subtitle">Issue a brand-new API key for this agent.</p>' +
+      '<div class="alert alert-error" style="margin:1rem 0;font-size:0.82rem;line-height:1.5">' +
+      '<strong>\u26A0 Warning</strong><br>' +
+      'The current API key will be <strong>immediately and permanently invalidated</strong>. ' +
+      'Any code, scripts, or integrations using the old key will stop working right away. ' +
+      'Make sure you update all usages with the new key.' +
+      '</div>' +
+      '<div class="modal-actions">' +
+      '<button class="btn btn-ghost" id="rk-cancel">Cancel</button>' +
+      '<button class="btn btn-accent" style="background:var(--red)" id="rk-confirm">Regenerate Key</button>' +
+      '</div>';
+
+    document.getElementById("rk-cancel").onclick = function() { overlay.classList.remove("active"); };
+
+    document.getElementById("rk-confirm").onclick = function() {
+      var btn = this;
+      btn.disabled = true; btn.textContent = "Regenerating\u2026";
+
+      api("POST", "/v1/user/agents/" + agentId + "/rotate-key").then(function(data) {
+        var newKey = data.api_key;
+
+        // Step 2: Show new key (one-time)
+        mc.innerHTML =
+          '<h2>&#128273; New API Key</h2>' +
+          '<p class="warning-text">\u26A0 Save this key now \u2014 it will not be shown again.</p>' +
+          '<div class="api-key-box" style="margin:1rem 0">' +
+          '<span id="rk-key-text" style="word-break:break-all">' + esc(newKey) + '</span>' +
+          '<button class="copy-btn" id="rk-copy">Copy</button>' +
+          '</div>' +
+          '<p style="font-size:0.75rem;color:var(--text-dim);margin-bottom:1rem">' +
+          'Rotated at: ' + esc(data.rotated_at || new Date().toISOString()) +
+          '</p>' +
+          '<div class="modal-actions">' +
+          '<button class="btn btn-accent" id="rk-done">Done \u2014 I saved my key</button>' +
+          '</div>';
+
+        document.getElementById("rk-copy").onclick = function() {
+          navigator.clipboard.writeText(newKey);
+          this.textContent = "Copied!";
+          var self = this;
+          setTimeout(function() { self.textContent = "Copy"; }, 2000);
+        };
+
+        document.getElementById("rk-done").onclick = function() {
+          overlay.classList.remove("active");
+          showToast("API key regenerated. Old key is now invalid.", "success");
+
+          // Prepend to activity feed immediately
+          var list = document.getElementById("activity-list");
+          if (list) {
+            var div = document.createElement("div");
+            div.className = "activity-item";
+            div.innerHTML =
+              '<div class="activity-icon">&#128273;</div>' +
+              '<div class="activity-text">API key regenerated</div>' +
+              '<div class="activity-time">just now</div>';
+            list.insertBefore(div, list.firstChild);
+          }
+        };
+      }).catch(function(err) {
+        mc.innerHTML =
+          '<h2>&#128273; Regenerate API Key</h2>' +
+          '<div class="alert alert-error" style="margin:1rem 0">' + esc(err.detail || "Failed to regenerate key") + '</div>' +
+          '<div class="modal-actions"><button class="btn btn-ghost" id="rk-cancel">Close</button></div>';
+        document.getElementById("rk-cancel").onclick = function() { overlay.classList.remove("active"); };
+      });
+    };
+  }
+
+  function showRenameModal(agentId, currentName) {
+    var overlay = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    overlay.classList.add("active");
+    mc.innerHTML =
+      '<h2>Rename Agent</h2>' +
+      '<p class="subtitle" style="font-family:monospace;font-size:0.75rem;color:var(--text-dim);">' + esc(agentId) + '</p>' +
+      '<div class="form-group">' +
+      '<label>New Name</label>' +
+      '<input type="text" id="rename-input" maxlength="64" value="' + esc(currentName) + '" autocomplete="off">' +
+      '<div class="name-error" id="rename-err"></div>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+      '<button class="btn btn-ghost" id="rename-cancel">Cancel</button>' +
+      '<button class="btn btn-accent" id="rename-save">Save Name</button>' +
+      '</div>';
+
+    var inp = document.getElementById("rename-input");
+    var errEl = document.getElementById("rename-err");
+    inp.focus(); inp.select();
+
+    function validate(n) {
+      if (!n) return "Name is required";
+      if (n.length > 64) return "Max 64 characters";
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9 _\-]{0,63}$/.test(n)) return "Letters, numbers, spaces, hyphens, underscores only \u2014 must start with a letter or number";
+      return "";
+    }
+    inp.oninput = function() { errEl.textContent = validate(this.value.trim()); };
+
+    document.getElementById("rename-cancel").onclick = function() { overlay.classList.remove("active"); };
+
+    document.getElementById("rename-save").onclick = function() {
+      var name = inp.value.trim();
+      var err = validate(name);
+      if (err) { errEl.textContent = err; inp.focus(); return; }
+      var btn = this;
+      btn.disabled = true; btn.textContent = "Saving\u2026";
+      api("PATCH", "/v1/user/agents/" + agentId, { name: name }).then(function() {
+        overlay.classList.remove("active");
+        renderAgentDetail(document.getElementById("app"), agentId);
+      }).catch(function(e) {
+        errEl.textContent = e.detail || "Failed to rename";
+        btn.disabled = false; btn.textContent = "Save Name";
+      });
+    };
+
+    inp.onkeydown = function(e) { if (e.key === "Enter") document.getElementById("rename-save").click(); };
+  }
+
+  function showApiKeyModal(agentId, apiKey, agentName) {
     var overlay = document.getElementById("modal-overlay");
     var mc = document.getElementById("modal-content");
     overlay.classList.add("active");
     mc.innerHTML =
       '<h2>Agent Registered</h2>' +
-      '<p class="subtitle">Agent <strong>' + esc(agentId) + '</strong> is ready.</p>' +
+      '<p class="subtitle"><strong>' + esc(agentName || agentId) + '</strong> is ready.' +
+      (agentName ? ' <span style="font-family:monospace;color:var(--text-dim);font-size:0.75em;">' + esc(agentId) + '</span>' : '') + '</p>' +
       '<p class="warning-text">\u26A0 Save this API key now \u2014 it cannot be recovered.</p>' +
       '<div class="api-key-box"><span id="key-text">' + esc(apiKey) + '</span>' +
       '<button class="copy-btn" id="copy-key">Copy</button></div>' +
@@ -1047,7 +2386,13 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
   }
 
   // ── Init ──
-  route();
+  if (token) {
+    api("GET", "/v1/auth/me").then(function(me) {
+      user = me; route();
+    }).catch(function() {
+      localStorage.removeItem("mg_token"); token = null; route();
+    });
+  } else { route(); }
 })();
 </script>
 </body>
