@@ -2434,3 +2434,310 @@ class TestAnalytics:
         """The analytics_events table is created by init_db."""
         rows = self._query_analytics("SELECT name FROM sqlite_master WHERE type='table' AND name='analytics_events'")
         assert len(rows) == 1
+
+
+# =============================================================================
+# MEMORY VISIBILITY SCHEMA & ACCESS CONTROL (MEM-01..07)
+# =============================================================================
+
+class TestMemoryVisibilitySchema:
+    """
+    Verifies:
+    - Schema migration adds visibility + shared_agents columns to memory table
+    - memory_access_log table is created with correct schema and index
+    - init_db() is idempotent (can be called multiple times)
+    - Existing NULL visibility rows are backfilled to 'private'
+    - _check_memory_visibility() helper correctly enforces access rules
+    - _log_memory_access() never raises
+    - POST /v1/memory stores visibility and shared_agents
+    - GET /v1/agents/{target}/memory/{key} returns 403 for private keys
+    - GET /v1/agents/{target}/memory/{key} returns 200 for public keys
+    - GET /v1/agents/{target}/memory/{key} returns 200 for shared keys (requester in list)
+    - GET /v1/memory/{key} (own-agent) is unaffected by visibility
+    """
+
+    def _raw_db(self):
+        """Return a raw sqlite3 connection (row_factory = sqlite3.Row)."""
+        import sqlite3
+        from main import DB_PATH
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    # ── Schema migration ──────────────────────────────────────────────────────
+
+    def test_memory_table_has_visibility_column(self):
+        """init_db() adds visibility column to memory table."""
+        conn = self._raw_db()
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(memory)").fetchall()}
+        conn.close()
+        assert "visibility" in cols, "memory table must have 'visibility' column"
+
+    def test_memory_table_has_shared_agents_column(self):
+        """init_db() adds shared_agents column to memory table."""
+        conn = self._raw_db()
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(memory)").fetchall()}
+        conn.close()
+        assert "shared_agents" in cols, "memory table must have 'shared_agents' column"
+
+    def test_memory_access_log_table_exists(self):
+        """init_db() creates memory_access_log table."""
+        conn = self._raw_db()
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_access_log'"
+        ).fetchone()
+        conn.close()
+        assert row is not None, "memory_access_log table must exist after init_db()"
+
+    def test_memory_access_log_index_exists(self):
+        """init_db() creates idx_mal_agent index on memory_access_log."""
+        conn = self._raw_db()
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_mal_agent'"
+        ).fetchone()
+        conn.close()
+        assert row is not None, "idx_mal_agent index must exist after init_db()"
+
+    def test_init_db_is_idempotent(self):
+        """Calling init_db() twice does not raise."""
+        from main import init_db
+        init_db()  # second call — must not fail (idempotent ALTER TABLE)
+        # If we reach here, no exception was raised
+        assert True
+
+    def test_null_visibility_backfilled_to_private(self):
+        """Rows with NULL visibility are updated to 'private' by the migration."""
+        import sqlite3
+        from main import DB_PATH, init_db
+        # Directly insert a row without visibility (simulating pre-migration data)
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        # Insert a raw row bypassing visibility
+        conn.execute(
+            "INSERT OR REPLACE INTO memory "
+            "(agent_id, namespace, key, value, created_at, updated_at) "
+            "VALUES ('agent_backfill_test', 'default', 'old_key', 'v', '2020-01-01', '2020-01-01')"
+        )
+        conn.commit()
+        # Force visibility to NULL
+        conn.execute("UPDATE memory SET visibility=NULL WHERE agent_id='agent_backfill_test'")
+        conn.commit()
+        conn.close()
+        # Re-run init_db — should backfill NULL -> 'private'
+        init_db()
+        conn2 = sqlite3.connect(DB_PATH)
+        conn2.row_factory = sqlite3.Row
+        row = conn2.execute(
+            "SELECT visibility FROM memory WHERE agent_id='agent_backfill_test'"
+        ).fetchone()
+        conn2.close()
+        assert row is not None
+        assert row["visibility"] == "private", f"Expected 'private', got {row['visibility']!r}"
+
+    # ── Helper function: _check_memory_visibility ─────────────────────────────
+
+    def test_check_visibility_public(self):
+        """_check_memory_visibility returns True for public memory."""
+        from main import _check_memory_visibility, get_db
+        _, _, h = register_agent("owner-pub")
+        aid2, _, _ = register_agent("requester-pub")
+        # Store public memory
+        r = client.post("/v1/memory", json={"key": "pub_key", "value": "pub_val", "visibility": "public"}, headers=h)
+        assert r.status_code == 200
+        owner_id = client.get("/v1/memory/pub_key", headers=h).json()  # just to confirm it exists
+        # get owner agent_id from the registration
+        owner_agent_id = r.url  # need to fetch from DB
+        # Use get_db to check via helper
+        with get_db() as db:
+            # We need to know the owner's agent_id — get it from registered agent
+            # Fetch the agent_id from the memory table
+            row = db.execute("SELECT agent_id FROM memory WHERE key='pub_key'").fetchone()
+            assert row is not None
+            target_id = row["agent_id"]
+            result = _check_memory_visibility(db, target_id, "default", "pub_key", aid2)
+        assert result is True, "Public memory must be accessible by any agent"
+
+    def test_check_visibility_private_other_agent(self):
+        """_check_memory_visibility returns False for private memory accessed by another agent."""
+        from main import _check_memory_visibility, get_db
+        _, _, h = register_agent("owner-priv")
+        aid2, _, _ = register_agent("requester-priv")
+        client.post("/v1/memory", json={"key": "priv_key", "value": "secret", "visibility": "private"}, headers=h)
+        with get_db() as db:
+            row = db.execute("SELECT agent_id FROM memory WHERE key='priv_key'").fetchone()
+            target_id = row["agent_id"]
+            result = _check_memory_visibility(db, target_id, "default", "priv_key", aid2)
+        assert result is False, "Private memory must NOT be accessible by other agents"
+
+    def test_check_visibility_shared_requester_in_list(self):
+        """_check_memory_visibility returns True for shared memory when requester is in the list."""
+        from main import _check_memory_visibility, get_db
+        _, _, h = register_agent("owner-shared")
+        aid2, _, _ = register_agent("requester-shared")
+        client.post("/v1/memory", json={
+            "key": "shared_key", "value": "shared_val",
+            "visibility": "shared",
+            "shared_agents": [aid2]
+        }, headers=h)
+        with get_db() as db:
+            row = db.execute("SELECT agent_id FROM memory WHERE key='shared_key'").fetchone()
+            target_id = row["agent_id"]
+            result = _check_memory_visibility(db, target_id, "default", "shared_key", aid2)
+        assert result is True, "Shared memory must be accessible by agents in the shared_agents list"
+
+    def test_check_visibility_shared_requester_not_in_list(self):
+        """_check_memory_visibility returns False when requester is NOT in shared_agents."""
+        from main import _check_memory_visibility, get_db
+        _, _, h = register_agent("owner-shared2")
+        aid2, _, _ = register_agent("requester-not-in-list")
+        aid3, _, _ = register_agent("another-agent")
+        client.post("/v1/memory", json={
+            "key": "shared_key2", "value": "val",
+            "visibility": "shared",
+            "shared_agents": [aid3]  # aid2 is NOT in list
+        }, headers=h)
+        with get_db() as db:
+            row = db.execute("SELECT agent_id FROM memory WHERE key='shared_key2'").fetchone()
+            target_id = row["agent_id"]
+            result = _check_memory_visibility(db, target_id, "default", "shared_key2", aid2)
+        assert result is False, "Agent not in shared_agents list must be denied"
+
+    def test_check_visibility_nonexistent_key(self):
+        """_check_memory_visibility returns False when key does not exist."""
+        from main import _check_memory_visibility, get_db
+        _, _, _ = register_agent("owner-nokey")
+        aid2, _, _ = register_agent("requester-nokey")
+        with get_db() as db:
+            result = _check_memory_visibility(db, "nonexistent_agent", "default", "no_such_key", aid2)
+        assert result is False, "Non-existent key must return False"
+
+    # ── _log_memory_access never raises ──────────────────────────────────────
+
+    def test_log_memory_access_never_raises(self):
+        """_log_memory_access() must not raise even with invalid inputs."""
+        from main import _log_memory_access
+        # Should not raise
+        _log_memory_access("read", "agent_x", "default", "key1", actor_agent_id="agent_y")
+        _log_memory_access("write", "", "", "", actor_user_id=None)
+        assert True  # If we reach here, it didn't raise
+
+    # ── POST /v1/memory stores visibility ────────────────────────────────────
+
+    def test_memory_set_stores_visibility_private(self):
+        """POST /v1/memory stores visibility='private' (default)."""
+        _, _, h = register_agent("vis-private")
+        r = client.post("/v1/memory", json={"key": "k", "value": "v"}, headers=h)
+        assert r.status_code == 200
+        import sqlite3
+        from main import DB_PATH
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT visibility FROM memory WHERE key='k'").fetchone()
+        conn.close()
+        assert row is not None
+        assert row["visibility"] == "private"
+
+    def test_memory_set_stores_visibility_public(self):
+        """POST /v1/memory stores visibility='public' when specified."""
+        _, _, h = register_agent("vis-public")
+        r = client.post("/v1/memory", json={"key": "k", "value": "v", "visibility": "public"}, headers=h)
+        assert r.status_code == 200
+        import sqlite3
+        from main import DB_PATH
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT visibility FROM memory WHERE key='k'").fetchone()
+        conn.close()
+        assert row["visibility"] == "public"
+
+    def test_memory_set_stores_shared_agents(self):
+        """POST /v1/memory stores shared_agents JSON when visibility='shared'."""
+        _, _, h = register_agent("vis-shared-store")
+        aid2, _, _ = register_agent("shared-with")
+        r = client.post("/v1/memory", json={
+            "key": "k", "value": "v",
+            "visibility": "shared",
+            "shared_agents": [aid2]
+        }, headers=h)
+        assert r.status_code == 200
+        import sqlite3, json
+        from main import DB_PATH
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT visibility, shared_agents FROM memory WHERE key='k'").fetchone()
+        conn.close()
+        assert row["visibility"] == "shared"
+        assert aid2 in json.loads(row["shared_agents"])
+
+    # ── GET /v1/agents/{target}/memory/{key} — cross-agent endpoint ──────────
+
+    def test_cross_agent_read_public_returns_200(self):
+        """GET /v1/agents/{target}/memory/{key} returns 200 for public memory."""
+        aid1, _, h1 = register_agent("owner-cross-pub")
+        aid2, _, h2 = register_agent("requester-cross-pub")
+        client.post("/v1/memory", json={"key": "pub", "value": "hello", "visibility": "public"}, headers=h1)
+        r = client.get(f"/v1/agents/{aid1}/memory/pub", headers=h2)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["value"] == "hello"
+        assert data["visibility"] == "public"
+
+    def test_cross_agent_read_private_returns_403(self):
+        """GET /v1/agents/{target}/memory/{key} returns 403 for private memory."""
+        aid1, _, h1 = register_agent("owner-cross-priv")
+        aid2, _, h2 = register_agent("requester-cross-priv")
+        client.post("/v1/memory", json={"key": "priv", "value": "secret"}, headers=h1)
+        r = client.get(f"/v1/agents/{aid1}/memory/priv", headers=h2)
+        assert r.status_code == 403
+        assert "Access denied" in r.json()["detail"]
+
+    def test_cross_agent_read_private_not_404(self):
+        """Private memory returns 403 not 404 (prevents enumeration)."""
+        aid1, _, h1 = register_agent("owner-403")
+        aid2, _, h2 = register_agent("requester-403")
+        client.post("/v1/memory", json={"key": "secret_key", "value": "secret"}, headers=h1)
+        r = client.get(f"/v1/agents/{aid1}/memory/secret_key", headers=h2)
+        assert r.status_code == 403, f"Must return 403 not {r.status_code}"
+
+    def test_cross_agent_read_shared_in_list_returns_200(self):
+        """GET /v1/agents/{target}/memory/{key} returns 200 when requester is in shared_agents."""
+        aid1, _, h1 = register_agent("owner-shared-ep")
+        aid2, _, h2 = register_agent("req-shared-ep")
+        client.post("/v1/memory", json={
+            "key": "shared_ep", "value": "shared_val",
+            "visibility": "shared",
+            "shared_agents": [aid2]
+        }, headers=h1)
+        r = client.get(f"/v1/agents/{aid1}/memory/shared_ep", headers=h2)
+        assert r.status_code == 200
+        assert r.json()["value"] == "shared_val"
+
+    def test_cross_agent_read_shared_not_in_list_returns_403(self):
+        """GET /v1/agents/{target}/memory/{key} returns 403 when requester NOT in shared_agents."""
+        aid1, _, h1 = register_agent("owner-shared-excl")
+        aid2, _, h2 = register_agent("req-not-in-list")
+        aid3, _, _ = register_agent("other-agent")
+        client.post("/v1/memory", json={
+            "key": "shared_excl", "value": "val",
+            "visibility": "shared",
+            "shared_agents": [aid3]
+        }, headers=h1)
+        r = client.get(f"/v1/agents/{aid1}/memory/shared_excl", headers=h2)
+        assert r.status_code == 403
+
+    # ── GET /v1/memory/{key} (own-agent) is unaffected ───────────────────────
+
+    def test_own_agent_read_unaffected_by_visibility_private(self):
+        """GET /v1/memory/{key} always returns 200 for the owner, regardless of visibility."""
+        _, _, h = register_agent("owner-own-read")
+        client.post("/v1/memory", json={"key": "mine", "value": "myval", "visibility": "private"}, headers=h)
+        r = client.get("/v1/memory/mine", headers=h)
+        assert r.status_code == 200
+        assert r.json()["value"] == "myval"
+
+    def test_own_agent_read_unaffected_by_visibility_shared(self):
+        """Owner can always read their own shared key."""
+        _, _, h = register_agent("owner-own-shared")
+        client.post("/v1/memory", json={"key": "shared_own", "value": "sv", "visibility": "shared"}, headers=h)
+        r = client.get("/v1/memory/shared_own", headers=h)
+        assert r.status_code == 200
