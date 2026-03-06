@@ -14,3 +14,12 @@ __pycache__/
 .claude/
 CLAUDE.md
 .planning/
+
+# Billing pages (Stripe redirects — generated)
+billing-cancel.html
+billing-failed.html
+billing-success.html
+
+# Backup files
+*.live_backup
+*.backup
