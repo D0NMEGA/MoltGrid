@@ -1441,6 +1441,54 @@ def user_integration_list(agent_id: str, user_id: str = Depends(get_user_id)):
     return {"agent_id": agent_id, "integrations": integrations}
 
 
+# ── Integration status (dashboard, CON-07) ────────────────────────────────────
+class IntegrationStatusItem(BaseModel):
+    integration_id: str
+    agent_id: str
+    platform: str
+    status: str
+    last_sync_at: str
+    event_count: int
+
+class IntegrationStatusResponse(BaseModel):
+    integrations: List[IntegrationStatusItem]
+
+@app.get("/v1/user/integrations/status", response_model=IntegrationStatusResponse, tags=["User Dashboard"])
+def user_integrations_status(agent_id: Optional[str] = None, user_id: str = Depends(get_user_id)):
+    """Return integration status with event counts for all agents owned by user (or one agent if agent_id given)."""
+    with get_db() as db:
+        if agent_id:
+            _verify_agent_ownership(db, agent_id, user_id)
+            rows = db.execute(
+                "SELECT i.id, i.agent_id, i.platform, i.status, i.created_at "
+                "FROM integrations i JOIN agents a ON i.agent_id = a.agent_id "
+                "WHERE a.user_id = ? AND i.agent_id = ? ORDER BY i.created_at DESC",
+                (user_id, agent_id),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT i.id, i.agent_id, i.platform, i.status, i.created_at "
+                "FROM integrations i JOIN agents a ON i.agent_id = a.agent_id "
+                "WHERE a.user_id = ? ORDER BY i.created_at DESC",
+                (user_id,),
+            ).fetchall()
+        items = []
+        for r in rows:
+            count_row = db.execute(
+                "SELECT COUNT(*) as c FROM analytics_events WHERE agent_id = ? AND source != 'moltgrid_api'",
+                (r["agent_id"],),
+            ).fetchone()
+            items.append(IntegrationStatusItem(
+                integration_id=r["id"],
+                agent_id=r["agent_id"],
+                platform=r["platform"],
+                status=r["status"],
+                last_sync_at=r["created_at"],
+                event_count=count_row["c"] if count_row else 0,
+            ))
+    return IntegrationStatusResponse(integrations=items)
+
+
 # ── Jobs list ─────────────────────────────────────────────────────────────────
 @app.get("/v1/user/agents/{agent_id}/jobs-list", tags=["User Dashboard"])
 def user_jobs_list(
