@@ -24,6 +24,13 @@ echo "[deploy] Syncing skills from internal repo..."
 mkdir -p /opt/moltgrid/.claude/commands/moltgrid
 cp -r /opt/moltgrid-internal/.claude/commands/moltgrid/. /opt/moltgrid/.claude/commands/moltgrid/
 
+echo "[deploy] Syncing agents from internal repo..."
+mkdir -p /opt/moltgrid/.claude/agents
+if [ -d /opt/moltgrid-internal/.claude/agents ]; then
+  cp -r /opt/moltgrid-internal/.claude/agents/. /opt/moltgrid/.claude/agents/
+fi
+chown -R claude-agent:claude-agent /opt/moltgrid/.claude
+
 echo "[deploy] Installing dependencies..."
 cd /opt/moltgrid
 source venv/bin/activate
