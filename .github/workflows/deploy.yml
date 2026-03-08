@@ -9,10 +9,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: root
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: /opt/moltgrid/deploy.sh
+      - name: Verify API health
+        run: |
+          sleep 15
+          curl -sf https://api.moltgrid.net/v1/health | python3 -m json.tool
+          echo "VPS deployed and healthy (self-deploys via deploy.sh on push)"
