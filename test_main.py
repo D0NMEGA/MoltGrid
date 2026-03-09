@@ -4137,3 +4137,69 @@ class TestTOTP2FA:
         r = client.post("/v1/auth/2fa/disable", json={"code": disable_code}, headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 200
         assert r.json()["disabled"] is True
+
+
+class TestAgentTemplates:
+    """Tests for agent templates feature (BL-04)."""
+
+    def test_list_templates_returns_4(self):
+        """GET /v1/templates returns all 4 seeded templates."""
+        r = client.get("/v1/templates")
+        assert r.status_code == 200
+        body = r.json()
+        assert "templates" in body
+        assert len(body["templates"]) == 4
+        ids = {t["template_id"] for t in body["templates"]}
+        assert "tmpl_openclaw_social" in ids
+        assert "tmpl_worker" in ids
+        assert "tmpl_research" in ids
+        assert "tmpl_customer_service" in ids
+
+    def test_get_template_by_id(self):
+        """GET /v1/templates/tmpl_worker returns full template fields."""
+        r = client.get("/v1/templates/tmpl_worker")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["template_id"] == "tmpl_worker"
+        assert body["name"] == "Background Worker Agent"
+        assert body["category"] == "worker"
+        assert body["description"]
+        assert body["starter_code"]
+
+    def test_get_template_404(self):
+        """GET /v1/templates/tmpl_nonexistent returns 404 with standard error shape."""
+        r = client.get("/v1/templates/tmpl_nonexistent")
+        assert r.status_code == 404
+        body = r.json()
+        # Standard error shape is nested under "detail"
+        detail = body.get("detail", body)
+        assert detail.get("status") == 404 or r.status_code == 404
+
+    @patch("main._queue_email")
+    def test_register_with_template_id(self, mock_email):
+        """POST /v1/register with template_id=tmpl_worker creates agent with template_starter_code in memory."""
+        r = client.post("/v1/register", json={"name": "TemplateTestAgent", "template_id": "tmpl_worker"})
+        assert r.status_code == 200
+        body = r.json()
+        assert "api_key" in body
+        api_key = body["api_key"]
+        agent_id = body["agent_id"]
+
+        # Verify memory key template_starter_code was written
+        mem_r = client.get(
+            "/v1/memory/template_starter_code",
+            headers={"X-API-Key": api_key},
+        )
+        assert mem_r.status_code == 200
+        mem_body = mem_r.json()
+        assert mem_body.get("key") == "template_starter_code"
+        assert mem_body.get("value")  # starter_code is a non-empty JSON string
+
+    @patch("main._queue_email")
+    def test_register_with_invalid_template_id(self, mock_email):
+        """POST /v1/register with unknown template_id still creates agent successfully."""
+        r = client.post("/v1/register", json={"name": "NoTemplateAgent", "template_id": "tmpl_does_not_exist"})
+        assert r.status_code == 200
+        body = r.json()
+        assert "agent_id" in body
+        assert "api_key" in body
