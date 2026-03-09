@@ -677,6 +677,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS organizations (
             org_id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            slug TEXT UNIQUE,
             owner_user_id TEXT NOT NULL,
             created_at TEXT NOT NULL
         )
@@ -5685,6 +5686,7 @@ def submit_contact(form: ContactForm):
 
 class OrgCreateRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=64)
+    slug: Optional[str] = Field(None, max_length=64, pattern="^[a-z0-9-]+$")
 
 class OrgInviteRequest(BaseModel):
     user_id: str = Field(..., max_length=64)
@@ -5698,23 +5700,30 @@ class OrgRoleUpdateRequest(BaseModel):
 def create_org(req: OrgCreateRequest, user_id: str = Depends(get_user_id)):
     org_id = f"org_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
+    slug = req.slug
     with get_db() as db:
+        if slug:
+            existing_slug = db.execute(
+                "SELECT org_id FROM organizations WHERE slug = ?", (slug,)
+            ).fetchone()
+            if existing_slug:
+                raise HTTPException(409, "Slug already taken")
         db.execute(
-            "INSERT INTO organizations (org_id, name, owner_user_id, created_at) VALUES (?, ?, ?, ?)",
-            (org_id, req.name, user_id, now),
+            "INSERT INTO organizations (org_id, name, slug, owner_user_id, created_at) VALUES (?, ?, ?, ?, ?)",
+            (org_id, req.name, slug, user_id, now),
         )
         db.execute(
             "INSERT INTO org_members (org_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
             (org_id, user_id, "owner", now),
         )
-    return {"org_id": org_id, "name": req.name, "owner_user_id": user_id, "created_at": now}
+    return {"org_id": org_id, "name": req.name, "slug": slug, "owner_user_id": user_id, "created_at": now, "role": "owner"}
 
 
 @app.get("/v1/orgs", tags=["Orgs"])
 def list_orgs(user_id: str = Depends(get_user_id)):
     with get_db() as db:
         rows = db.execute(
-            """SELECT o.org_id, o.name, o.owner_user_id, o.created_at
+            """SELECT o.org_id, o.name, o.slug, o.owner_user_id, o.created_at, m.role
                FROM organizations o
                JOIN org_members m ON m.org_id = o.org_id
                WHERE m.user_id = ?""",
@@ -5727,7 +5736,7 @@ def list_orgs(user_id: str = Depends(get_user_id)):
 def get_org(org_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         org = db.execute(
-            "SELECT org_id, name, owner_user_id, created_at FROM organizations WHERE org_id = ?",
+            "SELECT org_id, name, slug, owner_user_id, created_at FROM organizations WHERE org_id = ?",
             (org_id,),
         ).fetchone()
         if not org:
@@ -5761,6 +5770,12 @@ def invite_member(org_id: str, req: OrgInviteRequest, user_id: str = Depends(get
         ).fetchone()
         if not caller or caller["role"] not in ("owner", "admin"):
             raise HTTPException(403, "Only owners and admins can invite members")
+        # Validate target user exists
+        target_user = db.execute(
+            "SELECT user_id FROM users WHERE user_id = ?", (req.user_id,)
+        ).fetchone()
+        if not target_user:
+            raise HTTPException(404, "User not found")
         existing = db.execute(
             "SELECT user_id FROM org_members WHERE org_id = ? AND user_id = ?",
             (org_id, req.user_id),
@@ -5817,7 +5832,7 @@ def remove_member(org_id: str, target_user_id: str, user_id: str = Depends(get_u
     return {"removed": True}
 
 
-@app.patch("/v1/orgs/{org_id}/members/{target_user_id}/role", tags=["Orgs"])
+@app.patch("/v1/orgs/{org_id}/members/{target_user_id}", tags=["Orgs"])
 def change_member_role(
     org_id: str,
     target_user_id: str,
@@ -5844,6 +5859,25 @@ def change_member_role(
             (req.role, org_id, target_user_id),
         )
     return {"org_id": org_id, "user_id": target_user_id, "role": req.role}
+
+
+@app.post("/v1/orgs/{org_id}/switch", tags=["Orgs"])
+def switch_org_context(org_id: str, user_id: str = Depends(get_user_id)):
+    """Switch the user's active org context."""
+    with get_db() as db:
+        org = db.execute(
+            "SELECT org_id, name FROM organizations WHERE org_id = ?",
+            (org_id,),
+        ).fetchone()
+        if not org:
+            raise HTTPException(404, "Org not found")
+        member = db.execute(
+            "SELECT role FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, user_id),
+        ).fetchone()
+        if not member:
+            raise HTTPException(403, "Not a member of this org")
+    return {"active_org_id": org_id, "org_name": org["name"]}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
