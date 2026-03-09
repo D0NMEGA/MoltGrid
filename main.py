@@ -27,9 +27,10 @@ import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from croniter import croniter
 from fastapi import FastAPI, HTTPException, Header, Depends, Query, WebSocket, WebSocketDisconnect, Cookie, Response, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 import jwt as pyjwt
 import bcrypt as _bcrypt
@@ -122,9 +123,40 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+def _http_code_to_slug(status: int) -> str:
+    return {
+        400: "bad_request", 401: "unauthorized", 403: "forbidden",
+        404: "not_found", 409: "conflict", 422: "validation_error",
+        429: "rate_limit_exceeded", 500: "internal_error", 503: "service_unavailable",
+    }.get(status, f"http_{status}")
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": str(exc.detail), "code": _http_code_to_slug(exc.status_code), "status": exc.status_code},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Validation failed", "code": "validation_error", "status": 422},
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://moltgrid.net",
+        "https://www.moltgrid.net",
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "X-MoltGrid-Version"],
@@ -2117,11 +2149,84 @@ class MemorySetRequest(BaseModel):
     shared_agents: List[str] = Field(default_factory=list)
 
 class MemoryGetResponse(BaseModel):
+    model_config = ConfigDict(extra='ignore')
     key: str
     value: str
     namespace: str
     updated_at: str
     expires_at: Optional[str]
+
+
+class MemoryKeyEntry(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    key: str
+    size_bytes: int
+    updated_at: str
+    expires_at: Optional[str]
+
+
+class MemoryListResponse(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    namespace: str
+    keys: List[MemoryKeyEntry]
+    count: int
+
+
+class HealthStatsResponse(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    registered_agents: int
+    public_agents: int
+    total_jobs: int
+    memory_keys_stored: int
+    shared_memory_keys: int
+    messages_relayed: int
+    active_webhooks: int
+    active_schedules: int
+    websocket_connections: int
+
+
+class HealthResponse(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    status: str
+    version: str
+    stats: HealthStatsResponse
+    timestamp: str
+
+
+class QueueJobEntry(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    job_id: str
+    status: str
+    priority: int
+    created_at: str
+    completed_at: Optional[str]
+
+
+class QueueListResponse(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    queue_name: str
+    jobs: List[QueueJobEntry]
+    count: int
+
+
+class ScheduleEntry(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    task_id: str
+    cron_expr: str
+    queue_name: str
+    priority: int
+    enabled: bool
+    next_run_at: Optional[str]
+    last_run_at: Optional[str]
+    run_count: Optional[int]
+    created_at: str
+
+
+class ScheduleListResponse(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    schedules: List[ScheduleEntry]
+    count: int
+
 
 def _log_memory_access(action, agent_id, namespace, key,
                        actor_agent_id=None, actor_user_id=None,
@@ -2289,7 +2394,7 @@ def memory_delete(key: str, namespace: str = "default", agent_id: str = Depends(
     _log_memory_access("delete", agent_id, namespace, key, actor_agent_id=agent_id)
     return {"status": "deleted", "key": key}
 
-@app.get("/v1/memory", tags=["Memory"])
+@app.get("/v1/memory", response_model=MemoryListResponse, tags=["Memory"])
 def memory_list(
     namespace: str = "default",
     prefix: str = "",
@@ -2337,6 +2442,9 @@ def queue_submit(req: QueueSubmitRequest, agent_id: str = Depends(get_agent_id))
 
     # Convert payload to string if it's a dict
     payload_str = json.dumps(req.payload) if isinstance(req.payload, dict) else req.payload
+    # Enforce size limit (MAX_QUEUE_PAYLOAD_SIZE = 100KB)
+    if len(payload_str.encode("utf-8")) > MAX_QUEUE_PAYLOAD_SIZE:
+        raise HTTPException(422, f"Payload exceeds maximum size of {MAX_QUEUE_PAYLOAD_SIZE} bytes")
 
     with get_db() as db:
         is_first = db.execute("SELECT COUNT(*) as c FROM queue WHERE agent_id=?", (agent_id,)).fetchone()["c"] == 0
@@ -2427,7 +2535,7 @@ def queue_complete(job_id: str, result: str = "", agent_id: str = Depends(get_ag
     })
     return {"job_id": job_id, "status": "completed"}
 
-@app.get("/v1/queue", tags=["Queue"])
+@app.get("/v1/queue", response_model=QueueListResponse, tags=["Queue"])
 def queue_list(
     queue_name: str = "default",
     status: Optional[str] = None,
@@ -2845,7 +2953,7 @@ def schedule_create(req: ScheduledTaskRequest, agent_id: str = Depends(get_agent
         next_run_at=next_run, created_at=now
     )
 
-@app.get("/v1/schedules", tags=["Schedules"])
+@app.get("/v1/schedules", response_model=ScheduleListResponse, tags=["Schedules"])
 def schedule_list(agent_id: str = Depends(get_agent_id)):
     """List your scheduled tasks."""
     with get_db() as db:
@@ -4982,7 +5090,7 @@ def sla():
         "encryption_enabled": _fernet is not None,
     }
 
-@app.get("/v1/health", tags=["System"])
+@app.get("/v1/health", response_model=HealthResponse, tags=["System"])
 def health():
     """Public health check — no auth required."""
     with get_db() as db:
