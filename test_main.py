@@ -4265,4 +4265,26 @@ class TestMoltBookDeepIntegration:
         assert len(r.json()["feed"]) >= 1
         item = r.json()["feed"][0]
         assert "type" in item
+
+
+class TestSkillMd:
+    def test_get_skill_md_200(self):
+        r = client.get("/skill.md")
+        assert r.status_code == 200
+        assert "text/markdown" in r.headers.get("content-type", "")
+
+    def test_get_skill_md_has_sections(self):
+        r = client.get("/skill.md")
+        body = r.text
+        for section in ["## Authentication", "## Memory", "## Relay", "## Event Stream"]:
+            assert section in body, f"Missing section: {section}"
+
+    def test_get_skill_md_v1_alias(self):
+        r = client.get("/v1/skill.md")
+        assert r.status_code == 200
+        assert "text/markdown" in r.headers.get("content-type", "")
+
+    def test_skill_md_no_auth_required(self):
+        r = client.get("/skill.md")
+        assert r.status_code == 200  # no X-API-Key or Bearer needed
         assert "timestamp" in item
