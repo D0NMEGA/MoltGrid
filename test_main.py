@@ -4203,3 +4203,66 @@ class TestAgentTemplates:
         body = r.json()
         assert "agent_id" in body
         assert "api_key" in body
+
+
+class TestAuditLogs:
+    @patch("main._queue_email")
+    def test_login_creates_audit_entry(self, mock_email):
+        client.post("/v1/auth/signup", json={"email": "audit_user@test.com", "password": "pass123", "display_name": "T"})
+        client.post("/v1/auth/login", json={"email": "audit_user@test.com", "password": "pass123"})
+        token = client.post("/v1/auth/login", json={"email": "audit_user@test.com", "password": "pass123"}).json()["token"]
+        r = client.get("/v1/user/audit-log", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        actions = [e["action"] for e in r.json()["entries"]]
+        assert "user.login" in actions
+
+    @patch("main._queue_email")
+    def test_audit_log_filter_by_action(self, mock_email):
+        client.post("/v1/auth/signup", json={"email": "audit_filter@test.com", "password": "pass123", "display_name": "T"})
+        token = client.post("/v1/auth/login", json={"email": "audit_filter@test.com", "password": "pass123"}).json()["token"]
+        r = client.get("/v1/user/audit-log?action=user.login", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        for entry in r.json()["entries"]:
+            assert entry["action"] == "user.login"
+
+    @patch("main._queue_email")
+    def test_audit_log_export_csv(self, mock_email):
+        client.post("/v1/auth/signup", json={"email": "audit_csv@test.com", "password": "pass123", "display_name": "T"})
+        token = client.post("/v1/auth/login", json={"email": "audit_csv@test.com", "password": "pass123"}).json()["token"]
+        r = client.get("/v1/user/audit-log/export", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        assert "text/csv" in r.headers.get("content-type", "")
+        assert "timestamp,action" in r.text
+
+    @patch("main._queue_email")
+    def test_audit_log_requires_auth(self, mock_email):
+        r = client.get("/v1/user/audit-log")
+        assert r.status_code == 401
+
+
+class TestMoltBookDeepIntegration:
+    def test_moltbook_register_creates_agent(self):
+        r = client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_user_001", "display_name": "MoltBook User"})
+        assert r.status_code == 200
+        data = r.json()
+        assert "agent_id" in data
+        assert "api_key" in data
+        assert data["api_key"].startswith("af_")
+
+    def test_moltbook_register_duplicate_returns_409(self):
+        client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_user_dup", "display_name": "Dup User"})
+        r = client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_user_dup", "display_name": "Dup User"})
+        assert r.status_code == 409
+
+    def test_moltbook_feed_returns_items(self):
+        # Create an agent and ingest a moltbook event
+        r_reg = client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_feed_user", "display_name": "Feed User"})
+        api_key = r_reg.json()["api_key"]
+        client.post("/v1/moltbook/events", json={"event_type": "post", "content": "Hello MoltBook!"}, headers={"X-API-Key": api_key})
+        r = client.get("/v1/moltbook/feed")
+        assert r.status_code == 200
+        assert "feed" in r.json()
+        assert len(r.json()["feed"]) >= 1
+        item = r.json()["feed"][0]
+        assert "type" in item
+        assert "timestamp" in item
