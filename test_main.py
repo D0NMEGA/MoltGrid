@@ -3410,3 +3410,100 @@ class TestPhase2UserIntegrations:
         assert "integrations" in d
         assert len(d["integrations"]) == 1
         assert d["integrations"][0]["platform"] == "n8n"
+
+
+# ─── BE-01: Error Format ─────────────────────────────────────────────────────
+
+class TestErrorFormat:
+    """BE-01: All errors return {error, code, status} shape — no {detail: ...} key."""
+
+    def test_404_returns_standard_shape(self):
+        r = client.get("/v1/nonexistent-endpoint-that-does-not-exist")
+        assert r.status_code == 404
+        body = r.json()
+        assert "error" in body
+        assert "code" in body
+        assert "status" in body
+        assert "detail" not in body
+        assert body["code"] == "not_found"
+        assert body["status"] == 404
+
+    def test_validation_error_returns_standard_shape(self):
+        # Register agent first to get API key
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={"email": "t@t.com", "password": "pass123"})
+        token = r.json().get("token", "")
+        r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
+        api_key = r2.json().get("api_key", "badkey")
+        # Send invalid memory request (missing required field)
+        r3 = client.post("/v1/memory", json={}, headers={"X-API-Key": api_key})
+        assert r3.status_code == 422
+        body = r3.json()
+        assert "error" in body
+        assert "code" in body
+        assert body["code"] == "validation_error"
+        assert "detail" not in body
+
+    def test_unauthorized_returns_standard_shape(self):
+        r = client.get("/v1/memory/somekey", headers={"X-API-Key": "af_invalid"})
+        assert r.status_code in (401, 403)
+        body = r.json()
+        assert "error" in body
+        assert "code" in body
+        assert "status" in body
+        assert "detail" not in body
+
+
+# ─── BE-03: Input Limits ─────────────────────────────────────────────────────
+
+class TestInputLimits:
+    """BE-03: Input size limits enforced."""
+
+    def test_memory_value_size_limit(self):
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={"email": "t2@t.com", "password": "pass123"})
+        token = r.json().get("token", "")
+        r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
+        api_key = r2.json().get("api_key", "badkey")
+        big_value = "x" * 50001
+        r3 = client.post("/v1/memory", json={"key": "k", "value": big_value}, headers={"X-API-Key": api_key})
+        assert r3.status_code in (422, 413), f"Expected 422 or 413, got {r3.status_code}"
+
+    def test_memory_value_at_limit_accepted(self):
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={"email": "t3@t.com", "password": "pass123"})
+        token = r.json().get("token", "")
+        r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
+        api_key = r2.json().get("api_key", "badkey")
+        ok_value = "x" * 50000
+        r3 = client.post("/v1/memory", json={"key": "k", "value": ok_value}, headers={"X-API-Key": api_key})
+        assert r3.status_code in (200, 201), f"Expected success, got {r3.status_code}"
+
+
+# ─── BE-04: CORS ─────────────────────────────────────────────────────────────
+
+class TestCORS:
+    """BE-04: CORS configured for moltgrid.net only."""
+
+    def test_allowed_origin_gets_cors_header(self):
+        r = client.options(
+            "/v1/health",
+            headers={"Origin": "https://moltgrid.net", "Access-Control-Request-Method": "GET"},
+        )
+        assert r.headers.get("access-control-allow-origin") == "https://moltgrid.net"
+
+    def test_disallowed_origin_blocked(self):
+        r = client.options(
+            "/v1/health",
+            headers={"Origin": "https://evil.com", "Access-Control-Request-Method": "GET"},
+        )
+        acao = r.headers.get("access-control-allow-origin", "")
+        assert acao != "https://evil.com", "evil.com must not be allowed"
+        assert acao != "*", "Wildcard must not be present"
+
+    def test_localhost_dev_allowed(self):
+        r = client.options(
+            "/v1/health",
+            headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET"},
+        )
+        assert r.headers.get("access-control-allow-origin") == "http://localhost:3000"
