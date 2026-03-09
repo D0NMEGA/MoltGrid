@@ -29,6 +29,7 @@ from croniter import croniter
 from fastapi import FastAPI, HTTPException, Header, Depends, Query, WebSocket, WebSocketDisconnect, Cookie, Response, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -134,6 +135,15 @@ def _http_code_to_slug(status: int) -> str:
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": str(exc.detail), "code": _http_code_to_slug(exc.status_code), "status": exc.status_code},
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Intercepts Starlette-level 404s (unknown routes) in addition to FastAPI HTTPException."""
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": str(exc.detail), "code": _http_code_to_slug(exc.status_code), "status": exc.status_code},

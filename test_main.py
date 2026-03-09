@@ -1591,9 +1591,16 @@ class TestUserAuth:
     """Tests for user accounts, JWT auth, dashboard endpoints, and tier enforcement."""
 
     def _signup(self, email="user@example.com", password="securepass123", display_name="Test"):
-        r = client.post("/v1/auth/signup", json={
-            "email": email, "password": password, "display_name": display_name,
-        })
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={
+                "email": email, "password": password, "display_name": display_name,
+            })
+        return r
+
+    def _register(self, name, token):
+        """Register an agent with user auth — mocks _queue_email to avoid DB lock."""
+        with patch("main._queue_email"):
+            r = client.post("/v1/register", json={"name": name}, headers=self._auth_header(token))
         return r
 
     def _auth_header(self, token):
@@ -1670,8 +1677,7 @@ class TestUserAuth:
         r = self._signup(email="owner@example.com")
         token = r.json()["token"]
         user_id = r.json()["user_id"]
-        reg = client.post("/v1/register", json={"name": "owned-bot"},
-                          headers=self._auth_header(token))
+        reg = self._register("owned-bot", token)
         assert reg.status_code == 200
         agent_id = reg.json()["agent_id"]
         # Verify ownership via /v1/user/agents
@@ -1695,8 +1701,8 @@ class TestUserAuth:
         conn.commit()
         conn.close()
         # Register 2 agents
-        client.post("/v1/register", json={"name": "bot1"}, headers=self._auth_header(token))
-        client.post("/v1/register", json={"name": "bot2"}, headers=self._auth_header(token))
+        self._register("bot1", token)
+        self._register("bot2", token)
         agents = client.get("/v1/user/agents", headers=self._auth_header(token))
         assert agents.status_code == 200
         assert agents.json()["count"] == 2
@@ -1707,7 +1713,7 @@ class TestUserAuth:
         token_a = r_a.json()["token"]
         token_b = r_b.json()["token"]
         # User A registers an agent
-        client.post("/v1/register", json={"name": "a-bot"}, headers=self._auth_header(token_a))
+        self._register("a-bot", token_a)
         # User B should see 0 agents
         agents_b = client.get("/v1/user/agents", headers=self._auth_header(token_b))
         assert agents_b.json()["count"] == 0
@@ -1719,34 +1725,39 @@ class TestUserAuth:
         r = self._signup(email="limit@example.com")
         token = r.json()["token"]
         # First agent should succeed (free tier allows 1)
-        r1 = client.post("/v1/register", json={"name": "first"}, headers=self._auth_header(token))
+        r1 = self._register("first", token)
         assert r1.status_code == 200
         # Second agent should fail
-        r2 = client.post("/v1/register", json={"name": "second"}, headers=self._auth_header(token))
+        r2 = self._register("second", token)
         assert r2.status_code == 403
-        assert "Agent limit" in r2.json()["detail"]
+        body = r2.json()
+        # Error responses use {error, code, status} shape (not {detail: ...})
+        assert "Agent limit" in body.get("error", body.get("detail", ""))
 
     def test_usage_quota(self):
-        r = self._signup(email="quota@example.com")
-        token = r.json()["token"]
-        user_id = r.json()["user_id"]
-        # Register an agent under this user
-        reg = client.post("/v1/register", json={"name": "quota-bot"}, headers=self._auth_header(token))
-        api_key = reg.json()["api_key"]
-        agent_headers = {"X-API-Key": api_key}
-        # Set usage_count to max_api_calls - 1 (free = 10000)
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("UPDATE users SET usage_count = 9999 WHERE user_id = ?", (user_id,))
-        conn.commit()
-        conn.close()
-        # This request should succeed (9999 -> increments to 10000)
-        r1 = client.get("/v1/memory", headers=agent_headers)
-        assert r1.status_code == 200
-        # Next request should be blocked (usage_count >= 10000)
-        r2 = client.get("/v1/memory", headers=agent_headers)
-        assert r2.status_code == 429
-        assert "quota" in r2.json()["detail"].lower()
+        with patch("main._queue_email"):
+            r = self._signup(email="quota@example.com")
+            token = r.json()["token"]
+            user_id = r.json()["user_id"]
+            # Register an agent under this user
+            reg = self._register("quota-bot", token)
+            api_key = reg.json()["api_key"]
+            agent_headers = {"X-API-Key": api_key}
+            # Set usage_count to max_api_calls - 1 (free = 10000)
+            import sqlite3
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("UPDATE users SET usage_count = 9999 WHERE user_id = ?", (user_id,))
+            conn.commit()
+            conn.close()
+            # This request should succeed (9999 -> increments to 10000)
+            r1 = client.get("/v1/memory", headers=agent_headers)
+            assert r1.status_code == 200
+            # Next request should be blocked (usage_count >= 10000)
+            r2 = client.get("/v1/memory", headers=agent_headers)
+            assert r2.status_code == 429
+            body = r2.json()
+            # Error responses use {error, code, status} shape (not {detail: ...})
+            assert "quota" in body.get("error", body.get("detail", "")).lower()
 
 
 
@@ -1763,14 +1774,14 @@ class TestBilling:
         d = r.json()
         assert d["currency"] == "usd"
         assert d["billing_period"] == "monthly"
+        # tiers is a dict keyed by tier name
         assert len(d["tiers"]) == 4
-        names = [t["name"] for t in d["tiers"]]
-        assert names == ["free", "hobby", "team", "scale"]
+        assert set(d["tiers"].keys()) == {"free", "hobby", "team", "scale"}
         # Verify free tier details
-        free = d["tiers"][0]
+        free = d["tiers"]["free"]
         assert free["price"] == 0
-        assert free["agents"] == 1
-        assert free["api_calls"] == 10000
+        assert free["max_agents"] == 1
+        assert free["max_api_calls"] == 10000
 
     def test_checkout_requires_auth(self):
         r = client.post("/v1/billing/checkout", json={"tier": "hobby"})
@@ -1778,14 +1789,17 @@ class TestBilling:
 
     def test_checkout_invalid_tier(self):
         # Signup to get a token
-        s = client.post("/v1/auth/signup", json={
-            "email": "checkout@example.com", "password": "securepass123",
-        })
+        with patch("main._queue_email"):
+            s = client.post("/v1/auth/signup", json={
+                "email": "checkout@example.com", "password": "securepass123",
+            })
         token = s.json()["token"]
         r = client.post("/v1/billing/checkout", json={"tier": "invalid"},
                         headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 400
-        assert "Invalid tier" in r.json()["detail"]
+        body = r.json()
+        # Error responses use {error, code, status} shape (not {detail: ...})
+        assert "Invalid tier" in body.get("error", body.get("detail", ""))
 
     def test_billing_status_requires_auth(self):
         r = client.get("/v1/billing/status")
@@ -1797,9 +1811,10 @@ class TestBilling:
         assert r.status_code == 400
 
     def test_user_starts_free(self):
-        s = client.post("/v1/auth/signup", json={
-            "email": "freetier@example.com", "password": "securepass123",
-        })
+        with patch("main._queue_email"):
+            s = client.post("/v1/auth/signup", json={
+                "email": "freetier@example.com", "password": "securepass123",
+            })
         assert s.status_code == 200
         token = s.json()["token"]
         me = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
@@ -2245,11 +2260,13 @@ class TestResponseHeaders:
         assert "x-moltgrid-version" in r.headers
 
     def test_cors_headers(self):
+        # Use an allowed origin (CORS is now restricted to moltgrid.net / localhost)
         r = client.options("/v1/health", headers={
-            "Origin": "https://example.com",
+            "Origin": "https://moltgrid.net",
             "Access-Control-Request-Method": "GET",
         })
         assert "access-control-allow-origin" in r.headers
+        assert r.headers["access-control-allow-origin"] == "https://moltgrid.net"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2689,7 +2706,9 @@ class TestMemoryVisibilitySchema:
         client.post("/v1/memory", json={"key": "priv", "value": "secret"}, headers=h1)
         r = client.get(f"/v1/agents/{aid1}/memory/priv", headers=h2)
         assert r.status_code == 403
-        assert "Access denied" in r.json()["detail"]
+        body = r.json()
+        # Error responses use {error, code, status} shape (not {detail: ...})
+        assert "Access denied" in body.get("error", body.get("detail", ""))
 
     def test_cross_agent_read_private_not_404(self):
         """Private memory returns 403 not 404 (prevents enumeration)."""
@@ -3432,8 +3451,8 @@ class TestErrorFormat:
         # Register agent first to get API key
         with patch("main._queue_email"):
             r = client.post("/v1/auth/signup", json={"email": "t@t.com", "password": "pass123"})
-        token = r.json().get("token", "")
-        r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
+            token = r.json().get("token", "")
+            r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
         api_key = r2.json().get("api_key", "badkey")
         # Send invalid memory request (missing required field)
         r3 = client.post("/v1/memory", json={}, headers={"X-API-Key": api_key})
@@ -3462,8 +3481,8 @@ class TestInputLimits:
     def test_memory_value_size_limit(self):
         with patch("main._queue_email"):
             r = client.post("/v1/auth/signup", json={"email": "t2@t.com", "password": "pass123"})
-        token = r.json().get("token", "")
-        r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
+            token = r.json().get("token", "")
+            r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
         api_key = r2.json().get("api_key", "badkey")
         big_value = "x" * 50001
         r3 = client.post("/v1/memory", json={"key": "k", "value": big_value}, headers={"X-API-Key": api_key})
@@ -3472,8 +3491,8 @@ class TestInputLimits:
     def test_memory_value_at_limit_accepted(self):
         with patch("main._queue_email"):
             r = client.post("/v1/auth/signup", json={"email": "t3@t.com", "password": "pass123"})
-        token = r.json().get("token", "")
-        r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
+            token = r.json().get("token", "")
+            r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
         api_key = r2.json().get("api_key", "badkey")
         ok_value = "x" * 50000
         r3 = client.post("/v1/memory", json={"key": "k", "value": ok_value}, headers={"X-API-Key": api_key})
