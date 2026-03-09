@@ -14,6 +14,7 @@ import asyncio
 import logging
 import smtplib
 import statistics
+import csv
 import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -621,6 +622,21 @@ def init_db():
         'CREATE INDEX IF NOT EXISTS idx_mal_agent ON memory_access_log(agent_id, created_at)'
     )
 
+    # Audit logs table (BL-05)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            log_id TEXT PRIMARY KEY,
+            user_id TEXT,
+            agent_id TEXT,
+            action TEXT NOT NULL,
+            details TEXT,
+            ip_address TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action, created_at)")
+
     # Agent templates table (BL-04)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS templates (
@@ -1022,6 +1038,7 @@ def auth_login(req: LoginRequest, request: Request):
                         "UPDATE users SET known_login_ips = ? WHERE user_id = ?",
                         (json.dumps(known_ips), row["user_id"])
                     )
+    _log_audit("user.login", user_id=row["user_id"], ip_address=_get_client_ip(request))
     return {"user_id": row["user_id"], "token": token}
 
 @app.get("/v1/auth/me", tags=["Auth"])
@@ -1301,6 +1318,7 @@ def user_delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
         db.execute("DELETE FROM collaborations WHERE agent_id=? OR partner_agent=?", (agent_id, agent_id))
         db.execute("DELETE FROM marketplace WHERE creator_agent=?", (agent_id,))
         db.execute("DELETE FROM agents WHERE agent_id=?", (agent_id,))
+    _log_audit("agent.delete", user_id=user_id, agent_id=agent_id)
     return {"status": "deleted", "agent_id": agent_id}
 
 @app.get("/v1/user/usage", tags=["User Dashboard"])
@@ -1813,6 +1831,7 @@ def user_schedule_create(agent_id: str, req: UserScheduleRequest, user_id: str =
             (task_id, agent_id, req.cron_expr, req.queue_name, _encrypt(req.payload),
              req.priority, now, next_run),
         )
+    _log_audit("schedule.create", user_id=user_id, agent_id=agent_id, details=task_id)
     return {"task_id": task_id, "cron_expr": req.cron_expr, "next_run_at": next_run, "enabled": True}
 
 
@@ -1859,6 +1878,7 @@ def user_schedule_delete(agent_id: str, task_id: str, user_id: str = Depends(get
             "DELETE FROM scheduled_tasks WHERE task_id=? AND agent_id=?", (task_id, agent_id)
         ).rowcount
     if not deleted: raise HTTPException(404, "Schedule not found")
+    _log_audit("schedule.delete", user_id=user_id, agent_id=agent_id, details=task_id)
     return {"status": "deleted"}
 
 
@@ -1888,6 +1908,7 @@ def user_webhook_create(agent_id: str, req: "WebhookRegisterRequest", user_id: s
             "VALUES (?,?,?,?,?,?,1)",
             (webhook_id, agent_id, req.url, json.dumps(req.event_types), req.secret, now),
         )
+    _log_audit("webhook.create", user_id=user_id, agent_id=agent_id, details=webhook_id)
     return {"webhook_id": webhook_id, "url": req.url, "event_types": req.event_types, "active": True}
 
 
@@ -1899,7 +1920,92 @@ def user_webhook_delete(agent_id: str, webhook_id: str, user_id: str = Depends(g
             "DELETE FROM webhooks WHERE webhook_id=? AND agent_id=?", (webhook_id, agent_id)
         ).rowcount
     if not deleted: raise HTTPException(404, "Webhook not found")
+    _log_audit("webhook.delete", user_id=user_id, agent_id=agent_id, details=webhook_id)
     return {"status": "deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUDIT LOG VIEWER (BL-05)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/v1/user/audit-log/export", tags=["User Dashboard"])
+def user_audit_log_export(
+    action: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    user_id: str = Depends(get_user_id),
+):
+    """Export audit log entries as CSV. Returns all matching entries (no pagination)."""
+    base = "SELECT log_id, action, agent_id, details, ip_address, created_at FROM audit_logs WHERE user_id = ?"
+    params: list = [user_id]
+    if action:
+        base += " AND action = ?"
+        params.append(action)
+    if from_date:
+        base += " AND created_at >= ?"
+        params.append(from_date)
+    if to_date:
+        base += " AND created_at <= ?"
+        params.append(to_date)
+    base += " ORDER BY created_at DESC"
+    with get_db() as db:
+        rows = db.execute(base, params).fetchall()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["timestamp", "action", "agent_id", "details", "ip_address"])
+    for row in rows:
+        writer.writerow([
+            row["created_at"], row["action"], row["agent_id"] or "",
+            row["details"] or "", row["ip_address"] or "",
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit-log.csv"},
+    )
+
+
+@app.get("/v1/user/audit-log", tags=["User Dashboard"])
+def user_audit_log(
+    action: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    user_id: str = Depends(get_user_id),
+):
+    """Retrieve audit log entries for the authenticated user with optional filters."""
+    base = "SELECT log_id, action, agent_id, details, ip_address, created_at FROM audit_logs WHERE user_id = ?"
+    count_base = "SELECT COUNT(*) as cnt FROM audit_logs WHERE user_id = ?"
+    params: list = [user_id]
+    count_params: list = [user_id]
+    if action:
+        base += " AND action = ?"
+        count_base += " AND action = ?"
+        params.append(action)
+        count_params.append(action)
+    if from_date:
+        base += " AND created_at >= ?"
+        count_base += " AND created_at >= ?"
+        params.append(from_date)
+        count_params.append(from_date)
+    if to_date:
+        base += " AND created_at <= ?"
+        count_base += " AND created_at <= ?"
+        params.append(to_date)
+        count_params.append(to_date)
+    capped_limit = min(limit, 200)
+    base += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([capped_limit, offset])
+    with get_db() as db:
+        rows = db.execute(base, params).fetchall()
+        total = db.execute(count_base, count_params).fetchone()["cnt"]
+    return {
+        "entries": [dict(r) for r in rows],
+        "total": total,
+        "limit": capped_limit,
+        "offset": offset,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2061,7 +2167,9 @@ async def stripe_webhook(request: Request):
                 db.execute("UPDATE users SET payment_failed = 1 WHERE user_id = ?", (user["user_id"],))
                 logger.warning(f"Payment failed for user {user['user_id']}")
 
-    # Payment confirmation email — OUTSIDE with get_db() block
+    # Audit log + payment confirmation email — OUTSIDE with get_db() blocks
+    if _checkout_user_id:
+        _log_audit("billing.tier_change", user_id=_checkout_user_id, details=_checkout_tier)
     if _checkout_user_id:
         with get_db() as email_db:
             email_user = email_db.execute("SELECT email FROM users WHERE user_id = ?", (_checkout_user_id,)).fetchone()
@@ -2258,6 +2366,7 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
             )
 
     _track_event("agent.registered", agent_id=agent_id)
+    _log_audit("agent.register", user_id=owner_id, agent_id=agent_id)
     return RegisterResponse(
         agent_id=agent_id,
         api_key=api_key,
@@ -2291,6 +2400,84 @@ def moltbook_ingest_event(req: MoltBookEventRequest, agent_id: str = Depends(get
             "agent_id": agent_id, "created_at": now}
 
 
+# ── MoltBook deep integration: auto-provisioning + feed (BL-06) ───────────────
+
+class MoltBookRegisterRequest(BaseModel):
+    moltbook_user_id: str = Field(..., max_length=128)
+    display_name: str = Field(..., max_length=64)
+
+
+# TODO: Add IP-based rate limiting in Phase 8
+@app.post("/v1/moltbook/register", tags=["Integrations"])
+def moltbook_register(req: MoltBookRegisterRequest):
+    """Auto-provision a MoltGrid agent for a new MoltBook user. No auth required (external service)."""
+    now = datetime.now(timezone.utc).isoformat()
+    # Check for duplicate
+    with get_db() as db:
+        existing = db.execute(
+            "SELECT agent_id FROM agents WHERE moltbook_profile_id = ?", (req.moltbook_user_id,)
+        ).fetchone()
+    if existing:
+        raise HTTPException(
+            409,
+            detail={"error": "MoltBook user already registered", "code": "ALREADY_REGISTERED", "status": 409},
+        )
+    agent_id = f"af_{uuid.uuid4().hex[:12]}"
+    raw_key = f"af_{secrets.token_hex(24)}"
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    integration_id = f"int_{uuid.uuid4().hex[:16]}"
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO agents (agent_id, api_key_hash, display_name, moltbook_profile_id, public, "
+            "created_at, credits) VALUES (?,?,?,?,1,?,200)",
+            (agent_id, key_hash, req.display_name, req.moltbook_user_id, now),
+        )
+        db.execute(
+            "INSERT INTO integrations (id, agent_id, platform, config, status, created_at) VALUES (?,?,?,?,?,?)",
+            (integration_id, agent_id, "moltbook",
+             json.dumps({"moltbook_user_id": req.moltbook_user_id}), "active", now),
+        )
+    _log_audit("moltbook.register", agent_id=agent_id, details=req.moltbook_user_id)
+    return {"agent_id": agent_id, "api_key": raw_key, "display_name": req.display_name}
+
+
+@app.get("/v1/moltbook/feed", tags=["Integrations"])
+def moltbook_feed():
+    """Return last 20 moltbook-sourced analytics events as a social feed. Public endpoint."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT id, event_name, agent_id, metadata, moltbook_url, created_at "
+            "FROM analytics_events WHERE source = 'moltbook' ORDER BY created_at DESC LIMIT 20"
+        ).fetchall()
+
+    def _map_type(event_name: str) -> str:
+        suffix = event_name.replace("moltbook.", "")
+        return suffix if suffix else event_name
+
+    def _get_content(event_name: str, metadata_str: Optional[str]) -> str:
+        if metadata_str:
+            try:
+                meta = json.loads(metadata_str)
+                if "content" in meta:
+                    return str(meta["content"])
+            except Exception:
+                pass
+        return event_name
+
+    feed = [
+        {
+            "id": r["id"],
+            "type": _map_type(r["event_name"]),
+            "content": _get_content(r["event_name"], r["metadata"]),
+            "timestamp": r["created_at"],
+            "moltbook_url": r["moltbook_url"],
+            "agent_id": r["agent_id"],
+        }
+        for r in rows
+    ]
+    return {"feed": feed}
+
+
 @app.post("/v1/agents/rotate-key", tags=["Auth"])
 def rotate_api_key(agent_id: str = Depends(get_agent_id)):
     """Rotate the agent's API key. Returns the new key once; old key is immediately invalid."""
@@ -2312,6 +2499,7 @@ def rotate_api_key(agent_id: str = Depends(get_agent_id)):
             "MoltGrid security alert: API key rotated",
             "<p>Your MoltGrid agent API key was just rotated. If you did not initiate this, contact support immediately.</p>"
         )
+    _log_audit("apikey.rotate", agent_id=agent_id)
     return {
         "status": "rotated",
         "agent_id": agent_id,
@@ -2583,6 +2771,29 @@ def _log_memory_access(action, agent_id, namespace, key,
     finally:
         if conn:
             conn.close()
+
+
+def _log_audit(
+    action: str,
+    user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    details: Optional[str] = None,
+    ip_address: Optional[str] = None,
+) -> None:
+    """Fire-and-forget audit log writer. Uses own connection — call OUTSIDE with get_db() blocks."""
+    try:
+        log_id = f"log_{uuid.uuid4().hex[:16]}"
+        now = datetime.now(timezone.utc).isoformat()
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO audit_logs (log_id, user_id, agent_id, action, details, ip_address, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (log_id, user_id, agent_id, action, details, ip_address, now),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # Never raise from audit logger
 
 
 def _check_memory_visibility(db, target_agent_id: str, namespace: str, key: str, requester_agent_id: str) -> bool:
