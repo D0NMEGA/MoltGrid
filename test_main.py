@@ -7,6 +7,8 @@ import os
 import json
 import time
 import pytest
+import hashlib
+import pyotp
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
 
@@ -4059,3 +4061,79 @@ class TestOrgAccounts:
             headers=self._auth_header(token_owner),
         )
         assert r_invite.status_code == 404
+
+
+# ─── TOTP 2FA Tests ──────────────────────────────────────────────────────────
+
+class TestTOTP2FA:
+    @patch("main._queue_email")
+    def test_2fa_setup_returns_secret(self, mock_email):
+        client.post("/v1/auth/signup", json={"email": "2fa_setup@test.com", "password": "pass123", "display_name": "T"})
+        token = client.post("/v1/auth/login", json={"email": "2fa_setup@test.com", "password": "pass123"}).json()["token"]
+        r = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        data = r.json()
+        assert "secret" in data
+        assert "otpauth_uri" in data
+        assert "qr_code_url" in data
+
+    @patch("main._queue_email")
+    def test_2fa_verify_enables_and_returns_recovery_codes(self, mock_email):
+        client.post("/v1/auth/signup", json={"email": "2fa_verify@test.com", "password": "pass123", "display_name": "T"})
+        token = client.post("/v1/auth/login", json={"email": "2fa_verify@test.com", "password": "pass123"}).json()["token"]
+        setup = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"}).json()
+        code = pyotp.TOTP(setup["secret"]).now()
+        r = client.post("/v1/auth/2fa/verify", json={"code": code}, headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        assert r.json()["enabled"] is True
+        assert len(r.json()["recovery_codes"]) == 10
+
+    @patch("main._queue_email")
+    def test_login_with_2fa_enabled_no_code_returns_requires_2fa(self, mock_email):
+        client.post("/v1/auth/signup", json={"email": "2fa_login@test.com", "password": "pass123", "display_name": "T"})
+        token = client.post("/v1/auth/login", json={"email": "2fa_login@test.com", "password": "pass123"}).json()["token"]
+        setup = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"}).json()
+        code = pyotp.TOTP(setup["secret"]).now()
+        client.post("/v1/auth/2fa/verify", json={"code": code}, headers={"Authorization": f"Bearer {token}"})
+        # Now login without totp_code
+        r = client.post("/v1/auth/login", json={"email": "2fa_login@test.com", "password": "pass123"})
+        assert r.status_code == 200
+        assert r.json().get("requires_2fa") is True
+        assert "temp_token" in r.json()
+
+    @patch("main._queue_email")
+    def test_login_with_valid_totp_code_returns_jwt(self, mock_email):
+        client.post("/v1/auth/signup", json={"email": "2fa_fulllogin@test.com", "password": "pass123", "display_name": "T"})
+        token = client.post("/v1/auth/login", json={"email": "2fa_fulllogin@test.com", "password": "pass123"}).json()["token"]
+        setup = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"}).json()
+        code = pyotp.TOTP(setup["secret"]).now()
+        client.post("/v1/auth/2fa/verify", json={"code": code}, headers={"Authorization": f"Bearer {token}"})
+        # Login with totp_code
+        code2 = pyotp.TOTP(setup["secret"]).now()
+        r = client.post("/v1/auth/login", json={"email": "2fa_fulllogin@test.com", "password": "pass123", "totp_code": code2})
+        assert r.status_code == 200
+        assert "token" in r.json()
+
+    @patch("main._queue_email")
+    def test_recovery_code_login(self, mock_email):
+        client.post("/v1/auth/signup", json={"email": "2fa_recovery@test.com", "password": "pass123", "display_name": "T"})
+        token = client.post("/v1/auth/login", json={"email": "2fa_recovery@test.com", "password": "pass123"}).json()["token"]
+        setup = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"}).json()
+        code = pyotp.TOTP(setup["secret"]).now()
+        recovery_codes = client.post("/v1/auth/2fa/verify", json={"code": code}, headers={"Authorization": f"Bearer {token}"}).json()["recovery_codes"]
+        # Login with a recovery code instead of TOTP
+        r = client.post("/v1/auth/login", json={"email": "2fa_recovery@test.com", "password": "pass123", "totp_code": recovery_codes[0]})
+        assert r.status_code == 200
+        assert "token" in r.json()
+
+    @patch("main._queue_email")
+    def test_disable_2fa(self, mock_email):
+        client.post("/v1/auth/signup", json={"email": "2fa_disable@test.com", "password": "pass123", "display_name": "T"})
+        token = client.post("/v1/auth/login", json={"email": "2fa_disable@test.com", "password": "pass123"}).json()["token"]
+        setup = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"}).json()
+        code = pyotp.TOTP(setup["secret"]).now()
+        client.post("/v1/auth/2fa/verify", json={"code": code}, headers={"Authorization": f"Bearer {token}"})
+        disable_code = pyotp.TOTP(setup["secret"]).now()
+        r = client.post("/v1/auth/2fa/disable", json={"code": disable_code}, headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        assert r.json()["disabled"] is True
