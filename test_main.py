@@ -3826,3 +3826,236 @@ class TestDirectoryFeatured:
         assert r.status_code == 200
         data = r.json()
         assert "matches" in data
+
+
+class TestOrgAccounts:
+    """Tests for multi-user organization accounts (BL-02)."""
+
+    def _signup(self, email="org-user@example.com", password="securepass123", display_name="OrgUser"):
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={
+                "email": email, "password": password, "display_name": display_name,
+            })
+        return r
+
+    def _auth_header(self, token):
+        return {"Authorization": f"Bearer {token}"}
+
+    def _create_org(self, token, name="Test Org", slug="test-org"):
+        return client.post(
+            "/v1/orgs",
+            json={"name": name, "slug": slug},
+            headers=self._auth_header(token),
+        )
+
+    def test_create_org(self):
+        """Owner can create an organization."""
+        r = self._signup(email="org-owner@example.com")
+        token = r.json()["token"]
+        r2 = self._create_org(token)
+        assert r2.status_code == 200
+        data = r2.json()
+        assert data["name"] == "Test Org"
+        assert data["slug"] == "test-org"
+        assert "org_id" in data
+        assert data["role"] == "owner"
+
+    def test_create_org_slug_unique(self):
+        """Duplicate slug is rejected with 409."""
+        r = self._signup(email="slug-owner@example.com")
+        token = r.json()["token"]
+        self._create_org(token, name="First", slug="unique-slug")
+        r2 = self._create_org(token, name="Second", slug="unique-slug")
+        assert r2.status_code == 409
+
+    def test_list_orgs(self):
+        """User can list their organizations."""
+        r = self._signup(email="list-org@example.com")
+        token = r.json()["token"]
+        self._create_org(token, name="My Org", slug="my-org-list")
+        r2 = client.get("/v1/orgs", headers=self._auth_header(token))
+        assert r2.status_code == 200
+        data = r2.json()
+        assert "orgs" in data
+        assert len(data["orgs"]) >= 1
+        org = data["orgs"][0]
+        assert org["name"] == "My Org"
+        assert org["role"] == "owner"
+
+    def test_get_org(self):
+        """Owner can get org details."""
+        r = self._signup(email="get-org@example.com")
+        token = r.json()["token"]
+        create_r = self._create_org(token, name="Get Org", slug="get-org-slug")
+        org_id = create_r.json()["org_id"]
+        r2 = client.get(f"/v1/orgs/{org_id}", headers=self._auth_header(token))
+        assert r2.status_code == 200
+        data = r2.json()
+        assert data["org_id"] == org_id
+        assert data["name"] == "Get Org"
+        assert "members" in data
+
+    def test_get_org_non_member_forbidden(self):
+        """Non-member cannot access org details."""
+        r = self._signup(email="owner-org-sec@example.com")
+        token_owner = r.json()["token"]
+        create_r = self._create_org(token_owner, name="Secure Org", slug="secure-org")
+        org_id = create_r.json()["org_id"]
+
+        r2 = self._signup(email="outsider-org@example.com")
+        token_outsider = r2.json()["token"]
+
+        r3 = client.get(f"/v1/orgs/{org_id}", headers=self._auth_header(token_outsider))
+        assert r3.status_code == 403
+
+    def test_invite_member(self):
+        """Owner can invite a member to the org."""
+        r_owner = self._signup(email="invite-owner@example.com")
+        token_owner = r_owner.json()["token"]
+        create_r = self._create_org(token_owner, name="Invite Org", slug="invite-org")
+        org_id = create_r.json()["org_id"]
+
+        r_member = self._signup(email="invite-member@example.com")
+        member_user_id = r_member.json()["user_id"]
+
+        r_invite = client.post(
+            f"/v1/orgs/{org_id}/members",
+            json={"user_id": member_user_id, "role": "member"},
+            headers=self._auth_header(token_owner),
+        )
+        assert r_invite.status_code == 200
+        data = r_invite.json()
+        assert data["user_id"] == member_user_id
+        assert data["role"] == "member"
+
+    def test_invite_member_non_owner_forbidden(self):
+        """Plain member cannot invite others."""
+        r_owner = self._signup(email="noinvite-owner@example.com")
+        token_owner = r_owner.json()["token"]
+        create_r = self._create_org(token_owner, name="NoInvite Org", slug="noinvite-org")
+        org_id = create_r.json()["org_id"]
+
+        r_member = self._signup(email="noinvite-member@example.com")
+        token_member = r_member.json()["token"]
+        member_user_id = r_member.json()["user_id"]
+
+        # Invite member first
+        client.post(
+            f"/v1/orgs/{org_id}/members",
+            json={"user_id": member_user_id, "role": "member"},
+            headers=self._auth_header(token_owner),
+        )
+
+        # member tries to invite another user
+        r_other = self._signup(email="noinvite-other@example.com")
+        other_user_id = r_other.json()["user_id"]
+
+        r_bad = client.post(
+            f"/v1/orgs/{org_id}/members",
+            json={"user_id": other_user_id, "role": "member"},
+            headers=self._auth_header(token_member),
+        )
+        assert r_bad.status_code == 403
+
+    def test_remove_member(self):
+        """Owner can remove a member from the org."""
+        r_owner = self._signup(email="remove-owner@example.com")
+        token_owner = r_owner.json()["token"]
+        create_r = self._create_org(token_owner, name="Remove Org", slug="remove-org")
+        org_id = create_r.json()["org_id"]
+
+        r_member = self._signup(email="remove-member@example.com")
+        member_user_id = r_member.json()["user_id"]
+
+        client.post(
+            f"/v1/orgs/{org_id}/members",
+            json={"user_id": member_user_id, "role": "member"},
+            headers=self._auth_header(token_owner),
+        )
+
+        r_remove = client.delete(
+            f"/v1/orgs/{org_id}/members/{member_user_id}",
+            headers=self._auth_header(token_owner),
+        )
+        assert r_remove.status_code == 200
+
+    def test_update_member_role(self):
+        """Owner/admin can change a member's role."""
+        r_owner = self._signup(email="role-owner@example.com")
+        token_owner = r_owner.json()["token"]
+        create_r = self._create_org(token_owner, name="Role Org", slug="role-org")
+        org_id = create_r.json()["org_id"]
+
+        r_member = self._signup(email="role-member@example.com")
+        member_user_id = r_member.json()["user_id"]
+
+        client.post(
+            f"/v1/orgs/{org_id}/members",
+            json={"user_id": member_user_id, "role": "member"},
+            headers=self._auth_header(token_owner),
+        )
+
+        r_update = client.patch(
+            f"/v1/orgs/{org_id}/members/{member_user_id}",
+            json={"role": "admin"},
+            headers=self._auth_header(token_owner),
+        )
+        assert r_update.status_code == 200
+        assert r_update.json()["role"] == "admin"
+
+    def test_switch_org_context(self):
+        """User can switch to an org context via /v1/orgs/{org_id}/switch."""
+        r = self._signup(email="switch-user@example.com")
+        token = r.json()["token"]
+        create_r = self._create_org(token, name="Switch Org", slug="switch-org")
+        org_id = create_r.json()["org_id"]
+
+        r_switch = client.post(
+            f"/v1/orgs/{org_id}/switch",
+            headers=self._auth_header(token),
+        )
+        assert r_switch.status_code == 200
+        data = r_switch.json()
+        assert data["active_org_id"] == org_id
+        assert data["org_name"] == "Switch Org"
+
+    def test_org_schema_tables_exist(self):
+        """organizations and org_members tables must exist."""
+        from main import DB_PATH
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        conn.close()
+        assert "organizations" in tables, "organizations table missing"
+        assert "org_members" in tables, "org_members table missing"
+
+    def test_invalid_role_rejected(self):
+        """Inviting with an invalid role is rejected."""
+        r_owner = self._signup(email="invalid-role-owner@example.com")
+        token_owner = r_owner.json()["token"]
+        create_r = self._create_org(token_owner, name="Role Org2", slug="role-org2")
+        org_id = create_r.json()["org_id"]
+
+        r_member = self._signup(email="invalid-role-member@example.com")
+        member_user_id = r_member.json()["user_id"]
+
+        r_invite = client.post(
+            f"/v1/orgs/{org_id}/members",
+            json={"user_id": member_user_id, "role": "superadmin"},
+            headers=self._auth_header(token_owner),
+        )
+        assert r_invite.status_code == 422
+
+    def test_cannot_invite_nonexistent_user(self):
+        """Inviting a nonexistent user_id returns 404."""
+        r_owner = self._signup(email="nouser-owner@example.com")
+        token_owner = r_owner.json()["token"]
+        create_r = self._create_org(token_owner, name="NoUser Org", slug="nouser-org")
+        org_id = create_r.json()["org_id"]
+
+        r_invite = client.post(
+            f"/v1/orgs/{org_id}/members",
+            json={"user_id": "user_nonexistent123", "role": "member"},
+            headers=self._auth_header(token_owner),
+        )
+        assert r_invite.status_code == 404
