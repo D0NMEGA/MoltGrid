@@ -18,6 +18,7 @@ import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional, List, Union
 from contextlib import asynccontextmanager, contextmanager
 
@@ -46,7 +47,13 @@ DB_PATH = os.getenv("MOLTGRID_DB", "moltgrid.db")
 MAX_MEMORY_VALUE_SIZE = 50_000  # 50KB per value
 MAX_QUEUE_PAYLOAD_SIZE = 100_000  # 100KB per job
 RATE_LIMIT_WINDOW = 60  # seconds
-RATE_LIMIT_MAX = 120  # requests per window per agent
+RATE_LIMIT_MAX = 120  # requests per window per agent (fallback / free-tier default)
+TIER_RATE_LIMITS = {
+    "free":  120,
+    "hobby": 300,
+    "team":  600,
+    "scale": 1200,
+}
 
 # Subscription tier limits
 TIER_LIMITS = {
@@ -180,12 +187,14 @@ async def add_response_headers(request: Request, call_next):
     request.state.request_id = request_id
     request.state.rate_limit_remaining = None
     request.state.rate_limit_reset = None
+    request.state.rate_limit_max = None
 
     response = await call_next(request)
 
     response.headers["X-Request-ID"] = request_id
     response.headers["X-MoltGrid-Version"] = app.version
-    response.headers["X-RateLimit-Limit"] = str(RATE_LIMIT_MAX)
+    rate_limit_max = getattr(request.state, "rate_limit_max", RATE_LIMIT_MAX)
+    response.headers["X-RateLimit-Limit"] = str(rate_limit_max if rate_limit_max is not None else RATE_LIMIT_MAX)
 
     if request.state.rate_limit_remaining is not None:
         response.headers["X-RateLimit-Remaining"] = str(request.state.rate_limit_remaining)
@@ -520,6 +529,8 @@ def init_db():
         ("onboarding_completed", "INTEGER DEFAULT 0"),
         ("moltbook_profile_id", "TEXT"),
         ("display_name", "TEXT"),
+        ("featured", "INTEGER DEFAULT 0"),
+        ("verified", "INTEGER DEFAULT 0"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
@@ -554,6 +565,7 @@ def init_db():
         for col, typedef in [
             ("payment_failed", "INTEGER DEFAULT 0"),
             ("notification_preferences", "TEXT"),
+            ("known_login_ips", "TEXT DEFAULT '[]'"),
         ]:
             if col not in u_existing:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
@@ -750,10 +762,19 @@ async def get_agent_id(request: Request) -> str:
             (row["agent_id"], window)
         ).fetchone()
         current_count = rl["count"] if rl else 0
-        request.state.rate_limit_remaining = max(0, RATE_LIMIT_MAX - current_count)
+        # Tier-aware rate limit lookup
+        owner_row = db.execute(
+            "SELECT u.subscription_tier FROM users u "
+            "JOIN agents a ON a.owner_id = u.user_id WHERE a.agent_id = ?",
+            (row["agent_id"],)
+        ).fetchone()
+        tier = (owner_row["subscription_tier"] if owner_row else None) or "free"
+        tier_limit = TIER_RATE_LIMITS.get(tier, TIER_RATE_LIMITS["free"])
+        request.state.rate_limit_max = tier_limit  # consumed by header middleware
+        request.state.rate_limit_remaining = max(0, tier_limit - current_count)
         request.state.rate_limit_reset = (window + 1) * RATE_LIMIT_WINDOW
-        if current_count > RATE_LIMIT_MAX:
-            raise HTTPException(429, f"Rate limit exceeded ({RATE_LIMIT_MAX}/min)")
+        if current_count > tier_limit:
+            raise HTTPException(429, f"Rate limit exceeded ({tier_limit}/min for {tier} tier)")
 
         # Usage quota check (per owner's subscription tier)
         _check_usage_quota(db, row["agent_id"])
@@ -858,7 +879,7 @@ def auth_signup(req: SignupRequest):
     return {"user_id": user_id, "token": token, "message": "Account created"}
 
 @app.post("/v1/auth/login", tags=["Auth"])
-def auth_login(req: LoginRequest):
+def auth_login(req: LoginRequest, request: Request):
     with get_db() as db:
         row = db.execute("SELECT user_id, password_hash FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
         if not row or not _bcrypt.checkpw(req.password.encode(), row["password_hash"].encode()):
@@ -867,6 +888,30 @@ def auth_login(req: LoginRequest):
         db.execute("UPDATE users SET last_login = ? WHERE user_id = ?", (now, row["user_id"]))
     token = _create_token(row["user_id"], req.email.lower())
     _track_event("user.login", user_id=row["user_id"])
+    # IP-based security alert (OUTSIDE with get_db() blocks)
+    client_ip = _get_client_ip(request)
+    if client_ip != "unknown":
+        with get_db() as ip_db:
+            user_ip_row = ip_db.execute(
+                "SELECT email, known_login_ips FROM users WHERE user_id = ?", (row["user_id"],)
+            ).fetchone()
+        if user_ip_row:
+            known_ips = json.loads(user_ip_row["known_login_ips"] or "[]")
+            if known_ips and client_ip not in known_ips:
+                alert_html = (
+                    f"<p>A login to your MoltGrid account was detected from a new IP address: "
+                    f"<strong>{client_ip}</strong>.</p>"
+                    f"<p>If this was not you, please rotate your API keys immediately.</p>"
+                )
+                _queue_email(user_ip_row["email"], "MoltGrid security alert: new login IP detected", alert_html)
+            if client_ip not in known_ips:
+                known_ips.append(client_ip)
+                known_ips = known_ips[-10:]
+                with get_db() as ip_db2:
+                    ip_db2.execute(
+                        "UPDATE users SET known_login_ips = ? WHERE user_id = ?",
+                        (json.dumps(known_ips), row["user_id"])
+                    )
     return {"user_id": row["user_id"], "token": token}
 
 @app.get("/v1/auth/me", tags=["Auth"])
@@ -1800,6 +1845,10 @@ async def stripe_webhook(request: Request):
     event_type = event.get("type", "") if isinstance(event, dict) else event.type
     data_obj = event.get("data", {}).get("object", {}) if isinstance(event, dict) else event.data.object
 
+    # Track user_id + tier for post-DB email (checkout case)
+    _checkout_user_id = None
+    _checkout_tier = None
+
     with get_db() as db:
         if event_type == "checkout.session.completed":
             user_id = (data_obj.get("metadata") or {}).get("moltgrid_user_id")
@@ -1809,6 +1858,8 @@ async def stripe_webhook(request: Request):
                 _apply_tier(db, user_id, tier)
                 db.execute("UPDATE users SET stripe_subscription_id = ? WHERE user_id = ?", (sub_id, user_id))
                 _track_event("billing.subscription_activated", user_id=user_id, metadata={"tier": tier})
+                _checkout_user_id = user_id
+                _checkout_tier = tier
 
         elif event_type == "customer.subscription.updated":
             cust_id = data_obj.get("customer")
@@ -1834,6 +1885,18 @@ async def stripe_webhook(request: Request):
             if user:
                 db.execute("UPDATE users SET payment_failed = 1 WHERE user_id = ?", (user["user_id"],))
                 logger.warning(f"Payment failed for user {user['user_id']}")
+
+    # Payment confirmation email — OUTSIDE with get_db() block
+    if _checkout_user_id:
+        with get_db() as email_db:
+            email_user = email_db.execute("SELECT email FROM users WHERE user_id = ?", (_checkout_user_id,)).fetchone()
+        if email_user:
+            confirm_html = (
+                f"<h2>Your MoltGrid {_checkout_tier} plan is now active</h2>"
+                f"<p>Thank you for your purchase. Your account has been upgraded to the <strong>{_checkout_tier}</strong> tier.</p>"
+                f"<p>Log in to your dashboard: <a href='https://moltgrid.net'>Open Dashboard</a></p>"
+            )
+            _queue_email(email_user["email"], f"MoltGrid: {_checkout_tier} plan activated", confirm_html)
 
     return {"received": True}
 
@@ -2006,6 +2069,18 @@ def rotate_api_key(agent_id: str = Depends(get_agent_id)):
             "UPDATE agents SET api_key_hash=? WHERE agent_id=?",
             (hash_key(new_key), agent_id)
         )
+    # Send security alert email (OUTSIDE with get_db() block)
+    with get_db() as alert_db:
+        owner_row = alert_db.execute(
+            "SELECT u.email FROM users u JOIN agents a ON a.owner_id = u.user_id WHERE a.agent_id = ?",
+            (agent_id,)
+        ).fetchone()
+    if owner_row:
+        _queue_email(
+            owner_row["email"],
+            "MoltGrid security alert: API key rotated",
+            "<p>Your MoltGrid agent API key was just rotated. If you did not initiate this, contact support immediately.</p>"
+        )
     return {
         "status": "rotated",
         "agent_id": agent_id,
@@ -2121,6 +2196,23 @@ def onboarding_status(agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         result = _check_onboarding_progress(db, agent_id)
     return OnboardingResponse(**result)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCUMENTATION / GUIDES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+GUIDE_PLATFORMS = {"quickstart", "python-sdk", "typescript-sdk", "webhooks", "mcp"}
+
+@app.get("/v1/guides/{platform}", tags=["Documentation"])
+def get_guide(platform: str):
+    """Serve getting-started guide markdown for the specified platform."""
+    if platform not in GUIDE_PLATFORMS:
+        raise HTTPException(404, f"Guide not found. Available: {sorted(GUIDE_PLATFORMS)}")
+    guide_path = Path(__file__).parent / "docs" / "guides" / f"{platform}.md"
+    if not guide_path.exists():
+        raise HTTPException(404, f"Guide file not found for platform: {platform}")
+    return Response(content=guide_path.read_text(), media_type="text/markdown")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2841,6 +2933,46 @@ def webhook_delete(webhook_id: str, agent_id: str = Depends(get_agent_id)):
     return {"status": "deleted", "webhook_id": webhook_id}
 
 
+@app.post("/v1/webhooks/{webhook_id}/test", tags=["Webhooks"])
+def webhook_test(webhook_id: str, request: Request, agent_id: str = Depends(get_agent_id)):
+    """Fire a test ping to the webhook URL to verify it is reachable."""
+    now = datetime.now(timezone.utc).isoformat()
+    delivery_id = f"whd_{uuid.uuid4().hex[:16]}"
+    test_payload = json.dumps({
+        "event": "webhook.test",
+        "webhook_id": webhook_id,
+        "timestamp": now,
+    })
+    with get_db() as db:
+        hook = db.execute(
+            "SELECT webhook_id, url FROM webhooks WHERE webhook_id = ? AND agent_id = ?",
+            (webhook_id, agent_id)
+        ).fetchone()
+        if not hook:
+            raise HTTPException(404, "Webhook not found or not owned by you")
+        db.execute(
+            "INSERT INTO webhook_deliveries "
+            "(delivery_id, webhook_id, event_type, payload, status, attempt_count, max_attempts, next_retry_at, created_at) "
+            "VALUES (?, ?, 'webhook.test', ?, 'pending', 0, 1, ?, ?)",
+            (delivery_id, webhook_id, test_payload, now, now)
+        )
+    # Attempt delivery synchronously (single attempt only for test pings)
+    try:
+        _run_webhook_delivery_tick()
+    except Exception:
+        pass
+    with get_db() as db:
+        result = db.execute(
+            "SELECT status, last_error FROM webhook_deliveries WHERE delivery_id = ?",
+            (delivery_id,)
+        ).fetchone()
+    return {
+        "delivery_id": delivery_id,
+        "status": result["status"] if result else "unknown",
+        "error": result["last_error"] if result else None,
+    }
+
+
 def _fire_webhooks(agent_id: str, event_type: str, data: dict):
     """Queue webhook deliveries for an agent. Delivery happens via background worker with retries."""
     now = datetime.now(timezone.utc).isoformat()
@@ -2857,7 +2989,7 @@ def _fire_webhooks(agent_id: str, event_type: str, data: dict):
                 delivery_id = f"whd_{uuid.uuid4().hex[:16]}"
                 db.execute(
                     "INSERT INTO webhook_deliveries (delivery_id, webhook_id, event_type, payload, status, attempt_count, max_attempts, next_retry_at, created_at) "
-                    "VALUES (?, ?, ?, ?, 'pending', 0, 3, ?, ?)",
+                    "VALUES (?, ?, ?, ?, 'pending', 0, 5, ?, ?)",
                     (delivery_id, r["webhook_id"], event_type, body, now, now)
                 )
 
@@ -3158,6 +3290,14 @@ def _queue_email(to_email: str, subject: str, body_html: str):
 
     logger.info(f"Queued email {email_id} to {to_email}: {subject}")
     return email_id
+
+
+def _get_client_ip(request: Request) -> str:
+    """Extract client IP, honoring X-Forwarded-For for nginx-proxied requests."""
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 def _send_email_smtp(to_email: str, subject: str, body_html: str) -> bool:
     """Send email via SMTP. Returns True if successful, False otherwise."""
@@ -3543,7 +3683,7 @@ def directory_list(
     limit: int = Query(50, le=200),
 ):
     """Browse the public agent directory. No auth required."""
-    cols = "agent_id, name, description, capabilities, available, reputation, credits, created_at"
+    cols = "agent_id, name, description, capabilities, available, reputation, credits, created_at, heartbeat_status, featured, verified"
     with get_db() as db:
         if capability:
             rows = db.execute(
@@ -3562,55 +3702,10 @@ def directory_list(
         d = dict(r)
         d["capabilities"] = json.loads(d["capabilities"]) if d["capabilities"] else []
         d["available"] = bool(d.get("available", 1))
+        d["featured"] = bool(d.get("featured", 0))
+        d["verified"] = bool(d.get("verified", 0))
         agents.append(d)
     return {"agents": agents, "count": len(agents)}
-
-@app.get("/v1/directory/{agent_id}", tags=["Directory"])
-def directory_profile(agent_id: str):
-    """Get a public agent profile. No auth required. Returns 404 if agent is private."""
-    with get_db() as db:
-        # Get agent details
-        agent = db.execute(
-            "SELECT agent_id, name, description, capabilities, reputation, reputation_count, "
-            "credits, request_count, created_at, heartbeat_status FROM agents "
-            "WHERE agent_id=? AND public=1",
-            (agent_id,)
-        ).fetchone()
-
-        if not agent:
-            raise HTTPException(404, "Agent not found or not public")
-
-        # Get recent marketplace activity (last 5 completed tasks, titles only)
-        marketplace_activity = db.execute(
-            "SELECT title, delivered_at FROM marketplace "
-            "WHERE claimed_by=? AND status='delivered' "
-            "ORDER BY delivered_at DESC LIMIT 5",
-            (agent_id,)
-        ).fetchall()
-
-        # Calculate uptime percentage (simple: based on heartbeats in last 30 days)
-        uptime_pct = 99.0  # Default for new agents
-
-        # Build response
-        profile = {
-            "agent_id": agent["agent_id"],
-            "name": agent["name"],
-            "description": agent["description"],
-            "capabilities": json.loads(agent["capabilities"]) if agent["capabilities"] else [],
-            "reputation": agent["reputation"] or 0.0,
-            "reputation_count": agent["reputation_count"] or 0,
-            "credits": agent["credits"] or 0,
-            "tasks_completed": len(marketplace_activity),
-            "uptime_pct": uptime_pct,
-            "member_since": agent["created_at"][:10] if agent["created_at"] else None,
-            "heartbeat_status": agent["heartbeat_status"] or "unknown",
-            "recent_marketplace_activity": [
-                {"title": task["title"], "delivered_at": task["delivered_at"]}
-                for task in marketplace_activity
-            ]
-        }
-
-    return profile
 
 @app.get("/v1/leaderboard", tags=["Directory"])
 def leaderboard(
@@ -3876,6 +3971,55 @@ def directory_match(
         d["available"] = bool(d.get("available", 1))
         matches.append(d)
     return {"matches": matches, "count": len(matches), "need": need}
+
+@app.get("/v1/directory/{agent_id}", tags=["Directory"])
+def directory_profile(agent_id: str):
+    """Get a public agent profile. No auth required. Returns 404 if agent is private."""
+    with get_db() as db:
+        # Get agent details
+        agent = db.execute(
+            "SELECT agent_id, name, description, capabilities, reputation, reputation_count, "
+            "credits, request_count, created_at, heartbeat_status, featured, verified FROM agents "
+            "WHERE agent_id=? AND public=1",
+            (agent_id,)
+        ).fetchone()
+
+        if not agent:
+            raise HTTPException(404, "Agent not found or not public")
+
+        # Get recent marketplace activity (last 5 completed tasks, titles only)
+        marketplace_activity = db.execute(
+            "SELECT title, delivered_at FROM marketplace "
+            "WHERE claimed_by=? AND status='delivered' "
+            "ORDER BY delivered_at DESC LIMIT 5",
+            (agent_id,)
+        ).fetchall()
+
+        # Calculate uptime percentage (simple: based on heartbeats in last 30 days)
+        uptime_pct = 99.0  # Default for new agents
+
+        # Build response
+        profile = {
+            "agent_id": agent["agent_id"],
+            "name": agent["name"],
+            "description": agent["description"],
+            "capabilities": json.loads(agent["capabilities"]) if agent["capabilities"] else [],
+            "reputation": agent["reputation"] or 0.0,
+            "reputation_count": agent["reputation_count"] or 0,
+            "credits": agent["credits"] or 0,
+            "tasks_completed": len(marketplace_activity),
+            "uptime_pct": uptime_pct,
+            "member_since": agent["created_at"][:10] if agent["created_at"] else None,
+            "heartbeat_status": agent["heartbeat_status"] or "unknown",
+            "featured": bool(agent["featured"] or 0),
+            "verified": bool(agent["verified"] or 0),
+            "recent_marketplace_activity": [
+                {"title": task["title"], "delivered_at": task["delivered_at"]}
+                for task in marketplace_activity
+            ]
+        }
+
+    return profile
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

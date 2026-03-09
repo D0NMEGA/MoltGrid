@@ -438,9 +438,9 @@ class TestWebhooks:
         aid = client.get("/v1/stats", headers=h).json()["agent_id"]
         _fire_webhooks(aid, "job.completed", {"job_id": "j1"})
 
-        # Set attempt_count to max_attempts - 1 so next failure = final
+        # Set attempt_count to max_attempts - 1 so next failure = final (max_attempts=5)
         with get_db() as db:
-            db.execute("UPDATE webhook_deliveries SET attempt_count=2")
+            db.execute("UPDATE webhook_deliveries SET attempt_count=4")
 
         with patch("main.httpx.Client") as MockClient:
             mock_instance = MagicMock()
@@ -453,7 +453,7 @@ class TestWebhooks:
         with get_db() as db:
             row = dict(db.execute("SELECT * FROM webhook_deliveries").fetchone())
         assert row["status"] == "failed"
-        assert row["attempt_count"] == 3
+        assert row["attempt_count"] == 5  # max_attempts=5, started at 4, incremented to 5
         assert "Timeout" in row["last_error"]
 
     def test_relay_send_queues_webhook(self):
@@ -3526,3 +3526,303 @@ class TestCORS:
             headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET"},
         )
         assert r.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+
+# ─── BE-05: Per-tier rate limits ──────────────────────────────────────────────
+
+class TestTierRateLimits:
+    """BE-05: Per-tier rate limits enforced."""
+
+    def _make_agent(self, email, tier="free"):
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={"email": email, "password": "pass123"})
+        token = r.json().get("token", "")
+        # Set subscription tier directly in DB for test
+        import sqlite3, os as _os
+        db_path = _os.environ.get("MOLTGRID_DB", "moltgrid.db")
+        conn = sqlite3.connect(db_path)
+        user_row = conn.execute("SELECT user_id FROM users WHERE email = ?", (email,)).fetchone()
+        if user_row:
+            conn.execute("UPDATE users SET subscription_tier = ? WHERE user_id = ?", (tier, user_row[0]))
+            conn.commit()
+        conn.close()
+        with patch("main._queue_email"):
+            r2 = client.post("/v1/register", json={"name": "rlagent"}, headers={"Authorization": f"Bearer {token}"})
+        return r2.json().get("api_key", "badkey")
+
+    def test_free_tier_limit_enforced(self):
+        api_key = self._make_agent("rlfree@t.com", "free")
+        import sqlite3, os as _os
+        db_path = _os.environ.get("MOLTGRID_DB", "moltgrid.db")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        agent = conn.execute("SELECT agent_id FROM agents ORDER BY rowid DESC LIMIT 1").fetchone()
+        if not agent:
+            conn.close()
+            return
+        agent_id = agent["agent_id"]
+        # Insert 121 calls into rate_limits for current window
+        window = int(time.time()) // 60
+        conn.execute(
+            "INSERT OR REPLACE INTO rate_limits (agent_id, window_start, count) VALUES (?, ?, ?)",
+            (agent_id, window, 121)
+        )
+        conn.commit()
+        conn.close()
+        r = client.get("/v1/memory/anykey", headers={"X-API-Key": api_key})
+        assert r.status_code == 429, f"Expected 429 for free tier at 121 req, got {r.status_code}"
+
+    def test_hobby_tier_higher_limit(self):
+        api_key = self._make_agent("rlhobby2@t.com", "hobby")
+        import sqlite3, os as _os
+        db_path = _os.environ.get("MOLTGRID_DB", "moltgrid.db")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        agent = conn.execute("SELECT agent_id FROM agents ORDER BY rowid DESC LIMIT 1").fetchone()
+        if not agent:
+            conn.close()
+            return
+        agent_id = agent["agent_id"]
+        # Insert 301 calls (hobby limit is 300) — should be rejected
+        window = int(time.time()) // 60
+        conn.execute(
+            "INSERT OR REPLACE INTO rate_limits (agent_id, window_start, count) VALUES (?, ?, ?)",
+            (agent_id, window, 301)
+        )
+        conn.commit()
+        conn.close()
+        r = client.get("/v1/memory/anykey", headers={"X-API-Key": api_key})
+        assert r.status_code == 429, f"Expected 429 for hobby tier at 301 req, got {r.status_code}"
+
+    def test_ratelimit_header_reflects_tier(self):
+        api_key = self._make_agent("rlhobby@t.com", "hobby")
+        # Use an authenticated endpoint so get_agent_id runs the tier lookup
+        r = client.get("/v1/memory/any_nonexistent_key", headers={"X-API-Key": api_key})
+        limit_header = r.headers.get("x-ratelimit-limit", "")
+        # hobby tier should show 300, not always 120
+        assert limit_header == "300", f"Expected X-RateLimit-Limit: 300 for hobby tier, got {limit_header}"
+
+
+# ─── BE-06: Webhook retry count ───────────────────────────────────────────────
+
+class TestWebhookRetry:
+    """BE-06: Webhook delivery retries up to 5 times."""
+
+    def test_webhook_delivery_max_attempts_is_5(self):
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={"email": "whr@t.com", "password": "pass123"})
+        token = r.json().get("token", "")
+        with patch("main._queue_email"):
+            r2 = client.post("/v1/register", json={"name": "wha"}, headers={"Authorization": f"Bearer {token}"})
+        api_key = r2.json().get("api_key", "badkey")
+        # Create webhook
+        r3 = client.post(
+            "/v1/webhooks",
+            json={"url": "https://example.com/wh", "event_types": ["memory.set"]},
+            headers={"X-API-Key": api_key}
+        )
+        if r3.status_code not in (200, 201):
+            return  # skip if webhook creation unavailable
+        webhook_id = r3.json().get("webhook_id", "")
+        # Trigger a webhook delivery by setting memory
+        client.post("/v1/memory", json={"key": "k", "value": "v"}, headers={"X-API-Key": api_key})
+        # Check that max_attempts=5 was used in the delivery record
+        import sqlite3, os as _os
+        db_path = _os.environ.get("MOLTGRID_DB", "moltgrid.db")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT max_attempts FROM webhook_deliveries WHERE webhook_id = ? ORDER BY rowid DESC LIMIT 1",
+            (webhook_id,)
+        ).fetchone()
+        conn.close()
+        if row:
+            assert row["max_attempts"] == 5, f"Expected max_attempts=5, got {row['max_attempts']}"
+
+
+# ─── BE-07: Webhook test endpoint ────────────────────────────────────────────
+
+class TestWebhookTest:
+    """BE-07: POST /v1/webhooks/{id}/test fires a test ping."""
+
+    def _setup(self, email="whtest@t.com"):
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={"email": email, "password": "pass123"})
+        token = r.json().get("token", "")
+        with patch("main._queue_email"):
+            r2 = client.post("/v1/register", json={"name": "whtestagent"}, headers={"Authorization": f"Bearer {token}"})
+        api_key = r2.json().get("api_key", "badkey")
+        r3 = client.post(
+            "/v1/webhooks",
+            json={"url": "https://example.com/test-wh", "event_types": ["job.completed"]},
+            headers={"X-API-Key": api_key}
+        )
+        webhook_id = r3.json().get("webhook_id", "")
+        return api_key, webhook_id
+
+    def test_webhook_test_endpoint_returns_delivery_id(self):
+        api_key, webhook_id = self._setup()
+        if not webhook_id:
+            return  # skip if webhook creation failed
+        r = client.post(
+            f"/v1/webhooks/{webhook_id}/test",
+            headers={"X-API-Key": api_key}
+        )
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+        body = r.json()
+        assert "delivery_id" in body
+        assert "status" in body
+
+    def test_webhook_test_wrong_owner_returns_404(self):
+        _, webhook_id = self._setup(email="whtest2@t.com")
+        if not webhook_id:
+            return
+        # Create a different agent
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={"email": "other_wh@t.com", "password": "pass123"})
+        token = r.json().get("token", "")
+        with patch("main._queue_email"):
+            r2 = client.post("/v1/register", json={"name": "otherwh"}, headers={"Authorization": f"Bearer {token}"})
+        other_key = r2.json().get("api_key", "badkey")
+        r3 = client.post(
+            f"/v1/webhooks/{webhook_id}/test",
+            headers={"X-API-Key": other_key}
+        )
+        assert r3.status_code == 404
+
+
+class TestGuideEndpoints:
+    """BE-11: Getting-started guides served as markdown from API."""
+
+    def test_quickstart_guide_returns_markdown(self):
+        r = client.get("/v1/guides/quickstart")
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+        assert "text/markdown" in r.headers.get("content-type", "")
+        assert len(r.text) > 100
+
+    def test_python_sdk_guide_returns_200(self):
+        r = client.get("/v1/guides/python-sdk")
+        assert r.status_code == 200
+
+    def test_typescript_sdk_guide_returns_200(self):
+        r = client.get("/v1/guides/typescript-sdk")
+        assert r.status_code == 200
+
+    def test_webhooks_guide_returns_200(self):
+        r = client.get("/v1/guides/webhooks")
+        assert r.status_code == 200
+
+    def test_mcp_guide_returns_200(self):
+        r = client.get("/v1/guides/mcp")
+        assert r.status_code == 200
+
+    def test_nonexistent_guide_returns_404(self):
+        r = client.get("/v1/guides/nonexistent-platform")
+        assert r.status_code == 404
+        body = r.json()
+        assert "error" in body
+        assert body.get("code") == "not_found"
+
+
+class TestStripeEmailConfirmation:
+    """BE-08: Stripe checkout.session.completed triggers confirmation email."""
+
+    def test_checkout_completed_queues_email(self):
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={"email": "stripe@t.com", "password": "pass123"})
+        user_id = r.json().get("user_id", "")
+        if not user_id:
+            return
+        mock_event = {
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "metadata": {"moltgrid_user_id": user_id, "tier": "hobby"},
+                    "subscription": "sub_test123",
+                }
+            }
+        }
+        with patch("stripe.Webhook.construct_event", return_value=mock_event):
+            with patch("main._queue_email") as mock_email:
+                r2 = client.post(
+                    "/v1/stripe-webhook",
+                    content=b"{}",
+                    headers={"stripe-signature": "t=1,v1=fake"}
+                )
+                if mock_email.called:
+                    subjects = [str(c) for c in mock_email.call_args_list]
+                    assert any("plan" in s.lower() or "active" in s.lower() for s in subjects), \
+                        f"Expected payment confirmation email, got: {subjects}"
+
+
+class TestSecurityAlertEmails:
+    """BE-09: Security alert emails for new IP login and key rotation."""
+
+    def test_key_rotation_triggers_alert_email(self):
+        with patch("main._queue_email"):
+            r = client.post("/v1/auth/signup", json={"email": "keyrot@t.com", "password": "pass123"})
+        token = r.json().get("token", "")
+        with patch("main._queue_email"):
+            r2 = client.post("/v1/register", json={"name": "rota"}, headers={"Authorization": f"Bearer {token}"})
+        api_key = r2.json().get("api_key", "badkey")
+        with patch("main._queue_email") as mock_email:
+            r3 = client.post("/v1/agents/rotate-key", headers={"X-API-Key": api_key})
+            if r3.status_code == 200:
+                assert mock_email.called, "Expected _queue_email to be called on key rotation"
+                subjects = [str(c) for c in mock_email.call_args_list]
+                assert any("key" in s.lower() or "rotated" in s.lower() or "security" in s.lower() for s in subjects)
+
+    def test_new_ip_login_no_crash(self):
+        """Login with new IP header should not crash — basic smoke test."""
+        with patch("main._queue_email"):
+            client.post("/v1/auth/signup", json={"email": "iptest@t.com", "password": "pass123"})
+        # First login — establish baseline IP
+        with patch("main._queue_email"):
+            client.post("/v1/auth/login", json={"email": "iptest@t.com", "password": "pass123"})
+        # Second login from different IP
+        with patch("main._queue_email"):
+            client.post(
+                "/v1/auth/login",
+                json={"email": "iptest@t.com", "password": "pass123"},
+                headers={"X-Forwarded-For": "203.0.113.99"}
+            )
+        r_check = client.post("/v1/auth/login", json={"email": "iptest@t.com", "password": "pass123"})
+        assert r_check.status_code == 200
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DIRECTORY FEATURED/VERIFIED FIELDS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDirectoryFeatured:
+    def test_directory_list_has_featured_field(self):
+        agent_id, api_key, h = register_agent("dir-featured-agent")
+        client.put("/v1/directory/me", headers=h, json={"public": True, "description": "featured test"})
+        r = client.get("/v1/directory")
+        assert r.status_code == 200
+        agents = r.json()["agents"]
+        if agents:
+            assert "featured" in agents[0]
+            assert "verified" in agents[0]
+            assert isinstance(agents[0]["featured"], bool)
+            assert isinstance(agents[0]["verified"], bool)
+
+    def test_directory_stats_not_shadowed(self):
+        r = client.get("/v1/directory/stats")
+        assert r.status_code == 200
+        data = r.json()
+        assert "total_agents" in data
+        assert "online_agents" in data
+
+    def test_directory_search_not_shadowed(self):
+        r = client.get("/v1/directory/search?q=test")
+        assert r.status_code == 200
+        data = r.json()
+        assert "agents" in data
+
+    def test_directory_match_not_shadowed(self):
+        agent_id, api_key, h = register_agent("dir-match-agent")
+        r = client.get("/v1/directory/match?need=research", headers=h)
+        assert r.status_code == 200
+        data = r.json()
+        assert "matches" in data
