@@ -978,6 +978,7 @@ def auth_signup(req: SignupRequest, response: Response):
     now = datetime.now(timezone.utc).isoformat()
     pw_hash = _bcrypt.hashpw(req.password.encode(), _bcrypt.gensalt()).decode()
 
+    send_welcome = False
     with get_db() as db:
         existing = db.execute("SELECT user_id FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
         if existing:
@@ -986,29 +987,30 @@ def auth_signup(req: SignupRequest, response: Response):
             "INSERT INTO users (user_id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
             (user_id, req.email.lower(), pw_hash, req.display_name, now),
         )
+        send_welcome = _should_send_notification(db, user_id, "welcome")
 
-        # Send welcome email
-        if _should_send_notification(db, user_id, "welcome"):
-            welcome_html = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h1 style="color: #333;">Welcome to MoltGrid! 🚀</h1>
-                <p>Hi {req.display_name or 'there'},</p>
-                <p>Your agent infrastructure is ready. Here's how to get started:</p>
-                <ol>
-                    <li><strong>Register your first agent:</strong> POST /v1/register</li>
-                    <li><strong>Store persistent memory:</strong> POST /v1/memory</li>
-                    <li><strong>Send messages between agents:</strong> POST /v1/relay/send</li>
-                    <li><strong>Queue background jobs:</strong> POST /v1/queue/submit</li>
-                </ol>
-                <p><a href="https://moltgrid.net/dashboard" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Go to Dashboard</a></p>
-                <p><a href="http://82.180.139.113/docs">View Full API Documentation</a></p>
-                <p>Questions? Reply to this email or check our <a href="https://github.com/D0NMEGA/MoltGrid">GitHub</a>.</p>
-                <p>Happy building!<br>The MoltGrid Team</p>
-            </body>
-            </html>
-            """
-            _queue_email(req.email.lower(), "Welcome to MoltGrid — your agent infrastructure is ready", welcome_html)
+    # Queue welcome email OUTSIDE get_db() block to avoid nested lock
+    if send_welcome:
+        welcome_html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color: #333;">Welcome to MoltGrid!</h1>
+            <p>Hi {req.display_name or 'there'},</p>
+            <p>Your agent infrastructure is ready. Here's how to get started:</p>
+            <ol>
+                <li><strong>Register your first agent:</strong> POST /v1/register</li>
+                <li><strong>Store persistent memory:</strong> POST /v1/memory</li>
+                <li><strong>Send messages between agents:</strong> POST /v1/relay/send</li>
+                <li><strong>Queue background jobs:</strong> POST /v1/queue/submit</li>
+            </ol>
+            <p><a href="https://moltgrid.net/dashboard" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Go to Dashboard</a></p>
+            <p><a href="https://api.moltgrid.net/docs">View Full API Documentation</a></p>
+            <p>Questions? Reply to this email or check our <a href="https://github.com/D0NMEGA/MoltGrid">GitHub</a>.</p>
+            <p>Happy building!<br>The MoltGrid Team</p>
+        </body>
+        </html>
+        """
+        _queue_email(req.email.lower(), "Welcome to MoltGrid — your agent infrastructure is ready", welcome_html)
 
     token = _create_token(user_id, req.email.lower())
     _track_event("user.signup", user_id=user_id)
