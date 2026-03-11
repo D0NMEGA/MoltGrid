@@ -4287,4 +4287,3 @@ class TestSkillMd:
     def test_skill_md_no_auth_required(self):
         r = client.get("/skill.md")
         assert r.status_code == 200  # no X-API-Key or Bearer needed
-        assert "timestamp" in item

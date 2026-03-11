@@ -40,7 +40,10 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
 .page { position:relative; z-index:10; padding:2.5rem 2rem 3rem; max-width:1100px; margin:0 auto; }
 
 /* Auth pages */
-.auth-container { display:flex; align-items:center; justify-content:center; min-height:100vh; padding:2rem; }
+.auth-page-wrap { display:flex; flex-direction:column; min-height:100vh; }
+.auth-page-header { padding:1.25rem 2rem; border-bottom:1px solid var(--border); }
+.auth-logo { text-decoration:none; display:inline-block; }
+.auth-container { display:flex; align-items:center; justify-content:center; flex:1; padding:2rem; }
 .auth-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:2.5rem; width:100%; max-width:400px; }
 .auth-card h1 { font-size:1.4rem; font-weight:600; letter-spacing:-0.5px; margin-bottom:0.25rem; }
 .auth-card .subtitle { color:var(--text-dim); font-size:0.8rem; margin-bottom:1.5rem; font-family:'JetBrains Mono',monospace; }
@@ -54,6 +57,9 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
 .auth-link { text-align:center; margin-top:1.25rem; font-size:0.8rem; color:var(--text-dim); }
 .auth-link a { color:var(--accent); text-decoration:none; cursor:pointer; }
 .auth-link a:hover { text-decoration:underline; }
+.auth-page-footer { padding:1.25rem 2rem; border-top:1px solid var(--border); display:flex; gap:1.5rem; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:0.7rem; }
+.auth-page-footer a { color:var(--text-dim); text-decoration:none; transition:color 0.15s; }
+.auth-page-footer a:hover { color:var(--accent); }
 .alert { padding:10px 14px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:0.75rem; margin-bottom:1rem; }
 .alert-error { background:rgba(255,68,68,0.1); border:1px solid rgba(255,68,68,0.2); color:var(--red); }
 
@@ -314,7 +320,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 .sidebar-nav { flex:1; overflow-y:auto; padding:0.75rem 0; }
 .sidebar-item { display:flex; align-items:center; gap:0.65rem; padding:0.55rem 1.25rem; font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--text-dim); cursor:pointer; border-left:3px solid transparent; transition:all 0.15s; text-decoration:none; }
 .sidebar-item:hover { color:var(--text); background:var(--surface); }
-.sidebar-item.active { color:#2dd4bf; border-left-color:#2dd4bf; background:rgba(45,212,191,0.07); }
+.sidebar-item.active { color:var(--accent); border-left-color:var(--accent); background:var(--accent-glow); }
 .sidebar-item .si-icon { font-size:0.95rem; flex-shrink:0; width:18px; text-align:center; }
 .sidebar-divider { height:1px; background:var(--border); margin:0.5rem 1.25rem; }
 .sidebar-footer { padding:0.85rem 1.25rem; border-top:1px solid var(--border); }
@@ -339,7 +345,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
 /* ── Breadcrumbs ── */
 .breadcrumb { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); margin-bottom:1.1rem; display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap; }
-.breadcrumb .bc-link { color:#2dd4bf; cursor:pointer; text-decoration:none; transition:opacity 0.15s; }
+.breadcrumb .bc-link { color:var(--accent); cursor:pointer; text-decoration:none; transition:opacity 0.15s; }
 .breadcrumb .bc-link:hover { opacity:0.75; }
 .breadcrumb .bc-sep { color:var(--border); }
 .breadcrumb .bc-current { color:var(--text-dim); }
@@ -378,6 +384,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
   // ── Router ──
   function navigate(hash) { window.location.hash = hash; }
+  window.navigate = navigate; // expose for onclick handlers in innerHTML
 
   function route() {
     var hash = window.location.hash || "#/login";
@@ -433,6 +440,8 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
   // ── Login Page ──
   function renderLogin(app) {
     app.innerHTML =
+      '<div class="auth-page-wrap">' +
+      '<div class="auth-page-header"><a href="https://moltgrid.net" class="auth-logo"><img src="https://moltgrid.net/public/logo-full.png" alt="MoltGrid" style="height:28px"></a></div>' +
       '<div class="auth-container"><div class="auth-card">' +
       '<h1>Welcome back</h1>' +
       '<p class="subtitle">Sign in to your MoltGrid account</p>' +
@@ -445,7 +454,13 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       '<button type="submit" class="btn btn-accent form-submit" id="login-btn">Sign in</button>' +
       '</form>' +
       '<p class="auth-link">Don\'t have an account? <a id="go-signup">Sign up</a></p>' +
-      '</div></div>';
+      '</div></div>' +
+      '<div class="auth-page-footer">' +
+      '<a href="https://moltgrid.net/contact.html">Contact</a>' +
+      '<a href="https://moltgrid.net/docs">Docs</a>' +
+      '<a href="https://github.com/D0NMEGA/MoltGrid" target="_blank" rel="noopener">GitHub</a>' +
+      '</div>' +
+      '</div>';
 
     document.getElementById("go-signup").onclick = function() { navigate("#/signup"); };
 
@@ -631,10 +646,11 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
   }
 
   // ── Agent Detail Page ──
-  var _activityTimer = null;
+  // Use window._activityTimer so onclick handlers in innerHTML can access it
+  window._activityTimer = window._activityTimer || null;
 
   function renderAgentDetail(app, agentId) {
-    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+    if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
 
     if (!user) {
       api("GET", "/v1/auth/me").then(function(me) {
@@ -666,7 +682,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
     wireSidebar();
     var bannerUpgrade = document.getElementById("banner-upgrade");
-    if (bannerUpgrade) bannerUpgrade.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
+    if (bannerUpgrade) bannerUpgrade.onclick = function() { if (window._activityTimer) clearInterval(window._activityTimer); navigate("#/billing"); };
     document.getElementById("modal-overlay").onclick = function(e) {
       if (e.target.id === "modal-overlay") e.target.classList.remove("active");
     };
@@ -731,7 +747,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
       // Tab bar wiring
       function switchTab(tabName) {
-        if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+        if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
         document.querySelectorAll("#agent-tab-bar .tab-btn").forEach(function(b) {
           b.classList.toggle("active", b.getAttribute("data-tab") === tabName);
         });
@@ -952,7 +968,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       '<div class="action-btn" id="act-job"><div class="action-icon">&#128230;</div><div class="action-label">Submit Test Job</div><div class="action-desc">Add a job to the queue</div></div>' +
       '</div>';
     var ub = document.getElementById("usage-upgrade");
-    if (ub) ub.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
+    if (ub) ub.onclick = function() { if (window._activityTimer) clearInterval(window._activityTimer); navigate("#/billing"); };
     document.getElementById("act-message").onclick = function() { showMessageModal(agentId); };
     document.getElementById("act-job").onclick = function() { showJobModal(agentId); };
     loadCharts(agentId, 7);
@@ -972,7 +988,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       };
     });
     loadActivity(agentId, "all", 0, true);
-    _activityTimer = setInterval(function() { loadActivity(agentId, _curFilter, 0, true); }, 10000);
+    window._activityTimer = setInterval(function() { loadActivity(agentId, _curFilter, 0, true); }, 10000);
   }
 
   function renderTabMessages(agentId) {
@@ -1844,7 +1860,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       btn.disabled = true; btn.textContent = "Deleting\u2026";
       api("DELETE", "/v1/user/agents/" + agentId).then(function() {
         overlay.classList.remove("active");
-        if (_activityTimer) clearInterval(_activityTimer);
+        if (window._activityTimer) clearInterval(window._activityTimer);
         user = null; // force refresh
         navigate("#/agents");
       }).catch(function(err) {
@@ -1856,7 +1872,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
   // ── Overview Page ──
   function renderOverview(app) {
-    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+    if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
     if (!user) {
       api("GET", "/v1/auth/me").then(function(me) { user = me; renderOverview(app); })
         .catch(function() { token = null; navigate("#/login"); });
@@ -1950,7 +1966,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
   // ── Billing Page ──
   function renderBilling(app) {
-    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+    if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
 
     if (!user) {
       api("GET", "/v1/auth/me").then(function(me) {
@@ -2127,7 +2143,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
   // ── Billing Success Page ──
   function renderBillingSuccess(app) {
-    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+    if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
 
     var tier = (user && user.subscription_tier) || "free";
 
@@ -2163,7 +2179,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
   // ── Billing Cancel Page ──
   function renderBillingCancel(app) {
-    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+    if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
 
     app.innerHTML =
       '<div class="result-container"><div class="result-card">' +
@@ -2178,7 +2194,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
   // ── Billing Failed Page (Task 3) ──
   function renderBillingFailed(app) {
-    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+    if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
 
     app.innerHTML =
       '<div class="result-container"><div class="result-card">' +
@@ -2197,20 +2213,19 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     var tierColors = { free:"color:var(--text-dim);background:rgba(122,122,146,0.12);border:1px solid var(--border)", hobby:"color:var(--blue);background:rgba(68,136,255,0.1);border:1px solid rgba(68,136,255,0.2)", team:"color:var(--purple);background:rgba(187,136,255,0.1);border:1px solid rgba(187,136,255,0.2)", scale:"color:var(--yellow);background:rgba(255,204,0,0.1);border:1px solid rgba(255,204,0,0.2)" };
     var tierStyle = tierColors[tier] || tierColors.free;
     var items = [
-      { id:"agents",   icon:"&#x1F916;", label:"Agents",        hash:"#/agents" },
-      { id:"overview", icon:"&#x1F4CA;", label:"Activity",      hash:"#/overview" },
-      { id:"billing",  icon:"&#x1F4B3;", label:"Billing",       hash:"#/billing" },
-      { id:"docs",     icon:"&#x1F4D6;", label:"Docs",          href:"https://moltgrid.net/docs", external:true }
+      { id:"agents",   icon:"", label:"Agents",        hash:"#/agents" },
+      { id:"overview", icon:"", label:"Activity",      hash:"#/overview" },
+      { id:"billing",  icon:"", label:"Billing",       hash:"#/billing" },
+      { id:"docs",     icon:"", label:"Docs",          href:"https://moltgrid.net/docs", external:true }
     ];
     var navHtml = items.map(function(it) {
       var isActive = it.id === activeSection;
       var cls = "sidebar-item" + (isActive ? " active" : "");
       if (it.external) {
-        return '<a class="' + cls + '" href="' + it.href + '" target="_blank" rel="noopener">' +
-          '<span class="si-icon">' + it.icon + '</span>' + it.label + '</a>';
+        return '<a class="' + cls + '" href="' + it.href + '" target="_blank" rel="noopener">' + it.label + '</a>';
       }
       return '<div class="' + cls + '" data-nav="' + it.id + '" onclick="if(window._activityTimer){clearInterval(window._activityTimer);window._activityTimer=null;}navigate(\'' + it.hash + '\')">' +
-        '<span class="si-icon">' + it.icon + '</span>' + it.label + '</div>';
+        it.label + '</div>';
     }).join("");
     return '<div class="sidebar" id="mg-sidebar">' +
       '<div class="sidebar-logo" id="sidebar-logo"><img src="https://moltgrid.net/public/logo-full.png" alt="MoltGrid"></div>' +
@@ -2243,12 +2258,12 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     var logoutBtn = document.getElementById("sidebar-logout");
     if (logoutBtn) {
       logoutBtn.onclick = function() {
-        if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+        if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
         localStorage.removeItem("mg_token"); token = null; user = null; navigate("#/login");
       };
     }
     var logoLink = document.getElementById("sidebar-logo");
-    if (logoLink) { logoLink.onclick = function() { if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; } navigate("#/agents"); }; }
+    if (logoLink) { logoLink.onclick = function() { if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; } navigate("#/agents"); }; }
   }
 
   // ── Breadcrumb renderer ──
@@ -2281,7 +2296,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       '<h2>Register New Agent</h2>' +
       '<p class="subtitle">Give your agent a name. You can rename it later from the agent page.</p>' +
       '<div style="margin-bottom:1rem;padding:0.75rem 1rem;background:#0d2a24;border:1px solid #2dd4bf44;border-radius:8px;display:flex;align-items:center;gap:0.75rem">' +
-      '<span style="font-size:1.2rem">&#x1F985;</span>' +
+      '<span style="font-size:1.2rem">&#x1F99E;</span>' +
       '<div style="flex:1"><div style="color:#2dd4bf;font-weight:600;font-size:0.85rem">OpenClaw Quickstart</div><div style="color:#8b949e;font-size:0.78rem">Pre-configure an OpenClaw-compatible agent with recommended settings</div></div>' +
       '<button class="btn btn-ghost" id="reg-openclaw-btn" style="font-size:0.8rem;padding:0.3rem 0.75rem;border-color:#2dd4bf44;color:#2dd4bf">Use Template</button>' +
       '</div>' +

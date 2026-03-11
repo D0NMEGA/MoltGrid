@@ -1203,6 +1203,89 @@ def _verify_agent_ownership(db, agent_id: str, user_id: str):
         raise HTTPException(403, "You do not own this agent")
     return agent
 
+@app.get("/v1/user/overview", tags=["User Dashboard"])
+def user_overview(user_id: str = Depends(get_user_id)):
+    """Aggregated account overview: agents, totals, and 30-day charts."""
+    import json as _json
+    cutoff30 = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    with get_db() as db:
+        # Agents
+        agents_rows = db.execute(
+            "SELECT agent_id, name, heartbeat_status, heartbeat_at, request_count "
+            "FROM agents WHERE owner_id=? ORDER BY created_at DESC",
+            (user_id,)
+        ).fetchall()
+        agent_ids = [r["agent_id"] for r in agents_rows]
+        total_agents = len(agent_ids)
+        online_count = sum(1 for r in agents_rows if r["heartbeat_status"] in ("online", "busy", "worker_running"))
+
+        agents = [dict(r) for r in agents_rows]
+
+        if not agent_ids:
+            return {
+                "total_agents": 0, "online_count": 0, "agents": [],
+                "totals": {"messages_sent": 0, "messages_received": 0, "jobs_completed": 0, "jobs_failed": 0, "memory_keys": 0},
+                "msg_chart": [], "job_chart": []
+            }
+
+        placeholders = ",".join("?" * len(agent_ids))
+
+        # Totals
+        messages_sent = db.execute(
+            f"SELECT COUNT(*) as c FROM relay WHERE from_agent IN ({placeholders}) AND created_at >= ?",
+            agent_ids + [cutoff30]
+        ).fetchone()["c"]
+        messages_received = db.execute(
+            f"SELECT COUNT(*) as c FROM relay WHERE to_agent IN ({placeholders}) AND created_at >= ?",
+            agent_ids + [cutoff30]
+        ).fetchone()["c"]
+        jobs_completed = db.execute(
+            f"SELECT COUNT(*) as c FROM jobs WHERE agent_id IN ({placeholders}) AND status='completed' AND created_at >= ?",
+            agent_ids + [cutoff30]
+        ).fetchone()["c"]
+        jobs_failed = db.execute(
+            f"SELECT COUNT(*) as c FROM jobs WHERE agent_id IN ({placeholders}) AND status='failed' AND created_at >= ?",
+            agent_ids + [cutoff30]
+        ).fetchone()["c"]
+        memory_keys = db.execute(
+            f"SELECT COUNT(*) as c FROM memory WHERE agent_id IN ({placeholders})",
+            agent_ids
+        ).fetchone()["c"]
+
+        # 30-day message chart (by day)
+        msg_rows = db.execute(
+            f"SELECT substr(created_at,1,10) as date, COUNT(*) as count FROM relay "
+            f"WHERE (from_agent IN ({placeholders}) OR to_agent IN ({placeholders})) AND created_at >= ? "
+            f"GROUP BY date ORDER BY date",
+            agent_ids + agent_ids + [cutoff30]
+        ).fetchall()
+
+        # 30-day job chart (by day, split completed/failed)
+        job_rows = db.execute(
+            f"SELECT substr(created_at,1,10) as date, "
+            f"SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed, "
+            f"SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed "
+            f"FROM jobs WHERE agent_id IN ({placeholders}) AND created_at >= ? "
+            f"GROUP BY date ORDER BY date",
+            agent_ids + [cutoff30]
+        ).fetchall()
+
+    return {
+        "total_agents": total_agents,
+        "online_count": online_count,
+        "agents": agents,
+        "totals": {
+            "messages_sent": messages_sent,
+            "messages_received": messages_received,
+            "jobs_completed": jobs_completed,
+            "jobs_failed": jobs_failed,
+            "memory_keys": memory_keys
+        },
+        "msg_chart": [dict(r) for r in msg_rows],
+        "job_chart": [dict(r) for r in job_rows]
+    }
+
+
 @app.get("/v1/user/agents", tags=["User Dashboard"])
 def user_list_agents(user_id: str = Depends(get_user_id)):
     """List all agents owned by this user."""
@@ -1475,6 +1558,26 @@ def user_messages_list(
                 d[col] = a["name"] if a and a["name"] else aid
             result.append(d)
     return {"messages": result, "total": total, "offset": offset, "limit": limit}
+
+
+@app.get("/v1/user/agents/{agent_id}/messages/{message_id}", tags=["User Dashboard"])
+def user_message_detail(agent_id: str, message_id: str, user_id: str = Depends(get_user_id)):
+    """Get full detail for a single relay message."""
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        row = db.execute(
+            "SELECT message_id, from_agent, to_agent, channel, payload, created_at, read_at FROM relay "
+            "WHERE message_id=? AND (from_agent=? OR to_agent=?)",
+            (message_id, agent_id, agent_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Message not found")
+        d = dict(row)
+        d["payload"] = _decrypt(d["payload"])
+        for col, aid in [("from_name", d["from_agent"]), ("to_name", d["to_agent"])]:
+            a = db.execute("SELECT name FROM agents WHERE agent_id=?", (aid,)).fetchone()
+            d[col] = a["name"] if a and a["name"] else aid
+    return d
 
 
 # ── Memory list ───────────────────────────────────────────────────────────────
@@ -1882,6 +1985,19 @@ def user_schedule_delete(agent_id: str, task_id: str, user_id: str = Depends(get
     return {"status": "deleted"}
 
 
+class WebhookRegisterRequest(BaseModel):
+    url: str = Field(..., max_length=2048, description="HTTPS callback URL")
+    event_types: List[str] = Field(..., description="Events to subscribe to: message.received, job.completed")
+    secret: Optional[str] = Field(None, max_length=128, description="Shared secret for HMAC signature verification")
+
+class WebhookResponse(BaseModel):
+    webhook_id: str
+    url: str
+    event_types: List[str]
+    active: bool
+    created_at: str
+
+
 # ── Webhooks list / create / delete (user-level) ─────────────────────────────
 @app.get("/v1/user/agents/{agent_id}/webhooks", tags=["User Dashboard"])
 def user_webhooks_list(agent_id: str, user_id: str = Depends(get_user_id)):
@@ -1895,7 +2011,7 @@ def user_webhooks_list(agent_id: str, user_id: str = Depends(get_user_id)):
 
 
 @app.post("/v1/user/agents/{agent_id}/webhooks", tags=["User Dashboard"])
-def user_webhook_create(agent_id: str, req: "WebhookRegisterRequest", user_id: str = Depends(get_user_id)):
+def user_webhook_create(agent_id: str, req: WebhookRegisterRequest, user_id: str = Depends(get_user_id)):
     for et in req.event_types:
         if et not in WEBHOOK_EVENT_TYPES:
             raise HTTPException(400, f"Invalid event type: {et}")
@@ -3314,18 +3430,6 @@ def text_process(req: TextProcessRequest, agent_id: str = Depends(get_agent_id))
 
 WEBHOOK_EVENT_TYPES = {"message.received", "message.broadcast", "job.completed", "job.failed", "marketplace.task.claimed", "marketplace.task.delivered", "marketplace.task.completed"}
 WEBHOOK_TIMEOUT = 5.0  # seconds
-
-class WebhookRegisterRequest(BaseModel):
-    url: str = Field(..., max_length=2048, description="HTTPS callback URL")
-    event_types: List[str] = Field(..., description="Events to subscribe to: message.received, job.completed")
-    secret: Optional[str] = Field(None, max_length=128, description="Shared secret for HMAC signature verification")
-
-class WebhookResponse(BaseModel):
-    webhook_id: str
-    url: str
-    event_types: List[str]
-    active: bool
-    created_at: str
 
 @app.post("/v1/webhooks", response_model=WebhookResponse, tags=["Webhooks"])
 def webhook_register(req: WebhookRegisterRequest, agent_id: str = Depends(get_agent_id)):
@@ -6179,6 +6283,26 @@ def switch_org_context(org_id: str, user_id: str = Depends(get_user_id)):
         if not member:
             raise HTTPException(403, "Not a member of this org")
     return {"active_org_id": org_id, "org_name": org["name"]}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SKILL.MD — public agent field guide (no auth required)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/skill.md", tags=["System"])
+async def serve_skill_md():
+    skill_path = os.path.join(os.path.dirname(__file__), "skill.md")
+    with open(skill_path) as f:
+        content = f.read()
+    return Response(content=content, media_type="text/markdown")
+
+
+@app.get("/v1/skill.md", tags=["System"])
+async def serve_skill_md_v1():
+    skill_path = os.path.join(os.path.dirname(__file__), "skill.md")
+    with open(skill_path) as f:
+        content = f.read()
+    return Response(content=content, media_type="text/markdown")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
