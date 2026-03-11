@@ -98,9 +98,11 @@ STRIPE_TIER_PRICES = {
     "scale": STRIPE_PRICE_SCALE,
 }
 
-# Contact form SMTP: set SMTP_PASSWORD env var (Gmail App Password)
-SMTP_FROM = os.getenv("SMTP_FROM", "")
-SMTP_TO = os.getenv("SMTP_TO", "")
+# SMTP config: Hostinger email (contact@moltgrid.net) or any SMTP provider
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.hostinger.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_FROM = os.getenv("SMTP_FROM", "contact@moltgrid.net")
+SMTP_TO = os.getenv("SMTP_TO", "contact@moltgrid.net")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 
 if not SMTP_FROM or not SMTP_TO or not SMTP_PASSWORD:
@@ -971,7 +973,7 @@ class LoginRequest(BaseModel):
     totp_code: Optional[str] = Field(None, max_length=16)
 
 @app.post("/v1/auth/signup", tags=["Auth"])
-def auth_signup(req: SignupRequest):
+def auth_signup(req: SignupRequest, response: Response):
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
     pw_hash = _bcrypt.hashpw(req.password.encode(), _bcrypt.gensalt()).decode()
@@ -1010,10 +1012,21 @@ def auth_signup(req: SignupRequest):
 
     token = _create_token(user_id, req.email.lower())
     _track_event("user.signup", user_id=user_id)
+    # Set shared auth cookie readable by both moltgrid.net and api.moltgrid.net
+    response.set_cookie(
+        key="mg_token",
+        value=token,
+        domain=".moltgrid.net",
+        path="/",
+        httponly=False,
+        secure=True,
+        samesite="lax",
+        max_age=JWT_EXPIRY_DAYS * 86400,
+    )
     return {"user_id": user_id, "token": token, "message": "Account created"}
 
 @app.post("/v1/auth/login", tags=["Auth"])
-def auth_login(req: LoginRequest, request: Request):
+def auth_login(req: LoginRequest, request: Request, response: Response):
     with get_db() as db:
         row = db.execute("SELECT user_id, password_hash FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
         if not row or not _bcrypt.checkpw(req.password.encode(), row["password_hash"].encode()):
@@ -1070,6 +1083,17 @@ def auth_login(req: LoginRequest, request: Request):
                         (json.dumps(known_ips), row["user_id"])
                     )
     _log_audit("user.login", user_id=row["user_id"], ip_address=_get_client_ip(request))
+    # Set shared auth cookie readable by both moltgrid.net and api.moltgrid.net
+    response.set_cookie(
+        key="mg_token",
+        value=token,
+        domain=".moltgrid.net",
+        path="/",
+        httponly=False,  # JS needs to read this for homepage logged-in state
+        secure=True,
+        samesite="lax",
+        max_age=JWT_EXPIRY_DAYS * 86400,
+    )
     return {"user_id": row["user_id"], "token": token}
 
 @app.get("/v1/auth/me", tags=["Auth"])
@@ -1100,6 +1124,12 @@ def auth_refresh(user_id: str = Depends(get_user_id)):
             raise HTTPException(404, "User not found")
     token = _create_token(user_id, row["email"])
     return {"user_id": user_id, "token": token}
+
+@app.post("/v1/auth/logout", tags=["Auth"])
+def auth_logout(response: Response):
+    """Clear the shared auth cookie."""
+    response.delete_cookie(key="mg_token", domain=".moltgrid.net", path="/")
+    return {"status": "logged_out"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2219,8 +2249,8 @@ def billing_checkout(req: CheckoutRequest, user_id: str = Depends(get_user_id)):
         customer=customer_id,
         mode="subscription",
         line_items=[{"price": price_id, "quantity": 1}],
-        success_url="https://moltgrid.net/billing/success?session_id={CHECKOUT_SESSION_ID}",
-        cancel_url="https://moltgrid.net/billing/cancel",
+        success_url="https://api.moltgrid.net/dashboard#/billing",
+        cancel_url="https://api.moltgrid.net/dashboard#/billing",
         metadata={"moltgrid_user_id": user_id, "tier": req.tier},
     )
     _track_event("billing.checkout_started", user_id=user_id, metadata={"tier": req.tier})
@@ -2239,7 +2269,7 @@ def billing_portal(user_id: str = Depends(get_user_id)):
 
     session = stripe.billing_portal.Session.create(
         customer=user["stripe_customer_id"],
-        return_url="https://moltgrid.net/billing",
+        return_url="https://api.moltgrid.net/dashboard#/billing",
     )
     return {"portal_url": session.url}
 
@@ -3925,8 +3955,8 @@ def _send_email_smtp(to_email: str, subject: str, body_html: str) -> bool:
         html_part = MIMEText(body_html, "html")
         msg.attach(html_part)
 
-        # Send via Gmail SMTP
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        # Send via SMTP (Hostinger / configurable provider)
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
             server.login(SMTP_FROM, SMTP_PASSWORD)
             server.send_message(msg)
 
@@ -6127,7 +6157,7 @@ def submit_contact(form: ContactForm):
             "INSERT INTO contact_submissions (id, name, email, subject, message, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (submission_id, form.name, form.email, form.subject, form.message, now)
         )
-    # Send email via Gmail SMTP
+    # Send email via SMTP (Hostinger / configurable provider)
     if SMTP_PASSWORD:
         try:
             msg = MIMEMultipart()
@@ -6141,7 +6171,7 @@ def submit_contact(form: ContactForm):
                 f"Message:\n{form.message}"
             )
             msg.attach(MIMEText(body, "plain"))
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
                 server.login(SMTP_FROM, SMTP_PASSWORD)
                 server.sendmail(SMTP_FROM, SMTP_TO, msg.as_string())
             logger.info(f"Contact email sent: {submission_id}")
