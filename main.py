@@ -2493,7 +2493,9 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
             (agent_id, hash_key(api_key), req.name, now, owner_id),
         )
 
-        # Send first agent email if this is user's first agent
+        # Check if first agent email should be sent (resolve inside db block, send outside)
+        _send_first_agent_email = False
+        _first_agent_email_to = None
         if owner_id:
             agent_count = db.execute(
                 "SELECT COUNT(*) as cnt FROM agents WHERE owner_id = ?", (owner_id,)
@@ -2502,25 +2504,8 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
             if agent_count == 1:  # First agent
                 user = db.execute("SELECT email FROM users WHERE user_id = ?", (owner_id,)).fetchone()
                 if user and _should_send_notification(db, owner_id, "welcome"):
-                    first_agent_html = f"""
-                    <html>
-                    <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                        <h1 style="color: #333;">🎉 Your first agent is live on MoltGrid!</h1>
-                        <p>Congratulations! Your agent <strong>{req.name or agent_id}</strong> is now registered.</p>
-                        <p><strong>Agent ID:</strong> <code>{agent_id}</code></p>
-                        <p><strong>Next steps:</strong></p>
-                        <ul>
-                            <li>Store persistent memory: <code>POST /v1/memory</code></li>
-                            <li>Send a message to another agent: <code>POST /v1/relay/send</code></li>
-                            <li>Submit a background job: <code>POST /v1/queue/submit</code></li>
-                            <li>Start the onboarding tutorial: <code>POST /v1/onboarding/start</code></li>
-                        </ul>
-                        <p><a href="https://moltgrid.net/dashboard" style="background: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">View Dashboard</a></p>
-                        <p>Your agent is ready to go. Start building!</p>
-                    </body>
-                    </html>
-                    """
-                    _queue_email(user["email"], "Your first agent is live on MoltGrid", first_agent_html)
+                    _send_first_agent_email = True
+                    _first_agent_email_to = user["email"]
 
         # Apply template starter code to memory if template_id provided (BL-04)
         if req.template_id:
@@ -2543,6 +2528,28 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
                 "INSERT INTO relay (message_id, from_agent, to_agent, channel, payload, created_at) VALUES (?,?,?,?,?,?)",
                 (msg_id, WELCOME_AGENT_ID, agent_id, "welcome", _encrypt(WELCOME_MESSAGE), now)
             )
+
+    # Queue first-agent email OUTSIDE get_db() block to avoid nested lock
+    if _send_first_agent_email and _first_agent_email_to:
+        first_agent_html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color: #333;">Your first agent is live on MoltGrid!</h1>
+            <p>Congratulations! Your agent <strong>{req.name or agent_id}</strong> is now registered.</p>
+            <p><strong>Agent ID:</strong> <code>{agent_id}</code></p>
+            <p><strong>Next steps:</strong></p>
+            <ul>
+                <li>Store persistent memory: <code>POST /v1/memory</code></li>
+                <li>Send a message to another agent: <code>POST /v1/relay/send</code></li>
+                <li>Submit a background job: <code>POST /v1/queue/submit</code></li>
+                <li>Start the onboarding tutorial: <code>POST /v1/onboarding/start</code></li>
+            </ul>
+            <p><a href="https://moltgrid.net/dashboard" style="background: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">View Dashboard</a></p>
+            <p>Your agent is ready to go. Start building!</p>
+        </body>
+        </html>
+        """
+        _queue_email(_first_agent_email_to, "Your first agent is live on MoltGrid", first_agent_html)
 
     _track_event("agent.registered", agent_id=agent_id)
     _log_audit("agent.register", user_id=owner_id, agent_id=agent_id)
@@ -3919,18 +3926,25 @@ def _usage_reset_loop():
 # ─── Email Notifications ──────────────────────────────────────────────────────
 
 def _queue_email(to_email: str, subject: str, body_html: str):
-    """Queue an email for sending. Returns email ID."""
+    """Queue an email for sending. Uses independent connection to avoid nested locks."""
     email_id = f"email_{uuid.uuid4().hex[:16]}"
     now = datetime.now(timezone.utc).isoformat()
-
-    with get_db() as db:
-        db.execute(
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
             "INSERT INTO email_queue (id, to_email, subject, body_html, status, created_at) "
             "VALUES (?, ?, ?, ?, 'pending', ?)",
             (email_id, to_email, subject, body_html, now)
         )
-
-    logger.info(f"Queued email {email_id} to {to_email}: {subject}")
+        conn.commit()
+        logger.info(f"Queued email {email_id} to {to_email}: {subject}")
+    except Exception as e:
+        logger.error(f"Failed to queue email {email_id}: {e}")
+    finally:
+        if conn:
+            conn.close()
     return email_id
 
 
