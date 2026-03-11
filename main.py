@@ -1908,14 +1908,14 @@ def user_integrations_status(agent_id: Optional[str] = None, user_id: str = Depe
             rows = db.execute(
                 "SELECT i.id, i.agent_id, i.platform, i.status, i.created_at "
                 "FROM integrations i JOIN agents a ON i.agent_id = a.agent_id "
-                "WHERE a.user_id = ? AND i.agent_id = ? ORDER BY i.created_at DESC",
+                "WHERE a.owner_id = ? AND i.agent_id = ? ORDER BY i.created_at DESC",
                 (user_id, agent_id),
             ).fetchall()
         else:
             rows = db.execute(
                 "SELECT i.id, i.agent_id, i.platform, i.status, i.created_at "
                 "FROM integrations i JOIN agents a ON i.agent_id = a.agent_id "
-                "WHERE a.user_id = ? ORDER BY i.created_at DESC",
+                "WHERE a.owner_id = ? ORDER BY i.created_at DESC",
                 (user_id,),
             ).fetchall()
         items = []
