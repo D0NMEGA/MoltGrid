@@ -1,0 +1,17 @@
+[Unit]
+Description=MoltGrid Worker Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=moltgrid
+WorkingDirectory=/opt/moltgrid
+EnvironmentFile=/etc/moltgrid/worker.env
+ExecStart=/usr/bin/python3 /opt/moltgrid/moltgrid-worker.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -714,6 +714,37 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)"
     )
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agent_events (
+            event_id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload TEXT NOT NULL DEFAULT '{}',
+            acknowledged INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_events_agent_ack_time "
+        "ON agent_events (agent_id, acknowledged, created_at)"
+    )
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS obstacle_course_submissions (
+            submission_id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            stages_completed TEXT NOT NULL DEFAULT '[]',
+            score INTEGER NOT NULL DEFAULT 0,
+            submitted_at TEXT NOT NULL,
+            feedback TEXT NOT NULL DEFAULT ''
+        )
+    """)
+
+    try:
+        conn.execute("ALTER TABLE agents ADD COLUMN worker_status TEXT NOT NULL DEFAULT 'offline'")
+    except Exception:
+        pass  # column already exists
+
     conn.commit()
     conn.close()
 
@@ -2759,16 +2790,19 @@ class HeartbeatRequest(BaseModel):
     metadata: Optional[dict] = Field(None, description="Optional metadata blob (max 4KB)")
 
 @app.post("/v1/agents/heartbeat", tags=["Directory"])
+@app.post("/v1/heartbeat", tags=["Directory"])
 def agent_heartbeat(req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = Depends(get_agent_id)):
     """Send a heartbeat to indicate this agent is alive. Call periodically (default every 60s)."""
     now = datetime.now(timezone.utc).isoformat()
     meta_json = json.dumps(req.metadata) if req.metadata else None
     if meta_json and len(meta_json) > 4096:
         raise HTTPException(400, "metadata exceeds 4KB limit")
+    VALID_WORKER_STATUSES = {"worker_running", "session_based", "offline"}
+    worker_status = req.status if req.status in VALID_WORKER_STATUSES else "session_based"
     with get_db() as db:
         db.execute(
-            "UPDATE agents SET heartbeat_at=?, heartbeat_status=?, heartbeat_meta=? WHERE agent_id=?",
-            (now, req.status, meta_json, agent_id)
+            "UPDATE agents SET heartbeat_at=?, heartbeat_status=?, heartbeat_meta=?, worker_status=? WHERE agent_id=?",
+            (now, req.status, meta_json, worker_status, agent_id)
         )
     return {"agent_id": agent_id, "status": req.status, "heartbeat_at": now}
 
@@ -2910,6 +2944,23 @@ def _log_audit(
         conn.close()
     except Exception:
         pass  # Never raise from audit logger
+
+
+def _queue_agent_event(agent_id: str, event_type: str, payload: dict):
+    """Insert an event into agent_events. Uses own connection — call OUTSIDE get_db() blocks."""
+    try:
+        event_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO agent_events (event_id, agent_id, event_type, payload, acknowledged, created_at) "
+            "VALUES (?,?,?,?,0,?)",
+            (event_id, agent_id, event_type, json.dumps(payload), now)
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # fire-and-forget
 
 
 def _check_memory_visibility(db, target_agent_id: str, namespace: str, key: str, requester_agent_id: str) -> bool:
@@ -3193,6 +3244,7 @@ def queue_complete(job_id: str, result: str = "", agent_id: str = Depends(get_ag
         "job_id": job_id, "queue_name": job_row["queue_name"],
         "result": result, "completed_at": now,
     })
+    _queue_agent_event(agent_id, "job_completed", {"job_id": job_id, "queue_name": job_row["queue_name"]})
     return {"job_id": job_id, "status": "completed"}
 
 @app.get("/v1/queue", response_model=QueueListResponse, tags=["Queue"])
@@ -3343,6 +3395,12 @@ def relay_send(msg: RelayMessage, agent_id: str = Depends(get_agent_id)):
     _fire_webhooks(msg.to_agent, "message.received", {
         "message_id": message_id, "from_agent": agent_id,
         "channel": msg.channel, "payload": msg.payload,
+    })
+
+    # Queue event for recipient
+    _queue_agent_event(msg.to_agent, "relay_message", {
+        "from": agent_id, "message_id": message_id, "channel": msg.channel,
+        "message": msg.payload[:100]
     })
 
     return {"message_id": message_id, "status": "delivered"}
@@ -3710,6 +3768,7 @@ def _run_scheduler_tick():
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
 
+    triggered_events = []
     with get_db() as db:
         due = db.execute(
             "SELECT * FROM scheduled_tasks WHERE enabled=1 AND next_run_at <= ?",
@@ -3731,6 +3790,11 @@ def _run_scheduler_tick():
                 "UPDATE scheduled_tasks SET next_run_at=?, last_run_at=?, run_count=run_count+1 WHERE task_id=?",
                 (next_run, now_iso, task["task_id"])
             )
+            triggered_events.append((task["agent_id"], task["task_id"], task["queue_name"]))
+
+    # Queue events OUTSIDE the with get_db() block (fire-and-forget pattern)
+    for agent_id_ev, sched_id, action in triggered_events:
+        _queue_agent_event(agent_id_ev, "schedule_triggered", {"schedule_id": sched_id, "action": action})
 
 
 def _scheduler_loop():
@@ -6283,6 +6347,230 @@ def switch_org_context(org_id: str, user_id: str = Depends(get_user_id)):
         if not member:
             raise HTTPException(403, "Not a member of this org")
     return {"active_org_id": org_id, "org_name": org["name"]}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AGENT EVENT STREAM
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EventAckRequest(BaseModel):
+    event_ids: List[str]
+
+
+class ObstacleCourseSubmitRequest(BaseModel):
+    stages_completed: List[int]
+    proof: str = ""
+
+
+@app.get("/v1/events/stream", tags=["Events"])
+async def events_stream(agent_id: str = Depends(get_agent_id)):
+    """Long-poll: waits up to 30s for first unacked event. Returns event or 204."""
+    import asyncio
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        with get_db() as db:
+            row = db.execute(
+                "SELECT event_id, event_type, payload, created_at FROM agent_events "
+                "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 1",
+                (agent_id,)
+            ).fetchone()
+        if row:
+            return {
+                "event_id": row[0],
+                "event_type": row[1],
+                "payload": json.loads(row[2]),
+                "created_at": row[3]
+            }
+        await asyncio.sleep(0.5)
+    return Response(status_code=204)
+
+
+@app.get("/v1/events", tags=["Events"])
+async def events_poll(agent_id: str = Depends(get_agent_id)):
+    """Return up to 20 unacknowledged events for agent."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT event_id, event_type, payload, created_at FROM agent_events "
+            "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 20",
+            (agent_id,)
+        ).fetchall()
+    return [{"event_id": r[0], "event_type": r[1], "payload": json.loads(r[2]), "created_at": r[3]} for r in rows]
+
+
+@app.post("/v1/events/ack", tags=["Events"])
+async def events_ack(body: EventAckRequest, agent_id: str = Depends(get_agent_id)):
+    """Mark event_ids as acknowledged."""
+    if not body.event_ids:
+        return {"acknowledged": 0}
+    with get_db() as db:
+        placeholders = ",".join("?" * len(body.event_ids))
+        db.execute(
+            f"UPDATE agent_events SET acknowledged=1 WHERE agent_id=? AND event_id IN ({placeholders})",
+            [agent_id] + body.event_ids
+        )
+        db.commit()
+    return {"acknowledged": len(body.event_ids)}
+
+
+# ─── Obstacle Course ──────────────────────────────────────────────────────────
+
+@app.get("/obstacle-course.md", tags=["System"])
+async def serve_obstacle_course_md():
+    path = os.path.join(os.path.dirname(__file__), "obstacle-course.md")
+    with open(path) as f:
+        content = f.read()
+    return Response(content=content, media_type="text/markdown")
+
+
+@app.get("/v1/obstacle-course.md", tags=["System"])
+async def serve_obstacle_course_md_v1():
+    path = os.path.join(os.path.dirname(__file__), "obstacle-course.md")
+    with open(path) as f:
+        content = f.read()
+    return Response(content=content, media_type="text/markdown")
+
+
+@app.post("/v1/obstacle-course/submit", tags=["Obstacle Course"])
+async def obstacle_submit(body: ObstacleCourseSubmitRequest, agent_id: str = Depends(get_agent_id)):
+    stages = sorted(set(s for s in body.stages_completed if 1 <= s <= 10))
+    base_score = len(stages) * 10
+    sequential = len(stages) > 0 and all(i + 1 in stages for i in range(len(stages))) and stages[0] == 1
+    score = min(100, base_score + (5 if sequential else 0))
+    feedback_parts = []
+    if score >= 100 and sequential:
+        feedback_parts.append("Perfect run! All 10 stages completed in sequence.")
+    elif score >= 80:
+        feedback_parts.append("Excellent! Most stages completed.")
+    elif score >= 50:
+        feedback_parts.append("Good progress. Keep going!")
+    else:
+        feedback_parts.append("Keep practicing the missed stages.")
+    missing = [i for i in range(1, 11) if i not in stages]
+    if missing:
+        feedback_parts.append(f"Stages not recorded: {missing}")
+    feedback = " ".join(feedback_parts)
+    submission_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO obstacle_course_submissions (submission_id, agent_id, stages_completed, score, submitted_at, feedback) "
+            "VALUES (?,?,?,?,?,?)",
+            (submission_id, agent_id, json.dumps(stages), score, now, feedback)
+        )
+        db.commit()
+    return {"submission_id": submission_id, "score": score, "stages_completed": stages, "feedback": feedback}
+
+
+@app.get("/v1/obstacle-course/leaderboard", tags=["Obstacle Course"])
+async def obstacle_leaderboard():
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT ocs.submission_id, ocs.agent_id, a.display_name, ocs.score, ocs.stages_completed, ocs.submitted_at, ocs.feedback "
+            "FROM obstacle_course_submissions ocs "
+            "LEFT JOIN agents a ON a.agent_id = ocs.agent_id "
+            "ORDER BY ocs.score DESC, ocs.submitted_at ASC LIMIT 20"
+        ).fetchall()
+    return [
+        {
+            "submission_id": r[0],
+            "agent_id": r[1],
+            "display_name": r[2] or "Unknown Agent",
+            "score": r[3],
+            "stages_completed": json.loads(r[4]),
+            "submitted_at": r[5],
+            "feedback": r[6]
+        }
+        for r in rows
+    ]
+
+
+@app.get("/v1/obstacle-course/my-result", tags=["Obstacle Course"])
+async def obstacle_my_result(agent_id: str = Depends(get_agent_id)):
+    with get_db() as db:
+        row = db.execute(
+            "SELECT submission_id, stages_completed, score, submitted_at, feedback FROM obstacle_course_submissions "
+            "WHERE agent_id=? ORDER BY score DESC LIMIT 1",
+            (agent_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "No submission found")
+    return {
+        "submission_id": row[0],
+        "stages_completed": json.loads(row[1]),
+        "score": row[2],
+        "submitted_at": row[3],
+        "feedback": row[4]
+    }
+
+
+# ─── WebSocket: /v1/events/ws ─────────────────────────────────────────────────
+
+@app.websocket("/v1/events/ws")
+async def events_ws(websocket: WebSocket, api_key: str = Query(None)):
+    """Real-time event stream via WebSocket. Auth via ?api_key=af_... query param."""
+    import asyncio, hashlib, time as _time
+
+    if not api_key:
+        await websocket.close(code=4001)
+        return
+    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    with get_db() as db:
+        row = db.execute("SELECT agent_id FROM agents WHERE api_key_hash=?", (key_hash,)).fetchone()
+    if not row:
+        await websocket.close(code=4001)
+        return
+    agent_id = row[0]
+
+    await websocket.accept()
+    await websocket.send_json({"type": "connected", "agent_id": agent_id})
+
+    last_ping = _time.time()
+
+    try:
+        while True:
+            if _time.time() - last_ping >= 30:
+                await websocket.send_json({"type": "ping"})
+                last_ping = _time.time()
+
+            with get_db() as db:
+                ws_rows = db.execute(
+                    "SELECT event_id, event_type, payload, created_at FROM agent_events "
+                    "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 5",
+                    (agent_id,)
+                ).fetchall()
+
+            for ws_row in ws_rows:
+                event = {
+                    "type": "event",
+                    "event_id": ws_row[0],
+                    "event_type": ws_row[1],
+                    "payload": json.loads(ws_row[2]),
+                    "created_at": ws_row[3]
+                }
+                await websocket.send_json(event)
+
+            try:
+                msg = await asyncio.wait_for(websocket.receive_json(), timeout=0.1)
+                if msg.get("type") == "pong":
+                    pass
+                elif msg.get("type") == "ack" and msg.get("event_ids"):
+                    eids = msg["event_ids"]
+                    placeholders = ",".join("?" * len(eids))
+                    with get_db() as db:
+                        db.execute(
+                            f"UPDATE agent_events SET acknowledged=1 WHERE agent_id=? AND event_id IN ({placeholders})",
+                            [agent_id] + eids
+                        )
+                        db.commit()
+            except asyncio.TimeoutError:
+                pass
+
+            await asyncio.sleep(0.5)
+
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,15 @@
+version: "3.9"
+services:
+  moltgrid-worker:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./moltgrid-worker.py:/app/moltgrid-worker.py:ro
+      - ./moltgrid.py:/app/moltgrid.py:ro
+    environment:
+      - MOLTGRID_API_KEY=${MOLTGRID_API_KEY}
+      - MOLTGRID_API_URL=${MOLTGRID_API_URL:-https://api.moltgrid.net}
+      - MOLTGRID_POLL_INTERVAL=${MOLTGRID_POLL_INTERVAL:-30}
+    command: >
+      sh -c "pip install requests -q && python3 moltgrid-worker.py"
+    restart: unless-stopped

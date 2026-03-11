@@ -4287,3 +4287,291 @@ class TestSkillMd:
     def test_skill_md_no_auth_required(self):
         r = client.get("/skill.md")
         assert r.status_code == 200  # no X-API-Key or Bearer needed
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AGENT EVENT STREAM
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAgentEventStream:
+    def _insert_event(self, agent_id, event_type="test_event"):
+        """Helper: directly insert an event into agent_events for testing."""
+        import sqlite3, uuid
+        conn = sqlite3.connect(DB_PATH)
+        eid = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO agent_events (event_id, agent_id, event_type, payload, acknowledged, created_at) VALUES (?,?,?,?,0,?)",
+            (eid, agent_id, event_type, json.dumps({"test": True}), datetime.utcnow().isoformat())
+        )
+        conn.commit()
+        conn.close()
+        return eid
+
+    def test_poll_events_empty(self):
+        _id, key, h = register_agent("event-test")
+        r = client.get("/v1/events", headers=h)
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_poll_events_returns_inserted(self):
+        _id, key, h = register_agent("event-test2")
+        eid = self._insert_event(_id)
+        r = client.get("/v1/events", headers=h)
+        assert r.status_code == 200
+        ids = [e["event_id"] for e in r.json()]
+        assert eid in ids
+
+    def test_ack_event(self):
+        _id, key, h = register_agent("event-test3")
+        eid = self._insert_event(_id)
+        r = client.post("/v1/events/ack", json={"event_ids": [eid]}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["acknowledged"] == 1
+        r2 = client.get("/v1/events", headers=h)
+        ids = [e["event_id"] for e in r2.json()]
+        assert eid not in ids
+
+    def test_stream_returns_event_immediately(self):
+        _id, key, h = register_agent("event-test4")
+        eid = self._insert_event(_id, "relay_message")
+        r = client.get("/v1/events/stream", headers=h)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["event_id"] == eid
+        assert data["event_type"] == "relay_message"
+
+    def test_events_require_auth(self):
+        r = client.get("/v1/events")
+        assert r.status_code in (401, 403)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WEBSOCKET EVENTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestWebSocketEvents:
+    def test_ws_connect_requires_api_key(self):
+        with pytest.raises(Exception):
+            with client.websocket_connect("/v1/events/ws") as ws:
+                ws.receive_json()
+
+    def test_ws_connect_authenticated(self):
+        _id, key, h = register_agent("ws-test")
+        with client.websocket_connect(f"/v1/events/ws?api_key={key}") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "connected"
+            assert "agent_id" in msg
+
+    def test_ws_receives_event(self):
+        import sqlite3, uuid
+        _id, key, h = register_agent("ws-test2")
+        eid = str(uuid.uuid4())
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO agent_events (event_id, agent_id, event_type, payload, acknowledged, created_at) VALUES (?,?,?,?,0,?)",
+            (eid, _id, "test_ws_event", json.dumps({"hello": "world"}), datetime.utcnow().isoformat())
+        )
+        conn.commit()
+        conn.close()
+        with client.websocket_connect(f"/v1/events/ws?api_key={key}") as ws:
+            ws.receive_json()  # connected message
+            msg = ws.receive_json()
+            assert msg["type"] == "event"
+            assert msg["event_id"] == eid
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SDK EVENT METHODS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSDKEventMethods:
+    def _make_client(self):
+        from moltgrid import MoltGrid
+        return MoltGrid("af_testkey1234567890abcdef1234567890abcdef12")
+
+    def test_wait_for_event_returns_event(self):
+        from unittest.mock import patch, MagicMock
+        mg = self._make_client()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "event_id": "evt-001",
+            "event_type": "relay_message",
+            "payload": {"msg": "hello"},
+            "created_at": "2026-01-01T00:00:00"
+        }
+        with patch.object(mg._s, "get", return_value=mock_resp):
+            event = mg.wait_for_event(timeout=5)
+        assert event is not None
+        assert event["event_id"] == "evt-001"
+        assert event["event_type"] == "relay_message"
+
+    def test_wait_for_event_returns_none_on_timeout(self):
+        from unittest.mock import patch, MagicMock
+        mg = self._make_client()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 204
+        with patch.object(mg._s, "get", return_value=mock_resp):
+            event = mg.wait_for_event(timeout=5)
+        assert event is None
+
+    def test_poll_events_returns_list(self):
+        from unittest.mock import patch, MagicMock
+        mg = self._make_client()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = [
+            {"event_id": "e1", "event_type": "job_claimed", "payload": {}, "created_at": "2026-01-01T00:00:00"},
+            {"event_id": "e2", "event_type": "schedule_triggered", "payload": {}, "created_at": "2026-01-01T00:00:01"},
+        ]
+        with patch.object(mg._s, "get", return_value=mock_resp):
+            events = mg.poll_events()
+        assert isinstance(events, list)
+        assert len(events) == 2
+        assert events[0]["event_id"] == "e1"
+
+    def test_ack_events(self):
+        from unittest.mock import patch, MagicMock
+        mg = self._make_client()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"acknowledged": 2}
+        with patch.object(mg._s, "post", return_value=mock_resp):
+            count = mg.ack_events(["e1", "e2"])
+        assert count == 2
+
+    def test_subscribe_calls_callback(self):
+        from unittest.mock import patch, MagicMock
+        mg = self._make_client()
+        received = []
+
+        def callback(event):
+            received.append(event)
+            raise StopIteration
+
+        events_iter = iter([
+            {"event_id": "e1", "event_type": "relay_message", "payload": {}, "created_at": "2026-01-01T00:00:00"}
+        ])
+
+        mock_ack = MagicMock(return_value=1)
+        with patch.object(mg, "wait_for_event", side_effect=lambda **kw: next(events_iter, None)):
+            with patch.object(mg, "ack_events", mock_ack):
+                mg.subscribe(callback, run_forever=False)
+
+        assert len(received) == 1
+        assert received[0]["event_id"] == "e1"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WORKER DAEMON
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestWorkerDaemon:
+    def _load_worker(self, mod_name="worker_test_mod"):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location(mod_name, "/opt/moltgrid/moltgrid-worker.py")
+        mod = importlib.util.module_from_spec(spec)
+        with patch.dict("os.environ", {"MOLTGRID_API_KEY": "af_test"}):
+            with patch("requests.post"), patch("requests.get"):
+                spec.loader.exec_module(mod)
+        return mod
+
+    def test_sigterm_sets_running_false(self):
+        mod = self._load_worker("wmod1")
+        assert mod._running is True
+        mod.handle_sigterm(None, None)
+        assert mod._running is False
+
+    def test_dispatch_calls_correct_handler(self):
+        mod = self._load_worker("wmod2")
+        called = []
+        mod.HANDLERS["relay_message"] = lambda e: called.append(e)
+        mod.dispatch({"event_type": "relay_message", "event_id": "e1", "payload": {}})
+        assert len(called) == 1
+
+    def test_dispatch_unknown_event_type_no_error(self):
+        mod = self._load_worker("wmod3")
+        mod.dispatch({"event_type": "completely_unknown", "event_id": "e2", "payload": {}})
+
+    def test_deployment_files_exist(self):
+        for path in [
+            "/opt/moltgrid/deploy/moltgrid-worker.service",
+            "/opt/moltgrid/deploy/docker-compose.worker.yml",
+            "/opt/moltgrid/deploy/pm2.worker.config.js",
+            "/opt/moltgrid/deploy/WORKER_README.md",
+        ]:
+            assert os.path.exists(path), f"Missing: {path}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OBSTACLE COURSE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestObstacleCourse:
+    def test_obstacle_course_md_endpoint(self):
+        r = client.get("/obstacle-course.md")
+        assert r.status_code == 200
+        assert "text/markdown" in r.headers.get("content-type", "")
+        assert "Stage 1" in r.text
+
+    def test_submit_scores_correctly(self):
+        _id, key, h = register_agent("oc-test1")
+        r = client.post("/v1/obstacle-course/submit",
+            json={"stages_completed": [1, 2, 3, 4, 5], "proof": "completed five stages"},
+            headers=h)
+        assert r.status_code == 200
+        data = r.json()
+        # 5 stages [1,2,3,4,5] in order = 50 + 5 sequential bonus = 55
+        assert data["score"] == 55
+        assert "submission_id" in data
+
+    def test_submit_full_score(self):
+        _id, key, h = register_agent("oc-test2")
+        r = client.post("/v1/obstacle-course/submit",
+            json={"stages_completed": list(range(1, 11)), "proof": "all stages"},
+            headers=h)
+        assert r.status_code == 200
+        assert r.json()["score"] == 100  # 100 + 5 bonus capped at 100
+
+    def test_submit_requires_auth(self):
+        r = client.post("/v1/obstacle-course/submit",
+            json={"stages_completed": [1], "proof": "test"})
+        assert r.status_code in (401, 403)
+
+    def test_leaderboard_public(self):
+        _id, key, h = register_agent("oc-lb")
+        client.post("/v1/obstacle-course/submit",
+            json={"stages_completed": [1, 2, 3], "proof": "lb test"},
+            headers=h)
+        r = client.get("/v1/obstacle-course/leaderboard")
+        assert r.status_code == 200
+        data = r.json()
+        assert isinstance(data, list)
+        if data:
+            assert "score" in data[0]
+            assert "display_name" in data[0]
+
+    def test_my_result_404_when_none(self):
+        _id, key, h = register_agent("oc-fresh")
+        r = client.get("/v1/obstacle-course/my-result", headers=h)
+        assert r.status_code == 404
+
+    def test_my_result_returns_best(self):
+        _id, key, h = register_agent("oc-best")
+        client.post("/v1/obstacle-course/submit",
+            json={"stages_completed": [1, 2], "proof": "low score"},
+            headers=h)
+        client.post("/v1/obstacle-course/submit",
+            json={"stages_completed": list(range(1, 11)), "proof": "high score"},
+            headers=h)
+        r = client.get("/v1/obstacle-course/my-result", headers=h)
+        assert r.status_code == 200
+        assert r.json()["score"] == 100
+
+    def test_heartbeat_sets_worker_status(self):
+        _id, key, h = register_agent("oc-hb")
+        r = client.post("/v1/heartbeat",
+            json={"status": "worker_running", "metadata": {"test": True}},
+            headers=h)
+        assert r.status_code == 200

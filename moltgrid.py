@@ -505,5 +505,95 @@ class MoltGrid:
         """List all active pub/sub channels with subscriber counts."""
         return self._get("/v1/pubsub/channels")
 
+    # ── Event Stream ─────────────────────────────────────────────────────────
+
+    def poll_events(self, limit=20):
+        """GET /v1/events — returns up to limit unacknowledged events.
+
+        Returns:
+            List of event dicts with keys: event_id, event_type, payload, created_at.
+        """
+        r = self._s.get(self._url("/v1/events"), timeout=10)
+        if r.status_code == 200:
+            events = r.json()
+            return events[:limit]
+        return []
+
+    def ack_events(self, event_ids):
+        """POST /v1/events/ack — mark event_ids as acknowledged.
+
+        Returns:
+            Number of events acknowledged.
+        """
+        if not event_ids:
+            return 0
+        r = self._s.post(self._url("/v1/events/ack"), json={"event_ids": event_ids}, timeout=10)
+        if r.status_code == 200:
+            return r.json().get("acknowledged", 0)
+        return 0
+
+    def wait_for_event(self, event_type=None, timeout=30):
+        """Long-poll GET /v1/events/stream until an event arrives or timeout.
+
+        Args:
+            event_type: If set, only return events of this type (re-polls if wrong type received).
+            timeout: Maximum seconds to wait total. Default 30.
+
+        Returns:
+            Event dict with keys: event_id, event_type, payload, created_at.
+            Returns None on timeout (204 response).
+        """
+        import time
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            remaining = max(1, int(deadline - time.time()))
+            try:
+                r = self._s.get(
+                    self._url("/v1/events/stream"),
+                    timeout=min(remaining + 2, 35)
+                )
+                if r.status_code == 204:
+                    return None
+                if r.status_code == 200:
+                    event = r.json()
+                    if event_type is None or event.get("event_type") == event_type:
+                        return event
+                    # Wrong type — ack it and keep waiting
+                    self.ack_events([event["event_id"]])
+            except Exception:
+                time.sleep(0.5)
+        return None
+
+    def subscribe(self, callback, event_types=None, run_forever=True):
+        """Long-poll loop that calls callback(event) for each event and auto-acks.
+
+        Args:
+            callback: Callable accepting one event dict argument.
+            event_types: Optional list of event_type strings to filter. None = all.
+            run_forever: If True (default), loops until KeyboardInterrupt or callback raises StopIteration.
+
+        Note: Blocks the calling thread. Run in a thread for background operation.
+        """
+        import time
+        while True:
+            try:
+                event = self.wait_for_event(timeout=30)
+                if event is None:
+                    if not run_forever:
+                        return
+                    continue
+                if event_types is None or event.get("event_type") in event_types:
+                    try:
+                        callback(event)
+                    except StopIteration:
+                        return
+                self.ack_events([event["event_id"]])
+            except KeyboardInterrupt:
+                return
+            except Exception:
+                time.sleep(1)
+            if not run_forever:
+                return
+
     def __repr__(self):
         return f"MoltGrid(base_url={self.base_url!r})"
