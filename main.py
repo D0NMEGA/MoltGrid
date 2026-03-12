@@ -1431,8 +1431,14 @@ def user_list_agents(user_id: str = Depends(get_user_id)):
     return {"agents": [dict(r) for r in rows], "count": len(rows)}
 
 @app.get("/v1/user/agents/{agent_id}/activity", tags=["User Dashboard"])
-def user_agent_activity(agent_id: str, user_id: str = Depends(get_user_id)):
-    """Activity feed for one owned agent — last 50 events across relay, queue, and memory."""
+def user_agent_activity(
+    agent_id: str,
+    user_id: str = Depends(get_user_id),
+    type: str = Query("all", description="Filter: all, messages, jobs, memory, schedules, security"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """Activity feed for one owned agent — events across relay, queue, and memory with filtering and pagination."""
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
         events = []
@@ -1484,9 +1490,26 @@ def user_agent_activity(agent_id: str, user_id: str = Depends(get_user_id)):
                 item["metadata"] = {}
             events.append(item)
 
-    # Sort all events by timestamp DESC, take top 50
+    # Sort all events by timestamp DESC
     events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
-    return {"agent_id": agent_id, "events": events[:50]}
+
+    # Filter by type if not "all"
+    if type != "all":
+        type_map = {
+            "messages": ["message_sent", "message_received"],
+            "jobs": ["job_pending", "job_completed", "job_failed", "job_running"],
+            "memory": ["memory_update"],
+            "schedules": ["schedule"],
+            "security": ["key_rotated"],
+        }
+        allowed = type_map.get(type, [])
+        if allowed:
+            events = [e for e in events if any(e.get("event_type", "").startswith(a) for a in allowed)]
+
+    # Paginate
+    total = len(events)
+    events = events[offset:offset + limit]
+    return {"agent_id": agent_id, "events": events, "total": total}
 
 @app.get("/v1/user/agents/{agent_id}/stats", tags=["User Dashboard"])
 def user_agent_stats(agent_id: str, user_id: str = Depends(get_user_id)):

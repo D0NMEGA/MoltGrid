@@ -200,7 +200,10 @@ body {
 
 <div class="login-container">
   <div class="login-card" id="loginCard">
-    <div class="login-logo">MoltGrid<span>.admin</span></div>
+    <div class="login-logo" style="display:flex;align-items:center;justify-content:center;gap:8px">
+      <img src="https://moltgrid.net/public/logo-full.png" alt="MoltGrid" height="28">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:var(--text-dim)">admin</span>
+    </div>
     <div class="login-subtitle">Authenticated access required</div>
 
     <form id="loginForm" onsubmit="handleLogin(event)">

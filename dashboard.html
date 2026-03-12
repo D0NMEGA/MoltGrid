@@ -2116,6 +2116,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       var W, H, cx, cy;
       var hoveredNode = null;
 
+      var myAgentIds = (user && user.agents) ? user.agents.map(function(a) { return a.agent_id || a.id; }) : [];
       var statusColor = { online: "#44cc66", offline: "#3a3a4a", busy: "#ffcc00", unknown: "#3a3a4a" };
       var edgeColorMap = {
         collaboration: { line: "rgba(255,51,51,0.1)", pulse: "rgba(255,51,51,0.7)" },
@@ -2146,7 +2147,6 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       function layoutNodes() {
         var innerNodes = [];
         var outerNodes = [];
-        var myAgentIds = (user && user.agents) ? user.agents.map(function(a) { return a.agent_id || a.id; }) : [];
         for (var i = 0; i < nodes.length; i++) {
           if (myAgentIds.indexOf(nodes[i].id) >= 0) {
             innerNodes.push(nodes[i]);
@@ -2331,18 +2331,41 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
           var node = nodes[n];
           var pos = getNodePos(node, time);
           var baseR = getNodeRadius(node);
-          var color = getNodeColor(node);
+          var isOwn = myAgentIds.indexOf(node.id) >= 0;
+          var color = isOwn ? "#ff3333" : getNodeColor(node);
           var isOnline = node.status === "online" || node.status === "busy";
           var isHovered = (hoveredNode === node);
 
           // Breathing for online nodes
           var r = baseR;
+          if (isOwn) r = baseR * 1.5;
           if (isOnline) {
-            r = baseR + Math.sin(time * 1.5 + node._breathPhase) * 1.5;
+            r = r + Math.sin(time * 1.5 + node._breathPhase) * 1.5;
           }
 
-          // Outer glow ring for online nodes
-          if (isOnline) {
+          // Double glow ring for user's own nodes
+          if (isOwn) {
+            var ownRgb = hexToRgb("#ff3333");
+            // Outer glow
+            var ownGlowR2 = r + 14 + Math.sin(time * 0.8 + node._breathPhase) * 3;
+            var ownGlow2 = ctx.createRadialGradient(pos.x, pos.y, r, pos.x, pos.y, ownGlowR2);
+            ownGlow2.addColorStop(0, "rgba(" + ownRgb.r + "," + ownRgb.g + "," + ownRgb.b + ",0.12)");
+            ownGlow2.addColorStop(1, "rgba(" + ownRgb.r + "," + ownRgb.g + "," + ownRgb.b + ",0)");
+            ctx.fillStyle = ownGlow2;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, ownGlowR2, 0, Math.PI * 2);
+            ctx.fill();
+            // Inner glow
+            var ownGlowR1 = r + 6 + Math.sin(time * 1.2 + node._breathPhase) * 2;
+            var ownGlow1 = ctx.createRadialGradient(pos.x, pos.y, r * 0.6, pos.x, pos.y, ownGlowR1);
+            ownGlow1.addColorStop(0, "rgba(" + ownRgb.r + "," + ownRgb.g + "," + ownRgb.b + ",0.3)");
+            ownGlow1.addColorStop(1, "rgba(" + ownRgb.r + "," + ownRgb.g + "," + ownRgb.b + ",0)");
+            ctx.fillStyle = ownGlow1;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, ownGlowR1, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (isOnline) {
+            // Outer glow ring for other online nodes
             var rgb = hexToRgb(color);
             var glowR = r + 6 + Math.sin(time * 1.2 + node._breathPhase) * 2;
             var glow = ctx.createRadialGradient(pos.x, pos.y, r * 0.8, pos.x, pos.y, glowR);
@@ -2370,8 +2393,8 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
           ctx.fill();
 
           // Border
-          ctx.strokeStyle = isHovered ? "#ff3333" : "rgba(48,54,61,0.8)";
-          ctx.lineWidth = isHovered ? 2 : 1.2;
+          ctx.strokeStyle = isOwn ? "#ff3333" : (isHovered ? "#ff3333" : "rgba(48,54,61,0.8)");
+          ctx.lineWidth = isOwn ? 2.5 : (isHovered ? 2 : 1.2);
           ctx.beginPath();
           ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
           ctx.stroke();
@@ -2382,9 +2405,18 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
           ctx.arc(pos.x, pos.y, Math.max(1.5, r * 0.2), 0, Math.PI * 2);
           ctx.fill();
 
+          // "YOU" badge above user's own nodes
+          if (isOwn) {
+            ctx.fillStyle = "#ff3333";
+            ctx.font = "bold 8px 'JetBrains Mono', monospace";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "bottom";
+            ctx.fillText("YOU", pos.x, pos.y - r - 5);
+          }
+
           // Label
-          ctx.fillStyle = isHovered ? "#e6edf3" : "#8b949e";
-          ctx.font = "9px 'JetBrains Mono', monospace";
+          ctx.fillStyle = isOwn ? "#ff3333" : (isHovered ? "#e6edf3" : "#8b949e");
+          ctx.font = (isOwn ? "bold " : "") + "9px 'JetBrains Mono', monospace";
           ctx.textAlign = "center";
           ctx.textBaseline = "top";
           ctx.fillText(node.name || node.id.slice(0, 10), pos.x, pos.y + r + 6);
@@ -2450,7 +2482,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
           (d.skills && d.skills.length ? '<div style="margin-top:0.5rem">Skills: ' + d.skills.map(function(s){return '<span style="background:rgba(255,51,51,0.1);color:var(--accent);padding:1px 6px;border-radius:8px;font-size:0.65rem;margin:1px">' + esc(s) + '</span>';}).join(" ") + '</div>' : '') +
           (d.interests && d.interests.length ? '<div style="margin-top:0.25rem">Interests: ' + d.interests.map(function(s){return '<span style="background:rgba(68,136,255,0.1);color:var(--blue);padding:1px 6px;border-radius:8px;font-size:0.65rem;margin:1px">' + esc(s) + '</span>';}).join(" ") + '</div>' : '') +
           (d.capabilities && d.capabilities.length ? '<div style="margin-top:0.25rem">Capabilities: ' + d.capabilities.map(function(s){return '<span style="background:rgba(187,136,255,0.1);color:var(--purple);padding:1px 6px;border-radius:8px;font-size:0.65rem;margin:1px">' + esc(s) + '</span>';}).join(" ") + '</div>' : '') +
-          '<div style="margin-top:0.75rem"><a style="color:var(--accent);font-size:0.7rem;cursor:pointer" onclick="navigate(\'#/agents/' + d.id + '\')">View Full Profile</a></div>' +
+          (myAgentIds.indexOf(d.id) >= 0 ? '<div style="margin-top:0.75rem"><a style="color:var(--accent);font-size:0.7rem;cursor:pointer" onclick="navigate(\'#/agents/' + d.id + '\')">View Details</a></div>' : '') +
           '</div>';
       }
 
@@ -2897,7 +2929,11 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     if (logoutBtn) {
       logoutBtn.onclick = function() {
         if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
-        localStorage.removeItem("mg_token"); token = null; user = null; navigate("#/login");
+        localStorage.removeItem("mg_token");
+        document.cookie = "mg_token=; domain=.moltgrid.net; path=/; max-age=0";
+        document.cookie = "mg_token=; path=/; max-age=0";
+        fetch(API + "/v1/auth/logout", { method: "POST", credentials: "include" }).catch(function(){});
+        token = null; user = null; navigate("#/login");
       };
     }
     var logoLink = document.getElementById("sidebar-logo");
