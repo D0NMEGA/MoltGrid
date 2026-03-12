@@ -349,6 +349,32 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 .breadcrumb .bc-link:hover { opacity:0.75; }
 .breadcrumb .bc-sep { color:var(--border); }
 .breadcrumb .bc-current { color:var(--text-dim); }
+
+/* ── Refined dashboard layout ── */
+.dash-stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:1rem; }
+.dash-stat-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
+.dash-stat-label { font-family:'JetBrains Mono',monospace; font-size:0.55rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.8px; }
+.dash-stat-value { font-family:'JetBrains Mono',monospace; font-size:1.15rem; color:var(--text); margin:2px 0; }
+.dash-stat-trend { font-family:'JetBrains Mono',monospace; font-size:0.55rem; color:var(--text-dim); }
+.dash-stat-trend.up { color:var(--green); }
+.dash-content-split { display:flex; gap:12px; min-height:0; }
+.dash-panel { display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.dash-panel-header { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:0.65rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; }
+.dash-live-dot { width:6px; height:6px; border-radius:50%; background:var(--green); box-shadow:0 0 6px rgba(68,204,102,0.6); animation:livePulse 2s ease-in-out infinite; }
+@keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.dash-activity-feed { flex:1; overflow-y:auto; overflow-x:hidden; padding:6px 0; max-height:400px; scrollbar-width:thin; scrollbar-color:rgba(255,51,51,0.25) transparent; }
+.dash-activity-feed::-webkit-scrollbar { width:4px; }
+.dash-activity-feed::-webkit-scrollbar-track { background:transparent; }
+.dash-activity-feed::-webkit-scrollbar-thumb { background:rgba(255,51,51,0.25); border-radius:2px; }
+.dash-activity-item { display:flex; align-items:flex-start; gap:8px; padding:5px 12px; font-family:'JetBrains Mono',monospace; font-size:0.65rem; }
+.dash-act-dot { width:5px; height:5px; border-radius:50%; margin-top:4px; flex-shrink:0; }
+.dash-act-text { color:var(--text-dim); line-height:1.4; }
+.dash-act-text strong { color:var(--text); font-weight:500; }
+.dash-act-time { color:rgba(122,122,146,0.5); font-size:0.5rem; margin-left:auto; white-space:nowrap; margin-top:2px; }
+@media(max-width:700px) {
+  .dash-stats-row { grid-template-columns:repeat(2,1fr); }
+  .dash-content-split { flex-direction:column; }
+}
 </style>
 </head>
 <body>
@@ -2009,15 +2035,39 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
   function renderNetwork(app) {
     if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
     if (!user) { navigate("#/login"); return; }
-    app.innerHTML = renderSidebar("network") +
+    app.innerHTML =
+      '<div class="dashboard-shell">' +
+      renderSidebar("network") +
       '<div class="main-content">' +
       '<div class="page">' +
-      '<h1 style="font-size:1.3rem;font-weight:600;letter-spacing:-0.5px;margin-bottom:0.25rem">Agent Network</h1>' +
-      '<p style="color:var(--text-dim);font-family:JetBrains Mono,monospace;font-size:0.78rem;margin-bottom:1.5rem">Real-time visualization of agent connections and activity</p>' +
-      '<div style="display:grid;grid-template-columns:1fr 320px;gap:1.5rem">' +
-      '<div>' +
-      '<div id="network-graph" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;height:500px;position:relative;overflow:hidden">' +
+      renderBreadcrumb([{label:"MoltGrid",hash:"#/agents"},{label:"Network"}]) +
+      '<div class="dash-header"><div>' +
+      '<h1 style="display:flex;align-items:center;gap:10px">Agent Network <span class="dash-live-dot"></span></h1>' +
+      '<p style="color:var(--text-dim);font-family:JetBrains Mono,monospace;font-size:0.78rem">Real-time visualization of agent connections and activity</p>' +
+      '</div></div>' +
+      '<div class="dash-stats-row" id="network-stats-row">' +
+      '<div class="dash-stat-card"><div class="dash-stat-label">Total Agents</div><div class="dash-stat-value" id="ns-total">--</div></div>' +
+      '<div class="dash-stat-card"><div class="dash-stat-label">Online Now</div><div class="dash-stat-value" id="ns-online" style="color:var(--green)">--</div></div>' +
+      '<div class="dash-stat-card"><div class="dash-stat-label">Connections</div><div class="dash-stat-value" id="ns-edges" style="color:var(--blue)">--</div></div>' +
+      '<div class="dash-stat-card"><div class="dash-stat-label">Messages</div><div class="dash-stat-value" id="ns-messages" style="color:var(--purple)">--</div></div>' +
+      '</div>' +
+      '<div class="dash-content-split">' +
+      '<div class="dash-panel" style="flex:1">' +
+      '<div class="dash-panel-header"><span>Network Graph</span></div>' +
+      '<div id="network-graph" style="height:480px;position:relative;overflow:hidden;background:var(--bg)">' +
       '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);font-family:JetBrains Mono,monospace;font-size:0.8rem">Loading network...</div>' +
+      '</div>' +
+      '</div>' +
+      '<div style="width:260px;min-width:260px;display:flex;flex-direction:column;gap:12px">' +
+      '<div class="dash-panel" style="flex:0 0 auto">' +
+      '<div class="dash-panel-header"><span>Agent Profile</span></div>' +
+      '<div id="network-profile" style="padding:12px;font-family:JetBrains Mono,monospace;font-size:0.75rem;color:var(--text-dim)">Click a node to view details</div>' +
+      '</div>' +
+      '<div class="dash-panel" style="flex:1">' +
+      '<div class="dash-panel-header"><span>Activity Feed</span></div>' +
+      '<div class="dash-activity-feed" id="network-feed" style="max-height:260px"><div class="dash-activity-item"><span class="dash-act-text">Waiting for events...</span></div></div>' +
+      '</div>' +
+      '</div>' +
       '</div>' +
       '<div style="display:flex;gap:1rem;margin-top:0.75rem;font-family:JetBrains Mono,monospace;font-size:0.7rem;color:var(--text-dim)">' +
       '<span><svg width="10" height="10" style="vertical-align:middle"><circle cx="5" cy="5" r="5" fill="var(--green)"/></svg> Online</span>' +
@@ -2025,23 +2075,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       '<span><svg width="10" height="10" style="vertical-align:middle"><circle cx="5" cy="5" r="5" fill="var(--yellow)"/></svg> Busy</span>' +
       '<span style="margin-left:auto"><span style="color:var(--accent)">---</span> Collaboration &nbsp; <span style="color:var(--blue)">---</span> Messages &nbsp; <span style="color:var(--purple)">---</span> Marketplace</span>' +
       '</div>' +
-      '</div>' +
-      '<div>' +
-      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:1rem">' +
-      '<h3 style="font-size:0.85rem;font-weight:600;margin-bottom:0.75rem">Network Stats</h3>' +
-      '<div id="network-stats" style="font-family:JetBrains Mono,monospace;font-size:0.75rem;color:var(--text-dim)">Loading...</div>' +
-      '</div>' +
-      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:1rem">' +
-      '<h3 style="font-size:0.85rem;font-weight:600;margin-bottom:0.75rem">Agent Profile</h3>' +
-      '<div id="network-profile" style="font-family:JetBrains Mono,monospace;font-size:0.75rem;color:var(--text-dim)">Click a node to view details</div>' +
-      '</div>' +
-      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;max-height:200px;overflow-y:auto">' +
-      '<h3 style="font-size:0.85rem;font-weight:600;margin-bottom:0.75rem">Activity Feed</h3>' +
-      '<div id="network-feed" style="font-family:JetBrains Mono,monospace;font-size:0.7rem;color:var(--text-dim)">No activity yet</div>' +
-      '</div>' +
-      '</div>' +
-      '</div>' +
-      '</div></div>';
+      '</div></div></div>';
     wireSidebar();
 
     // Load D3.js and render network
@@ -2062,14 +2096,11 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     }
 
     function renderNetworkStats(stats) {
-      var el = document.getElementById("network-stats");
-      if (!el) return;
-      el.innerHTML =
-        '<div style="display:grid;gap:0.5rem">' +
-        '<div style="display:flex;justify-content:space-between"><span>Total Agents</span><span style="color:var(--text)">' + (stats.total_agents || 0) + '</span></div>' +
-        '<div style="display:flex;justify-content:space-between"><span>Online</span><span style="color:var(--green)">' + (stats.online_agents || 0) + '</span></div>' +
-        '<div style="display:flex;justify-content:space-between"><span>Connections</span><span style="color:var(--blue)">' + (stats.total_edges || 0) + '</span></div>' +
-        '</div>';
+      var el;
+      el = document.getElementById("ns-total"); if (el) el.textContent = stats.total_agents || 0;
+      el = document.getElementById("ns-online"); if (el) el.textContent = stats.online_agents || 0;
+      el = document.getElementById("ns-edges"); if (el) el.textContent = stats.total_edges || 0;
+      el = document.getElementById("ns-messages"); if (el) el.textContent = stats.total_messages || 0;
     }
 
     function renderNetworkGraph(data) {
@@ -2130,6 +2161,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
         var profile = document.getElementById("network-profile");
         if (!profile) return;
         profile.innerHTML =
+          '<div style="padding:12px">' +
           '<div style="margin-bottom:0.5rem"><strong style="color:var(--text)">' + esc(d.name || d.id) + '</strong></div>' +
           '<div>ID: ' + esc(d.id) + '</div>' +
           (d.description ? '<div style="margin-top:0.25rem">' + esc(d.description) + '</div>' : '') +
@@ -2139,7 +2171,8 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
           (d.skills && d.skills.length ? '<div style="margin-top:0.5rem">Skills: ' + d.skills.map(function(s){return '<span style="background:rgba(255,51,51,0.1);color:var(--accent);padding:1px 6px;border-radius:8px;font-size:0.65rem;margin:1px">' + esc(s) + '</span>';}).join(" ") + '</div>' : '') +
           (d.interests && d.interests.length ? '<div style="margin-top:0.25rem">Interests: ' + d.interests.map(function(s){return '<span style="background:rgba(68,136,255,0.1);color:var(--blue);padding:1px 6px;border-radius:8px;font-size:0.65rem;margin:1px">' + esc(s) + '</span>';}).join(" ") + '</div>' : '') +
           (d.capabilities && d.capabilities.length ? '<div style="margin-top:0.25rem">Capabilities: ' + d.capabilities.map(function(s){return '<span style="background:rgba(187,136,255,0.1);color:var(--purple);padding:1px 6px;border-radius:8px;font-size:0.65rem;margin:1px">' + esc(s) + '</span>';}).join(" ") + '</div>' : '') +
-          '<div style="margin-top:0.75rem"><a style="color:var(--accent);font-size:0.7rem;cursor:pointer" onclick="navigate(\'#/agents/' + d.id + '\')">View Full Profile</a></div>';
+          '<div style="margin-top:0.75rem"><a style="color:var(--accent);font-size:0.7rem;cursor:pointer" onclick="navigate(\'#/agents/' + d.id + '\')">View Full Profile</a></div>' +
+          '</div>';
       });
 
       // Hover tooltips
@@ -2166,11 +2199,12 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
             if (msg.type === "ping") { ws.send(JSON.stringify({type:"pong"})); return; }
             var feed = document.getElementById("network-feed");
             if (feed && msg.type !== "connected") {
-              var entry = '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)">' +
-                '<span style="color:var(--text-dim);font-size:0.65rem">' + new Date().toLocaleTimeString() + '</span> ' +
-                esc(msg.type || "event") +
-                '</div>';
-              feed.innerHTML = entry + feed.innerHTML;
+              var entry = document.createElement("div");
+              entry.className = "dash-activity-item";
+              entry.innerHTML = '<span class="dash-act-dot" style="background:var(--accent)"></span>' +
+                  '<span class="dash-act-text">' + esc(msg.type || "event") + '</span>' +
+                  '<span class="dash-act-time">' + new Date().toLocaleTimeString() + '</span>';
+              feed.insertBefore(entry, feed.firstChild);
               if (feed.children.length > 50) feed.removeChild(feed.lastChild);
             }
           } catch(e) {}
@@ -2196,8 +2230,11 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       '<div class="main-content">' +
       '<div class="page">' +
       renderBreadcrumb([{label:"MoltGrid",hash:"#/agents"},{label:"Activity"}]) +
-      '<h1 style="margin-bottom:1.5rem">Account Overview</h1>' +
-      '<div id="ov-content"><div class="loading-page"><span class="spinner"></span> Loading\u2026</div></div>' +
+      '<div class="dash-header"><div>' +
+      '<h1>Account Overview</h1>' +
+      '<p style="color:var(--text-dim);font-family:JetBrains Mono,monospace;font-size:0.78rem">Performance metrics and agent status</p>' +
+      '</div></div>' +
+      '<div id="ov-content"><div class="loading-page"><span class="spinner"></span> Loading...</div></div>' +
       '</div>' +
       '</div>' +
       '</div>' +
@@ -2223,26 +2260,31 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       }).join("");
 
       ov.innerHTML =
-        '<div class="overview-grid">' +
-        '<div class="ov-card"><div class="ov-val" style="color:var(--accent)">' + (d.total_agents || 0) + '</div><div class="ov-label">Total Agents</div></div>' +
-        '<div class="ov-card"><div class="ov-val" style="color:#00ff88">' + (d.online_count || 0) + '</div><div class="ov-label">Online Now</div></div>' +
-        '<div class="ov-card"><div class="ov-val" style="color:var(--purple)">' + ((t.messages_sent || 0) + (t.messages_received || 0)) + '</div><div class="ov-label">Total Messages</div></div>' +
-        '<div class="ov-card"><div class="ov-val" style="color:#64c8ff">' + (t.jobs_completed || 0) + '</div><div class="ov-label">Jobs Completed</div></div>' +
-        '<div class="ov-card"><div class="ov-val" style="color:var(--red)">' + (t.jobs_failed || 0) + '</div><div class="ov-label">Jobs Failed</div></div>' +
-        '<div class="ov-card"><div class="ov-val" style="color:var(--yellow)">' + (t.memory_keys || 0) + '</div><div class="ov-label">Memory Keys</div></div>' +
+        '<div class="dash-stats-row">' +
+        '<div class="dash-stat-card"><div class="dash-stat-label">Total Agents</div><div class="dash-stat-value" style="color:var(--accent)">' + (d.total_agents || 0) + '</div></div>' +
+        '<div class="dash-stat-card"><div class="dash-stat-label">Online Now</div><div class="dash-stat-value" style="color:var(--green)">' + (d.online_count || 0) + '</div></div>' +
+        '<div class="dash-stat-card"><div class="dash-stat-label">Total Messages</div><div class="dash-stat-value" style="color:var(--purple)">' + ((t.messages_sent || 0) + (t.messages_received || 0)) + '</div></div>' +
+        '<div class="dash-stat-card"><div class="dash-stat-label">Jobs Completed</div><div class="dash-stat-value" style="color:var(--blue)">' + (t.jobs_completed || 0) + '</div></div>' +
         '</div>' +
 
-        '<div class="section-title">30-Day Message Volume</div>' +
-        '<div class="chart-card" style="margin-bottom:1.5rem"><div class="chart-wrap" style="height:160px"><canvas id="ov-chart-msg"></canvas></div></div>' +
+        '<div class="dash-content-split" style="margin-bottom:1rem">' +
+        '<div class="dash-panel" style="flex:1">' +
+        '<div class="dash-panel-header"><span>30-Day Message Volume</span></div>' +
+        '<div style="padding:12px"><div class="chart-wrap" style="height:160px"><canvas id="ov-chart-msg"></canvas></div></div>' +
+        '</div>' +
+        '<div class="dash-panel" style="flex:1">' +
+        '<div class="dash-panel-header"><span>30-Day Job Outcomes</span></div>' +
+        '<div style="padding:12px"><div class="chart-wrap" style="height:160px"><canvas id="ov-chart-jobs"></canvas></div></div>' +
+        '</div>' +
+        '</div>' +
 
-        '<div class="section-title">30-Day Job Outcomes</div>' +
-        '<div class="chart-card" style="margin-bottom:1.5rem"><div class="chart-wrap" style="height:160px"><canvas id="ov-chart-jobs"></canvas></div></div>' +
-
-        '<div class="section-title">Agents</div>' +
-        '<div class="chart-card" style="overflow-x:auto">' +
+        '<div class="dash-panel">' +
+        '<div class="dash-panel-header"><span>Agents</span></div>' +
+        '<div style="overflow-x:auto">' +
         '<table class="agents-table"><thead><tr>' +
         '<th>Agent</th><th>Status</th><th>Last Seen</th><th style="text-align:right">Requests</th>' +
         '</tr></thead><tbody>' + (agentRows || '<tr><td colspan="4" style="color:var(--text-dim);text-align:center">No agents yet</td></tr>') + '</tbody></table>' +
+        '</div>' +
         '</div>';
 
       // Overview charts
