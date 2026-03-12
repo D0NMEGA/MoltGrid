@@ -149,6 +149,8 @@ app = FastAPI(
     "Persistent memory, task queues, message relay, and text utilities.",
     version="0.9.0",
     lifespan=lifespan,
+    docs_url="/api-docs",
+    redoc_url="/api-redoc",
 )
 
 
@@ -6407,6 +6409,21 @@ def session_delete(session_id: str, agent_id: str = Depends(get_agent_id)):
         if r.rowcount == 0:
             raise HTTPException(404, "Session not found")
     return {"status": "deleted", "session_id": session_id}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/docs", response_class=HTMLResponse, tags=["Documentation"], include_in_schema=False)
+def docs_page():
+    """Serve the comprehensive documentation page."""
+    html_path = _find_html("docs.html")
+    try:
+        with open(html_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(404, "Documentation page not found")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
