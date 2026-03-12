@@ -110,6 +110,9 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 if not SMTP_FROM or not SMTP_TO or not SMTP_PASSWORD:
     logger.warning("SMTP environment variables not set — contact form will be disabled.")
 
+# Cloudflare Turnstile CAPTCHA
+TURNSTILE_SECRET_KEY = os.getenv("TURNSTILE_SECRET_KEY", "")
+
 
 # ─── App ──────────────────────────────────────────────────────────────────────
 @asynccontextmanager
@@ -521,6 +524,13 @@ def init_db():
             FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
         );
         CREATE INDEX IF NOT EXISTS idx_pubsub_channel ON pubsub_subscriptions(channel);
+
+        CREATE TABLE IF NOT EXISTS password_resets (
+            token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
 
         CREATE TABLE IF NOT EXISTS analytics_events (
             id TEXT PRIMARY KEY,
@@ -1144,6 +1154,56 @@ def auth_logout(response: Response):
     return {"status": "logged_out"}
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., max_length=256)
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., max_length=256)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+@app.post("/v1/auth/forgot-password", tags=["Auth"])
+def auth_forgot_password(req: ForgotPasswordRequest):
+    """Send a password reset link to the user's email."""
+    with get_db() as db:
+        user_row = db.execute("SELECT user_id, email FROM users WHERE email = ?", (req.email,)).fetchone()
+    if not user_row:
+        # Don't reveal whether the email exists
+        return {"message": "If that email is registered, a reset link has been sent."}
+    reset_token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
+    with get_db() as db:
+        db.execute(
+            "INSERT OR REPLACE INTO password_resets (token, user_id, expires_at) VALUES (?, ?, ?)",
+            (reset_token, user_row["user_id"], expires.isoformat())
+        )
+    reset_url = f"https://api.moltgrid.net/dashboard#/reset-password?token={reset_token}"
+    reset_html = f"""
+    <html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+    <h1 style="color:#333">Reset your MoltGrid password</h1>
+    <p>Click the link below to reset your password. This link expires in 1 hour.</p>
+    <p><a href="{reset_url}" style="background:#ff3333;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block">Reset Password</a></p>
+    <p style="color:#666;font-size:0.85rem">If you didn't request this, ignore this email.</p>
+    </body></html>
+    """
+    _queue_email(user_row["email"], "Reset your MoltGrid password", reset_html)
+    return {"message": "If that email is registered, a reset link has been sent."}
+
+@app.post("/v1/auth/reset-password", tags=["Auth"])
+def auth_reset_password(req: ResetPasswordRequest):
+    """Reset password using a valid reset token."""
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        row = db.execute(
+            "SELECT user_id, expires_at FROM password_resets WHERE token = ?", (req.token,)
+        ).fetchone()
+        if not row or row["expires_at"] < now:
+            raise HTTPException(400, "Invalid or expired reset token")
+        pw_hash = _bcrypt.hashpw(req.new_password.encode(), _bcrypt.gensalt()).decode()
+        db.execute("UPDATE users SET password_hash = ? WHERE user_id = ?", (pw_hash, row["user_id"]))
+        db.execute("DELETE FROM password_resets WHERE token = ?", (req.token,))
+    return {"message": "Password reset successfully. You can now sign in."}
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # TOTP 2FA
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1313,11 +1373,11 @@ def user_overview(user_id: str = Depends(get_user_id)):
             agent_ids + [cutoff30]
         ).fetchone()["c"]
         jobs_completed = db.execute(
-            f"SELECT COUNT(*) as c FROM jobs WHERE agent_id IN ({placeholders}) AND status='completed' AND created_at >= ?",
+            f"SELECT COUNT(*) as c FROM queue WHERE agent_id IN ({placeholders}) AND status='completed' AND created_at >= ?",
             agent_ids + [cutoff30]
         ).fetchone()["c"]
         jobs_failed = db.execute(
-            f"SELECT COUNT(*) as c FROM jobs WHERE agent_id IN ({placeholders}) AND status='failed' AND created_at >= ?",
+            f"SELECT COUNT(*) as c FROM queue WHERE agent_id IN ({placeholders}) AND status='failed' AND created_at >= ?",
             agent_ids + [cutoff30]
         ).fetchone()["c"]
         memory_keys = db.execute(
@@ -1338,7 +1398,7 @@ def user_overview(user_id: str = Depends(get_user_id)):
             f"SELECT substr(created_at,1,10) as date, "
             f"SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed, "
             f"SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed "
-            f"FROM jobs WHERE agent_id IN ({placeholders}) AND created_at >= ? "
+            f"FROM queue WHERE agent_id IN ({placeholders}) AND created_at >= ? "
             f"GROUP BY date ORDER BY date",
             agent_ids + [cutoff30]
         ).fetchall()
@@ -6303,12 +6363,29 @@ class ContactForm(BaseModel):
     email: str
     subject: str = ""
     message: str
+    turnstile_token: Optional[str] = None
 
 @app.post("/v1/contact", tags=["System"])
 def submit_contact(form: ContactForm):
     """Public contact form submission — no auth required."""
     if not form.email or not form.message:
         raise HTTPException(400, "Email and message are required")
+    # Cloudflare Turnstile CAPTCHA verification
+    if TURNSTILE_SECRET_KEY and form.turnstile_token:
+        try:
+            ts_resp = httpx.post(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                data={"secret": TURNSTILE_SECRET_KEY, "response": form.turnstile_token},
+                timeout=10,
+            )
+            ts_result = ts_resp.json()
+            if not ts_result.get("success"):
+                raise HTTPException(400, "CAPTCHA verification failed")
+        except httpx.HTTPError:
+            logger.error("Turnstile verification request failed")
+            raise HTTPException(400, "CAPTCHA verification failed")
+    elif TURNSTILE_SECRET_KEY and not form.turnstile_token:
+        raise HTTPException(400, "CAPTCHA verification failed")
     now = datetime.now(timezone.utc).isoformat()
     submission_id = f"contact_{uuid.uuid4().hex[:12]}"
     with get_db() as db:

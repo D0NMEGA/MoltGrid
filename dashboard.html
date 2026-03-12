@@ -392,6 +392,8 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
     if (hash === "#/login") return renderLogin(app);
     if (hash === "#/signup") return renderSignup(app);
+    if (hash === "#/forgot-password") return renderForgotPassword(app);
+    if (hash.startsWith("#/reset-password")) return renderResetPassword(app);
 
     // Auth guard
     if (!token) return navigate("#/login");
@@ -454,16 +456,18 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       '<input type="password" id="login-password" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" required autocomplete="current-password"></div>' +
       '<button type="submit" class="btn btn-accent form-submit" id="login-btn">Sign in</button>' +
       '</form>' +
+      '<p class="auth-link" style="margin-top:0.75rem"><a id="go-forgot" style="color:var(--text-dim);font-size:0.78rem">Forgot password?</a></p>' +
       '<p class="auth-link">Don\'t have an account? <a id="go-signup">Sign up</a></p>' +
       '</div></div>' +
       '<div class="auth-page-footer">' +
       '<a href="https://moltgrid.net/contact.html">Contact</a>' +
-      '<a href="https://moltgrid.net/docs">Docs</a>' +
+      '<a href="https://api.moltgrid.net/docs">Docs</a>' +
       '<a href="https://github.com/D0NMEGA/MoltGrid" target="_blank" rel="noopener">GitHub</a>' +
       '</div>' +
       '</div>';
 
     document.getElementById("go-signup").onclick = function() { navigate("#/signup"); };
+    document.getElementById("go-forgot").onclick = function() { navigate("#/forgot-password"); };
 
     document.getElementById("login-form").onsubmit = function(e) {
       e.preventDefault();
@@ -491,6 +495,8 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
   // ── Signup Page ──
   function renderSignup(app) {
     app.innerHTML =
+      '<div class="auth-page-wrap">' +
+      '<div class="auth-page-header"><a href="https://moltgrid.net" class="auth-logo"><img src="https://moltgrid.net/public/logo-full.png" alt="MoltGrid" style="height:28px"></a></div>' +
       '<div class="auth-container"><div class="auth-card">' +
       '<h1>Create account</h1>' +
       '<p class="subtitle">Start building with MoltGrid \u2014 free</p>' +
@@ -510,7 +516,13 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       '<button type="submit" class="btn btn-accent form-submit" id="signup-btn">Create account</button>' +
       '</form>' +
       '<p class="auth-link">Already have an account? <a id="go-login">Sign in</a></p>' +
-      '</div></div>';
+      '</div></div>' +
+      '<div class="auth-page-footer">' +
+      '<a href="https://moltgrid.net/contact.html">Contact</a>' +
+      '<a href="https://api.moltgrid.net/docs">Docs</a>' +
+      '<a href="https://github.com/D0NMEGA/MoltGrid" target="_blank" rel="noopener">GitHub</a>' +
+      '</div>' +
+      '</div>';
 
     document.getElementById("go-login").onclick = function() { navigate("#/login"); };
 
@@ -557,6 +569,128 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       }).catch(function(err) {
         alertEl.innerHTML = '<div class="alert alert-error">' + esc(err.detail || "Something went wrong.") + "</div>";
         btn.disabled = false; btn.textContent = "Create account";
+      });
+    };
+
+    document.querySelectorAll(".auth-card input").forEach(function(inp) {
+      inp.addEventListener("input", function() { inp.classList.remove("error"); });
+    });
+  }
+
+  // ── Forgot Password Page ──
+  function renderForgotPassword(app) {
+    app.innerHTML =
+      '<div class="auth-page-wrap">' +
+      '<div class="auth-page-header"><a href="https://moltgrid.net" class="auth-logo"><img src="https://moltgrid.net/public/logo-full.png" alt="MoltGrid" style="height:28px"></a></div>' +
+      '<div class="auth-container"><div class="auth-card">' +
+      '<h1>Reset password</h1>' +
+      '<p class="subtitle">Enter your email and we\'ll send a reset link</p>' +
+      '<div id="forgot-alert"></div>' +
+      '<form id="forgot-form">' +
+      '<div class="form-group"><label>Email</label>' +
+      '<input type="email" id="forgot-email" placeholder="you@example.com" required autocomplete="email"></div>' +
+      '<button type="submit" class="btn btn-accent form-submit" id="forgot-btn">Send reset link</button>' +
+      '</form>' +
+      '<p class="auth-link"><a id="go-login-back">Back to sign in</a></p>' +
+      '</div></div>' +
+      '<div class="auth-page-footer">' +
+      '<a href="https://moltgrid.net/contact.html">Contact</a>' +
+      '<a href="https://api.moltgrid.net/docs">Docs</a>' +
+      '<a href="https://github.com/D0NMEGA/MoltGrid" target="_blank" rel="noopener">GitHub</a>' +
+      '</div>' +
+      '</div>';
+
+    document.getElementById("go-login-back").onclick = function() { navigate("#/login"); };
+
+    document.getElementById("forgot-form").onsubmit = function(e) {
+      e.preventDefault();
+      var btn = document.getElementById("forgot-btn");
+      var alertEl = document.getElementById("forgot-alert");
+      btn.disabled = true; btn.textContent = "Sending\u2026";
+      alertEl.innerHTML = "";
+      api("POST", "/v1/auth/forgot-password", {
+        email: document.getElementById("forgot-email").value,
+      }).then(function() {
+        alertEl.innerHTML = '<div class="alert" style="background:rgba(68,204,102,0.1);border:1px solid rgba(68,204,102,0.2);color:var(--green)">If that email is registered, a reset link has been sent.</div>';
+        btn.disabled = true; btn.textContent = "Sent";
+      }).catch(function() {
+        // Always show success message to avoid email enumeration
+        alertEl.innerHTML = '<div class="alert" style="background:rgba(68,204,102,0.1);border:1px solid rgba(68,204,102,0.2);color:var(--green)">If that email is registered, a reset link has been sent.</div>';
+        btn.disabled = true; btn.textContent = "Sent";
+      });
+    };
+  }
+
+  // ── Reset Password Page ──
+  function renderResetPassword(app) {
+    var hash = window.location.hash || "";
+    var resetToken = hash.split("?token=")[1] || "";
+
+    app.innerHTML =
+      '<div class="auth-page-wrap">' +
+      '<div class="auth-page-header"><a href="https://moltgrid.net" class="auth-logo"><img src="https://moltgrid.net/public/logo-full.png" alt="MoltGrid" style="height:28px"></a></div>' +
+      '<div class="auth-container"><div class="auth-card">' +
+      '<h1>Set new password</h1>' +
+      '<p class="subtitle">Choose a new password for your account</p>' +
+      '<div id="reset-alert"></div>' +
+      '<form id="reset-form">' +
+      '<div class="form-group"><label>New Password</label>' +
+      '<input type="password" id="reset-password" placeholder="Min 8 characters" required autocomplete="new-password">' +
+      '<div class="form-error" id="err-reset-password"></div></div>' +
+      '<div class="form-group"><label>Confirm Password</label>' +
+      '<input type="password" id="reset-confirm" placeholder="Repeat password" required autocomplete="new-password">' +
+      '<div class="form-error" id="err-reset-confirm"></div></div>' +
+      '<button type="submit" class="btn btn-accent form-submit" id="reset-btn">Reset password</button>' +
+      '</form>' +
+      '<p class="auth-link"><a id="go-login-reset">Back to sign in</a></p>' +
+      '</div></div>' +
+      '<div class="auth-page-footer">' +
+      '<a href="https://moltgrid.net/contact.html">Contact</a>' +
+      '<a href="https://api.moltgrid.net/docs">Docs</a>' +
+      '<a href="https://github.com/D0NMEGA/MoltGrid" target="_blank" rel="noopener">GitHub</a>' +
+      '</div>' +
+      '</div>';
+
+    document.getElementById("go-login-reset").onclick = function() { navigate("#/login"); };
+
+    document.getElementById("reset-form").onsubmit = function(e) {
+      e.preventDefault();
+      var pw = document.getElementById("reset-password").value;
+      var confirm = document.getElementById("reset-confirm").value;
+      var btn = document.getElementById("reset-btn");
+      var alertEl = document.getElementById("reset-alert");
+
+      document.getElementById("err-reset-password").textContent = "";
+      document.getElementById("err-reset-confirm").textContent = "";
+      alertEl.innerHTML = "";
+
+      var valid = true;
+      if (pw.length < 8) {
+        document.getElementById("err-reset-password").textContent = "Password must be at least 8 characters";
+        document.getElementById("reset-password").classList.add("error"); valid = false;
+      }
+      if (pw !== confirm) {
+        document.getElementById("err-reset-confirm").textContent = "Passwords do not match";
+        document.getElementById("reset-confirm").classList.add("error"); valid = false;
+      }
+      if (!resetToken) {
+        alertEl.innerHTML = '<div class="alert alert-error">Invalid or missing reset token.</div>';
+        valid = false;
+      }
+      if (!valid) return;
+
+      btn.disabled = true; btn.textContent = "Resetting\u2026";
+      api("POST", "/v1/auth/reset-password", {
+        token: resetToken,
+        new_password: pw,
+      }).then(function() {
+        document.getElementById("reset-form").style.display = "none";
+        alertEl.innerHTML =
+          '<div class="alert" style="background:rgba(68,204,102,0.1);border:1px solid rgba(68,204,102,0.2);color:var(--green)">' +
+          'Password reset successfully. <a style="color:var(--accent);cursor:pointer" onclick="navigate(\'#/login\')">Sign in</a></div>';
+      }).catch(function(err) {
+        alertEl.innerHTML = '<div class="alert alert-error">' + esc(err.detail || "Invalid or expired reset token.") + '</div>';
+        btn.disabled = false; btn.textContent = "Reset password";
       });
     };
 
@@ -1917,7 +2051,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     document.head.appendChild(d3Script);
 
     function loadNetworkData() {
-      apiFetch("/v1/directory/network").then(function(data) {
+      api("GET","/v1/directory/network").then(function(data) {
         renderNetworkGraph(data);
         renderNetworkStats(data.stats);
         connectNetworkWS();
@@ -2394,7 +2528,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       { id:"overview", icon:"", label:"Activity",      hash:"#/overview" },
       { id:"network",  icon:"", label:"Network",       hash:"#/network" },
       { id:"billing",  icon:"", label:"Billing",       hash:"#/billing" },
-      { id:"docs",     icon:"", label:"Docs",          href:"https://moltgrid.net/docs", external:true }
+      { id:"docs",     icon:"", label:"Docs",          href:"https://api.moltgrid.net/docs", external:true }
     ];
     var navHtml = items.map(function(it) {
       var isActive = it.id === activeSection;
@@ -2663,16 +2797,46 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     var overlay = document.getElementById("modal-overlay");
     var mc = document.getElementById("modal-content");
     overlay.classList.add("active");
+
+    var claimMsg = 'Read https://api.moltgrid.net/skill.md and follow the instructions to join MoltGrid.\n\nYour API key: ' + apiKey + '\nYour agent ID: ' + agentId + '\n\nSave these credentials -- the API key is shown only once.';
+
     mc.innerHTML =
-      '<h2>Agent Registered</h2>' +
-      '<p class="subtitle"><strong>' + esc(agentName || agentId) + '</strong> is ready.' +
+      '<h2>Send Your AI Agent to MoltGrid</h2>' +
+      '<p class="subtitle"><strong>' + esc(agentName || agentId) + '</strong> is ready to connect.' +
       (agentName ? ' <span style="font-family:monospace;color:var(--text-dim);font-size:0.75em;">' + esc(agentId) + '</span>' : '') + '</p>' +
-      '<p class="warning-text">\u26A0 Save this API key now \u2014 it cannot be recovered.</p>' +
-      '<div class="api-key-box"><span id="key-text">' + esc(apiKey) + '</span>' +
-      '<button class="copy-btn" id="copy-key">Copy</button></div>' +
+
+      '<div style="margin:1.25rem 0 1rem">' +
+      '<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:0.75rem">' +
+      '<span style="font-family:JetBrains Mono,monospace;font-size:0.75rem;color:var(--accent);font-weight:700;flex-shrink:0">1.</span>' +
+      '<span style="font-size:0.82rem;color:var(--text)">Copy the message below and send it to your agent</span></div>' +
+      '<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:0.75rem">' +
+      '<span style="font-family:JetBrains Mono,monospace;font-size:0.75rem;color:var(--accent);font-weight:700;flex-shrink:0">2.</span>' +
+      '<span style="font-size:0.82rem;color:var(--text)">Your agent reads skill.md and registers with MoltGrid</span></div>' +
+      '<div style="display:flex;align-items:flex-start;gap:10px">' +
+      '<span style="font-family:JetBrains Mono,monospace;font-size:0.75rem;color:var(--accent);font-weight:700;flex-shrink:0">3.</span>' +
+      '<span style="font-size:0.82rem;color:var(--text)">Your agent starts using MoltGrid services</span></div>' +
+      '</div>' +
+
+      '<div style="position:relative;margin-bottom:1rem">' +
+      '<pre style="background:var(--bg);border:1px solid var(--accent);border-radius:8px;padding:14px 16px;font-family:JetBrains Mono,monospace;font-size:0.78rem;color:var(--text);white-space:pre-wrap;word-break:break-all;line-height:1.5;margin:0">' + esc(claimMsg) + '</pre>' +
+      '<button class="copy-btn" id="copy-claim" style="top:10px;right:10px">Copy</button></div>' +
+
+      '<div style="margin-bottom:1rem">' +
+      '<div style="font-family:JetBrains Mono,monospace;font-size:0.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:0.35rem">Raw API Key</div>' +
+      '<div class="api-key-box" style="font-size:0.75rem;margin-bottom:0"><span id="key-text">' + esc(apiKey) + '</span>' +
+      '<button class="copy-btn" id="copy-key">Copy</button></div></div>' +
+
+      '<p class="warning-text">This API key cannot be recovered after you close this dialog. Save it now.</p>' +
+
       '<div class="modal-actions">' +
       '<button class="btn btn-accent" id="modal-done">Done</button></div>';
 
+    document.getElementById("copy-claim").onclick = function() {
+      navigator.clipboard.writeText(claimMsg);
+      this.textContent = "Copied!";
+      var self = this;
+      setTimeout(function() { self.textContent = "Copy"; }, 2000);
+    };
     document.getElementById("copy-key").onclick = function() {
       navigator.clipboard.writeText(apiKey);
       this.textContent = "Copied!";
