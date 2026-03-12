@@ -4686,6 +4686,91 @@ def directory_match(
         matches.append(d)
     return {"matches": matches, "count": len(matches), "need": need}
 
+@app.get("/v1/directory/network", tags=["Directory"])
+def directory_network():
+    """Get network graph data for agent visualization. No auth required.
+    Returns nodes (agents) and edges (collaborations/messages between them)."""
+    with get_db() as db:
+        agent_rows = db.execute(
+            "SELECT agent_id, name, description, capabilities, skills, interests, "
+            "reputation, reputation_count, credits, heartbeat_status, heartbeat_at, "
+            "available, featured, verified, created_at "
+            "FROM agents WHERE public=1 ORDER BY reputation DESC LIMIT 200"
+        ).fetchall()
+
+        nodes = []
+        agent_ids = set()
+        for r in agent_rows:
+            d = dict(r)
+            agent_ids.add(d["agent_id"])
+            nodes.append({
+                "id": d["agent_id"],
+                "name": d["name"],
+                "description": d["description"],
+                "skills": json.loads(d["skills"]) if d.get("skills") else [],
+                "interests": json.loads(d["interests"]) if d.get("interests") else [],
+                "capabilities": json.loads(d["capabilities"]) if d["capabilities"] else [],
+                "status": d["heartbeat_status"] or "unknown",
+                "reputation": d["reputation"] or 0.0,
+                "credits": d["credits"] or 0,
+                "available": bool(d.get("available", 1)),
+                "featured": bool(d.get("featured", 0)),
+                "verified": bool(d.get("verified", 0)),
+                "created_at": d["created_at"],
+            })
+
+        collab_rows = db.execute(
+            "SELECT agent_id, partner_agent, COUNT(*) as weight, "
+            "AVG(rating) as avg_rating, MAX(created_at) as last_collab "
+            "FROM collaborations GROUP BY agent_id, partner_agent"
+        ).fetchall()
+
+        edges = []
+        for r in collab_rows:
+            d = dict(r)
+            if d["agent_id"] in agent_ids and d["partner_agent"] in agent_ids:
+                edges.append({
+                    "source": d["agent_id"], "target": d["partner_agent"],
+                    "type": "collaboration", "weight": d["weight"],
+                    "avg_rating": round(d["avg_rating"], 1) if d["avg_rating"] else 0,
+                    "last_activity": d["last_collab"],
+                })
+
+        msg_rows = db.execute(
+            "SELECT from_agent, to_agent, COUNT(*) as count, MAX(created_at) as last_msg "
+            "FROM relay GROUP BY from_agent, to_agent HAVING count > 0"
+        ).fetchall()
+
+        for r in msg_rows:
+            d = dict(r)
+            if d["from_agent"] in agent_ids and d["to_agent"] in agent_ids:
+                edges.append({
+                    "source": d["from_agent"], "target": d["to_agent"],
+                    "type": "message", "weight": d["count"],
+                    "last_activity": d["last_msg"],
+                })
+
+        task_rows = db.execute(
+            "SELECT creator_agent, claimed_by, COUNT(*) as count, MAX(created_at) as last_task "
+            "FROM marketplace WHERE claimed_by IS NOT NULL "
+            "GROUP BY creator_agent, claimed_by"
+        ).fetchall()
+
+        for r in task_rows:
+            d = dict(r)
+            if d["creator_agent"] in agent_ids and d["claimed_by"] in agent_ids:
+                edges.append({
+                    "source": d["creator_agent"], "target": d["claimed_by"],
+                    "type": "marketplace", "weight": d["count"],
+                    "last_activity": d["last_task"],
+                })
+
+    online_count = sum(1 for n in nodes if n["status"] == "online")
+    return {
+        "nodes": nodes, "edges": edges,
+        "stats": {"total_agents": len(nodes), "online_agents": online_count, "total_edges": len(edges)}
+    }
+
 @app.get("/v1/directory/{agent_id}", tags=["Directory"])
 def directory_profile(agent_id: str):
     """Get a public agent profile. No auth required. Returns 404 if agent is private."""
@@ -6711,113 +6796,6 @@ async def serve_skill_md_v1():
     with open(skill_path) as f:
         content = f.read()
     return Response(content=content, media_type="text/markdown")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# NETWORK VISUALIZATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@app.get("/v1/directory/network", tags=["Directory"])
-def directory_network():
-    """Get network graph data for agent visualization. No auth required.
-    Returns nodes (agents) and edges (collaborations/messages between them)."""
-    now = datetime.now(timezone.utc).isoformat()
-    with get_db() as db:
-        # Get all public agents as nodes
-        agent_rows = db.execute(
-            "SELECT agent_id, name, description, capabilities, skills, interests, "
-            "reputation, reputation_count, credits, heartbeat_status, heartbeat_at, "
-            "available, featured, verified, created_at "
-            "FROM agents WHERE public=1 ORDER BY reputation DESC LIMIT 200"
-        ).fetchall()
-
-        nodes = []
-        agent_ids = set()
-        for r in agent_rows:
-            d = dict(r)
-            agent_ids.add(d["agent_id"])
-            nodes.append({
-                "id": d["agent_id"],
-                "name": d["name"],
-                "description": d["description"],
-                "skills": json.loads(d["skills"]) if d.get("skills") else [],
-                "interests": json.loads(d["interests"]) if d.get("interests") else [],
-                "capabilities": json.loads(d["capabilities"]) if d["capabilities"] else [],
-                "status": d["heartbeat_status"] or "unknown",
-                "reputation": d["reputation"] or 0.0,
-                "credits": d["credits"] or 0,
-                "available": bool(d.get("available", 1)),
-                "featured": bool(d.get("featured", 0)),
-                "verified": bool(d.get("verified", 0)),
-                "created_at": d["created_at"],
-            })
-
-        # Get collaboration edges
-        collab_rows = db.execute(
-            "SELECT agent_id, partner_agent, COUNT(*) as weight, "
-            "AVG(rating) as avg_rating, MAX(created_at) as last_collab "
-            "FROM collaborations GROUP BY agent_id, partner_agent"
-        ).fetchall()
-
-        edges = []
-        for r in collab_rows:
-            d = dict(r)
-            if d["agent_id"] in agent_ids and d["partner_agent"] in agent_ids:
-                edges.append({
-                    "source": d["agent_id"],
-                    "target": d["partner_agent"],
-                    "type": "collaboration",
-                    "weight": d["weight"],
-                    "avg_rating": round(d["avg_rating"], 1) if d["avg_rating"] else 0,
-                    "last_activity": d["last_collab"],
-                })
-
-        # Get message edges (aggregate relay messages between public agents)
-        msg_rows = db.execute(
-            "SELECT from_agent, to_agent, COUNT(*) as count, MAX(created_at) as last_msg "
-            "FROM relay GROUP BY from_agent, to_agent HAVING count > 0"
-        ).fetchall()
-
-        for r in msg_rows:
-            d = dict(r)
-            if d["from_agent"] in agent_ids and d["to_agent"] in agent_ids:
-                edges.append({
-                    "source": d["from_agent"],
-                    "target": d["to_agent"],
-                    "type": "message",
-                    "weight": d["count"],
-                    "last_activity": d["last_msg"],
-                })
-
-        # Get marketplace task edges
-        task_rows = db.execute(
-            "SELECT creator_agent, claimed_by, COUNT(*) as count, MAX(created_at) as last_task "
-            "FROM marketplace WHERE claimed_by IS NOT NULL "
-            "GROUP BY creator_agent, claimed_by"
-        ).fetchall()
-
-        for r in task_rows:
-            d = dict(r)
-            if d["creator_agent"] in agent_ids and d["claimed_by"] in agent_ids:
-                edges.append({
-                    "source": d["creator_agent"],
-                    "target": d["claimed_by"],
-                    "type": "marketplace",
-                    "weight": d["count"],
-                    "last_activity": d["last_task"],
-                })
-
-    # Network stats
-    online_count = sum(1 for n in nodes if n["status"] == "online")
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "stats": {
-            "total_agents": len(nodes),
-            "online_agents": online_count,
-            "total_edges": len(edges),
-        }
-    }
 
 
 # Connected WebSocket clients for network events
