@@ -121,6 +121,22 @@ if not SMTP_FROM or not SMTP_TO or not SMTP_PASSWORD:
 # Cloudflare Turnstile CAPTCHA
 TURNSTILE_SECRET_KEY = os.getenv("TURNSTILE_SECRET_KEY", "")
 
+# IP-based auth rate limiting (brute-force protection)
+_auth_rate_limits: dict = {}  # ip -> [timestamps]
+AUTH_RATE_LIMIT_MAX = 10      # max attempts per window
+AUTH_RATE_LIMIT_WINDOW = 300  # 5-minute window (seconds)
+
+def _check_auth_rate_limit(request: "Request"):
+    """Block auth attempts if IP exceeds 10 requests per 5 minutes."""
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or request.client.host if request.client else "unknown"
+    now = time.time()
+    attempts = _auth_rate_limits.get(ip, [])
+    attempts = [t for t in attempts if now - t < AUTH_RATE_LIMIT_WINDOW]
+    if len(attempts) >= AUTH_RATE_LIMIT_MAX:
+        raise HTTPException(429, "Too many authentication attempts. Try again in a few minutes.")
+    attempts.append(now)
+    _auth_rate_limits[ip] = attempts
+
 
 # ─── App ──────────────────────────────────────────────────────────────────────
 @asynccontextmanager
@@ -1050,7 +1066,8 @@ class LoginRequest(BaseModel):
     turnstile_token: Optional[str] = None
 
 @app.post("/v1/auth/signup", tags=["Auth"])
-def auth_signup(req: SignupRequest, response: Response):
+def auth_signup(req: SignupRequest, request: Request, response: Response):
+    _check_auth_rate_limit(request)
     _verify_turnstile(req.turnstile_token)
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
@@ -1116,6 +1133,7 @@ def auth_signup(req: SignupRequest, response: Response):
 
 @app.post("/v1/auth/login", tags=["Auth"])
 def auth_login(req: LoginRequest, request: Request, response: Response):
+    _check_auth_rate_limit(request)
     _verify_turnstile(req.turnstile_token)
     with get_db() as db:
         row = db.execute("SELECT user_id, password_hash FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
@@ -1241,8 +1259,9 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
 
 @app.post("/v1/auth/forgot-password", tags=["Auth"])
-def auth_forgot_password(req: ForgotPasswordRequest):
+def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
     """Send a password reset link to the user's email."""
+    _check_auth_rate_limit(request)
     with get_db() as db:
         user_row = db.execute("SELECT user_id, email FROM users WHERE email = ?", (req.email,)).fetchone()
     if not user_row:
@@ -5847,8 +5866,9 @@ class AdminLoginRequest(BaseModel):
     password: str
 
 @app.post("/admin/api/login", tags=["Admin"])
-def admin_login(req: AdminLoginRequest, response: Response):
+def admin_login(req: AdminLoginRequest, request: Request, response: Response):
     """Authenticate admin and set session cookie."""
+    _check_auth_rate_limit(request)
     if not ADMIN_PASSWORD_HASH:
         raise HTTPException(503, "Admin not configured. Set ADMIN_PASSWORD_HASH env var.")
     # Support bcrypt hashes (start with $2) with SHA-256 fallback for backward compat
