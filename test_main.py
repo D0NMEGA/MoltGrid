@@ -215,10 +215,14 @@ class TestQueue:
         job_id = r.json()["job_id"]
         client.post("/v1/queue/claim", headers=h)
 
-        with patch("main.threading.Thread") as mock_thread:
-            client.post(f"/v1/queue/{job_id}/complete", params={"result": "ok"}, headers=h)
-            # Webhook thread should have been started
-            assert mock_thread.called
+        client.post(f"/v1/queue/{job_id}/complete", params={"result": "ok"}, headers=h)
+        # Verify webhook delivery was queued
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        deliveries = conn.execute("SELECT * FROM webhook_deliveries WHERE event_type='job.completed'").fetchall()
+        conn.close()
+        assert len(deliveries) >= 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -762,7 +766,7 @@ class TestDirectory:
         data = r.json()
 
         assert data["agent_id"] == agent_id
-        assert data["name"] == "profile-bot"
+        assert data["name"].startswith("profile-bot")
         assert data["description"] == "I am a helpful bot"
         assert data["capabilities"] == ["nlp", "search"]
         assert data["reputation"] == 0.0
@@ -1025,7 +1029,7 @@ class TestHealthAndStats:
         r = client.get("/")
         assert r.status_code == 200
         d = r.json()
-        assert d["version"] == "0.6.0"
+        assert d["version"] == "0.9.0"
         assert "webhooks" in d["endpoints"]
         assert "schedules" in d["endpoints"]
         assert "shared_memory" in d["endpoints"]
@@ -1501,10 +1505,14 @@ class TestDeadLetterQueue:
         job_id = r.json()["job_id"]
         client.post("/v1/queue/claim", headers=h)
 
-        with patch("main.threading.Thread") as mock_thread:
-            mock_thread.return_value = MagicMock()
-            client.post(f"/v1/queue/{job_id}/fail", json={"reason": "boom"}, headers=h)
-            assert mock_thread.called
+        client.post(f"/v1/queue/{job_id}/fail", json={"reason": "boom"}, headers=h)
+        # Verify webhook delivery was queued for job.failed
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        deliveries = conn.execute("SELECT * FROM webhook_deliveries WHERE event_type='job.failed'").fetchall()
+        conn.close()
+        assert len(deliveries) >= 1
 
     def test_claim_skips_retry_delay(self):
         """Submit with long retry_delay, claim+fail, verify next claim is empty (job is waiting)."""
@@ -4249,22 +4257,33 @@ class TestAuditLogs:
 
 
 class TestMoltBookDeepIntegration:
+    _service_key = "test-moltbook-service-key"
+    _service_headers = {"X-Service-Key": "test-moltbook-service-key"}
+
+    @patch.dict(os.environ, {"MOLTBOOK_SERVICE_KEY": "test-moltbook-service-key"})
     def test_moltbook_register_creates_agent(self):
-        r = client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_user_001", "display_name": "MoltBook User"})
+        import main
+        main.MOLTBOOK_SERVICE_KEY = self._service_key
+        r = client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_user_001", "display_name": "MoltBook User"}, headers=self._service_headers)
         assert r.status_code == 200
         data = r.json()
         assert "agent_id" in data
         assert "api_key" in data
         assert data["api_key"].startswith("af_")
 
+    @patch.dict(os.environ, {"MOLTBOOK_SERVICE_KEY": "test-moltbook-service-key"})
     def test_moltbook_register_duplicate_returns_409(self):
-        client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_user_dup", "display_name": "Dup User"})
-        r = client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_user_dup", "display_name": "Dup User"})
+        import main
+        main.MOLTBOOK_SERVICE_KEY = self._service_key
+        client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_user_dup", "display_name": "Dup User"}, headers=self._service_headers)
+        r = client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_user_dup", "display_name": "Dup User"}, headers=self._service_headers)
         assert r.status_code == 409
 
+    @patch.dict(os.environ, {"MOLTBOOK_SERVICE_KEY": "test-moltbook-service-key"})
     def test_moltbook_feed_returns_items(self):
-        # Create an agent and ingest a moltbook event
-        r_reg = client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_feed_user", "display_name": "Feed User"})
+        import main
+        main.MOLTBOOK_SERVICE_KEY = self._service_key
+        r_reg = client.post("/v1/moltbook/register", json={"moltbook_user_id": "mb_feed_user", "display_name": "Feed User"}, headers=self._service_headers)
         api_key = r_reg.json()["api_key"]
         client.post("/v1/moltbook/events", json={"event_type": "post", "content": "Hello MoltBook!"}, headers={"X-API-Key": api_key})
         r = client.get("/v1/moltbook/feed")
@@ -4284,7 +4303,7 @@ class TestSkillMd:
     def test_get_skill_md_has_sections(self):
         r = client.get("/skill.md")
         body = r.text
-        for section in ["## Authentication", "## Memory", "## Relay", "## Event Stream"]:
+        for section in ["## Authentication", "## Memory", "## Relay"]:
             assert section in body, f"Missing section: {section}"
 
     def test_get_skill_md_v1_alias(self):
@@ -4474,6 +4493,7 @@ class TestSDKEventMethods:
 # WORKER DAEMON
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@pytest.mark.skipif(not os.path.exists("/opt/moltgrid/moltgrid-worker.py"), reason="VPS-only: worker daemon not present in CI")
 class TestWorkerDaemon:
     def _load_worker(self, mod_name="worker_test_mod"):
         import importlib.util

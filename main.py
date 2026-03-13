@@ -3604,6 +3604,7 @@ def queue_fail(job_id: str, req: QueueFailRequest, agent_id: str = Depends(get_a
     """Report a job as failed. Retries if attempts remain, otherwise moves to dead-letter queue."""
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
+    fire_webhook_data = None
     with get_db() as db:
         row = db.execute(
             "SELECT * FROM queue WHERE job_id=? AND status='processing'", (job_id,)
@@ -3627,11 +3628,8 @@ def queue_fail(job_id: str, req: QueueFailRequest, agent_id: str = Depends(get_a
                  row["result"], max_att, attempt, delay, now_iso, req.reason, now_iso)
             )
             db.execute("DELETE FROM queue WHERE job_id=?", (job_id,))
-            _fire_webhooks(row["agent_id"], "job.failed", {
-                "job_id": job_id, "queue_name": row["queue_name"],
-                "reason": req.reason, "attempts": attempt, "dead_lettered": True,
-            })
-            return {"job_id": job_id, "status": "dead_lettered", "attempts": attempt, "max_attempts": max_att}
+            fire_webhook_data = (row["agent_id"], row["queue_name"])
+            result = {"job_id": job_id, "status": "dead_lettered", "attempts": attempt, "max_attempts": max_att}
         else:
             # Retry: set back to pending with delay
             next_retry = (now + timedelta(seconds=delay)).isoformat() if delay > 0 else None
@@ -3640,8 +3638,16 @@ def queue_fail(job_id: str, req: QueueFailRequest, agent_id: str = Depends(get_a
                 "failed_at=?, fail_reason=?, next_retry_at=? WHERE job_id=?",
                 (attempt, now_iso, req.reason, next_retry, job_id)
             )
-            return {"job_id": job_id, "status": "pending_retry", "attempts": attempt,
+            result = {"job_id": job_id, "status": "pending_retry", "attempts": attempt,
                     "max_attempts": max_att, "next_retry_at": next_retry}
+
+    # Fire webhooks OUTSIDE the db context to avoid database locking
+    if fire_webhook_data:
+        _fire_webhooks(fire_webhook_data[0], "job.failed", {
+            "job_id": job_id, "queue_name": fire_webhook_data[1],
+            "reason": req.reason, "attempts": attempt, "dead_lettered": True,
+        })
+    return result
 
 @app.post("/v1/queue/{job_id}/replay", tags=["Queue"])
 def queue_replay(job_id: str, agent_id: str = Depends(get_agent_id)):
