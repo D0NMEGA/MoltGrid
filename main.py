@@ -6497,6 +6497,24 @@ def docs_page():
     except FileNotFoundError:
         raise HTTPException(404, "Documentation page not found")
 
+@app.get("/privacy", response_class=HTMLResponse, tags=["System"], include_in_schema=False)
+def privacy_page():
+    """Serve the privacy policy page."""
+    try:
+        with open(_find_html("privacy.html"), "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(404, "Privacy policy not found")
+
+@app.get("/terms", response_class=HTMLResponse, tags=["System"], include_in_schema=False)
+def terms_page():
+    """Serve the terms of service page."""
+    try:
+        with open(_find_html("terms.html"), "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(404, "Terms of service not found")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONTACT
