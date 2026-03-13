@@ -992,18 +992,38 @@ async def get_optional_user_id(request: Request) -> Optional[str]:
 # USER AUTH (JWT)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _verify_turnstile(token: Optional[str]):
+    """Verify Cloudflare Turnstile CAPTCHA token. Skips if not configured."""
+    if not TURNSTILE_SECRET_KEY:
+        return
+    if not token:
+        raise HTTPException(400, "CAPTCHA verification required")
+    try:
+        ts_resp = httpx.post(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data={"secret": TURNSTILE_SECRET_KEY, "response": token},
+            timeout=10,
+        )
+        if not ts_resp.json().get("success"):
+            raise HTTPException(400, "CAPTCHA verification failed")
+    except httpx.HTTPError:
+        raise HTTPException(400, "CAPTCHA verification failed")
+
 class SignupRequest(BaseModel):
     email: str = Field(..., max_length=256)
     password: str = Field(..., min_length=6, max_length=128)
     display_name: Optional[str] = Field(None, max_length=64)
+    turnstile_token: Optional[str] = None
 
 class LoginRequest(BaseModel):
     email: str = Field(..., max_length=256)
     password: str = Field(..., max_length=128)
     totp_code: Optional[str] = Field(None, max_length=16)
+    turnstile_token: Optional[str] = None
 
 @app.post("/v1/auth/signup", tags=["Auth"])
 def auth_signup(req: SignupRequest, response: Response):
+    _verify_turnstile(req.turnstile_token)
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
     pw_hash = _bcrypt.hashpw(req.password.encode(), _bcrypt.gensalt()).decode()
@@ -1021,26 +1041,24 @@ def auth_signup(req: SignupRequest, response: Response):
 
     # Queue welcome email OUTSIDE get_db() block to avoid nested lock
     if send_welcome:
-        welcome_html = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h1 style="color: #333;">Welcome to MoltGrid!</h1>
-            <p>Hi {req.display_name or 'there'},</p>
-            <p>Your agent infrastructure is ready. Here's how to get started:</p>
-            <ol>
-                <li><strong>Register your first agent:</strong> POST /v1/register</li>
-                <li><strong>Store persistent memory:</strong> POST /v1/memory</li>
-                <li><strong>Send messages between agents:</strong> POST /v1/relay/send</li>
-                <li><strong>Queue background jobs:</strong> POST /v1/queue/submit</li>
-            </ol>
-            <p><a href="https://moltgrid.net/dashboard" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Go to Dashboard</a></p>
-            <p><a href="https://api.moltgrid.net/docs">View Full API Documentation</a></p>
-            <p>Questions? Reply to this email or check our <a href="https://github.com/D0NMEGA/MoltGrid">GitHub</a>.</p>
-            <p>Happy building!<br>The MoltGrid Team</p>
-        </body>
-        </html>
-        """
-        _queue_email(req.email.lower(), "Welcome to MoltGrid — your agent infrastructure is ready", welcome_html)
+        welcome_body = f'''
+<p style="color:#e4e4ef;">Hi {req.display_name or 'there'},</p>
+<p style="color:#e4e4ef;">Your agent infrastructure is ready. Here's how to get started:</p>
+<ol style="color:#e4e4ef;padding-left:20px;">
+<li style="margin-bottom:8px;"><strong>Register your first agent:</strong> POST /v1/register</li>
+<li style="margin-bottom:8px;"><strong>Store persistent memory:</strong> POST /v1/memory</li>
+<li style="margin-bottom:8px;"><strong>Send messages between agents:</strong> POST /v1/relay/send</li>
+<li style="margin-bottom:8px;"><strong>Queue background jobs:</strong> POST /v1/queue/submit</li>
+</ol>
+<p style="margin-top:20px;">
+<a href="https://api.moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Go to Dashboard</a>
+</p>
+<p style="color:#7a7a92;font-size:13px;margin-top:16px;">
+<a href="https://api.moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">View Full Documentation</a> &nbsp;&middot;&nbsp;
+<a href="https://github.com/D0NMEGA/MoltGrid" style="color:#ff3333;text-decoration:none;">GitHub</a>
+</p>
+'''
+        _queue_email(req.email.lower(), "Welcome to MoltGrid — your agent infrastructure is ready", _branded_email("Welcome to MoltGrid!", welcome_body))
 
     token = _create_token(user_id, req.email.lower())
     _track_event("user.signup", user_id=user_id)
@@ -1070,6 +1088,7 @@ def auth_signup(req: SignupRequest, response: Response):
 
 @app.post("/v1/auth/login", tags=["Auth"])
 def auth_login(req: LoginRequest, request: Request, response: Response):
+    _verify_turnstile(req.turnstile_token)
     with get_db() as db:
         row = db.execute("SELECT user_id, password_hash FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
         if not row or not _bcrypt.checkpw(req.password.encode(), row["password_hash"].encode()):
@@ -4141,6 +4160,49 @@ def _usage_reset_loop():
 
 # ─── Email Notifications ──────────────────────────────────────────────────────
 
+def _branded_email(title: str, body_content: str) -> str:
+    """Generate a branded MoltGrid HTML email with dark theme, logo, header, and footer."""
+    return f'''<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#0a0a0f;font-family:'Helvetica Neue',Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0f;padding:40px 20px;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#12121a;border:1px solid #2a2a3a;border-radius:12px;overflow:hidden;">
+<!-- Header -->
+<tr><td style="padding:24px 32px;border-bottom:1px solid #2a2a3a;background:#12121a;">
+<img src="https://moltgrid.net/public/logo-full.png" alt="MoltGrid" height="28" style="display:block;">
+</td></tr>
+<!-- Title -->
+<tr><td style="padding:32px 32px 16px;color:#e4e4ef;font-size:22px;font-weight:700;">
+{title}
+</td></tr>
+<!-- Body -->
+<tr><td style="padding:0 32px 32px;color:#e4e4ef;font-size:15px;line-height:1.7;">
+{body_content}
+</td></tr>
+<!-- Footer -->
+<tr><td style="padding:20px 32px;border-top:1px solid #2a2a3a;background:#0a0a0f;">
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="color:#7a7a92;font-size:12px;">
+<a href="https://moltgrid.net" style="color:#ff3333;text-decoration:none;">moltgrid.net</a> &nbsp;&middot;&nbsp;
+<a href="https://api.moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">Docs</a> &nbsp;&middot;&nbsp;
+<a href="https://github.com/D0NMEGA/MoltGrid" style="color:#ff3333;text-decoration:none;">GitHub</a> &nbsp;&middot;&nbsp;
+<a href="https://api.moltgrid.net/dashboard" style="color:#ff3333;text-decoration:none;">Dashboard</a>
+</td></tr>
+<tr><td style="color:#7a7a92;font-size:11px;padding-top:12px;">
+MoltGrid &mdash; Infrastructure for Autonomous Agents<br>
+<a href="https://api.moltgrid.net/privacy" style="color:#7a7a92;text-decoration:none;">Privacy Policy</a> &nbsp;&middot;&nbsp;
+<a href="https://api.moltgrid.net/terms" style="color:#7a7a92;text-decoration:none;">Terms of Service</a>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>'''
+
 def _queue_email(to_email: str, subject: str, body_html: str):
     """Queue an email for sending. Uses independent connection to avoid nested locks."""
     email_id = f"email_{uuid.uuid4().hex[:16]}"
@@ -6565,26 +6627,36 @@ def submit_contact(form: ContactForm):
             "INSERT INTO contact_submissions (id, name, email, subject, message, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (submission_id, form.name, form.email, form.subject, form.message, now)
         )
-    # Send email via SMTP (Hostinger / configurable provider)
-    if SMTP_PASSWORD:
-        try:
-            msg = MIMEMultipart()
-            msg["From"] = SMTP_FROM
-            msg["To"] = SMTP_TO
-            msg["Subject"] = f"MoltGrid Contact: {form.subject or 'No subject'}"
-            body = (
-                f"Name: {form.name or 'Not provided'}\n"
-                f"Email: {form.email}\n"
-                f"Subject: {form.subject or 'Not provided'}\n\n"
-                f"Message:\n{form.message}"
-            )
-            msg.attach(MIMEText(body, "plain"))
-            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
-                server.login(SMTP_FROM, SMTP_PASSWORD)
-                server.sendmail(SMTP_FROM, SMTP_TO, msg.as_string())
-            logger.info(f"Contact email sent: {submission_id}")
-        except Exception as e:
-            logger.error(f"Failed to send contact email: {e}")
+    # Send confirmation email to the person who submitted the form
+    confirm_body = f'''
+<p style="color:#e4e4ef;">Hi {form.name or 'there'},</p>
+<p style="color:#e4e4ef;">Thank you for reaching out to MoltGrid. We've received your message and will get back to you shortly.</p>
+<div style="background:#1a1a26;border:1px solid #2a2a3a;border-radius:8px;padding:16px 20px;margin:16px 0;">
+<p style="color:#7a7a92;font-size:12px;margin:0 0 8px;text-transform:uppercase;letter-spacing:1px;">Your message</p>
+<p style="color:#e4e4ef;margin:0 0 4px;"><strong>Subject:</strong> {form.subject or "No subject"}</p>
+<p style="color:#e4e4ef;margin:0;white-space:pre-wrap;">{form.message}</p>
+</div>
+<p style="color:#7a7a92;font-size:13px;">If you need immediate help, check our <a href="https://api.moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">documentation</a>.</p>
+'''
+    _queue_email(form.email, "We received your message — MoltGrid", _branded_email("Message Received", confirm_body))
+
+    # Send the actual message to the team at don.mega306@gmail.com
+    team_body = f'''
+<p style="color:#e4e4ef;"><strong>New contact form submission</strong></p>
+<div style="background:#1a1a26;border:1px solid #2a2a3a;border-radius:8px;padding:16px 20px;margin:16px 0;">
+<table style="width:100%;border-collapse:collapse;">
+<tr><td style="color:#7a7a92;padding:4px 12px 4px 0;font-size:13px;white-space:nowrap;">Name</td><td style="color:#e4e4ef;padding:4px 0;font-size:14px;">{form.name or "Not provided"}</td></tr>
+<tr><td style="color:#7a7a92;padding:4px 12px 4px 0;font-size:13px;white-space:nowrap;">Email</td><td style="color:#e4e4ef;padding:4px 0;font-size:14px;"><a href="mailto:{form.email}" style="color:#ff3333;">{form.email}</a></td></tr>
+<tr><td style="color:#7a7a92;padding:4px 12px 4px 0;font-size:13px;white-space:nowrap;">Subject</td><td style="color:#e4e4ef;padding:4px 0;font-size:14px;">{form.subject or "No subject"}</td></tr>
+</table>
+</div>
+<div style="background:#1a1a26;border:1px solid #2a2a3a;border-radius:8px;padding:16px 20px;margin:16px 0;">
+<p style="color:#7a7a92;font-size:12px;margin:0 0 8px;text-transform:uppercase;letter-spacing:1px;">Message</p>
+<p style="color:#e4e4ef;margin:0;white-space:pre-wrap;">{form.message}</p>
+</div>
+<p style="color:#7a7a92;font-size:12px;">Submission ID: {submission_id}</p>
+'''
+    _queue_email("don.mega306@gmail.com", f"MoltGrid Contact: {form.subject or 'No subject'}", _branded_email("New Contact Submission", team_body))
     return {"status": "sent", "id": submission_id}
 
 # ═══════════════════════════════════════════════════════════════════════════════
