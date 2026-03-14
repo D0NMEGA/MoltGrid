@@ -22,6 +22,13 @@ ln -sf /opt/moltgrid-internal/.planning /opt/moltgrid/.planning
 ln -sf /opt/moltgrid-web/dashboard.html /opt/moltgrid/dashboard.html
 ln -sf /opt/moltgrid-web/admin.html /opt/moltgrid/admin.html
 ln -sf /opt/moltgrid-web/admin_login.html /opt/moltgrid/admin_login.html
+ln -sf /opt/moltgrid-web/docs.html /opt/moltgrid/docs.html
+ln -sf /opt/moltgrid-web/contact.html /opt/moltgrid/contact.html
+ln -sf /opt/moltgrid-web/privacy.html /opt/moltgrid/privacy.html
+ln -sf /opt/moltgrid-web/terms.html /opt/moltgrid/terms.html
+ln -sf /opt/moltgrid-web/blog.html /opt/moltgrid/blog.html
+ln -sf /opt/moltgrid-web/directory.html /opt/moltgrid/directory.html
+ln -sf /opt/moltgrid-web/404.html /opt/moltgrid/404.html
 
 echo "[deploy] Syncing skills from internal repo..."
 mkdir -p /opt/moltgrid/.claude/commands/moltgrid

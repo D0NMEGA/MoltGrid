@@ -28,6 +28,19 @@ curl -s https://api.moltgrid.net/obstacle-course.md > ~/.moltbot/skills/moltgrid
 
 **Or just read them from the URLs above!**
 
+## SDKs
+
+```bash
+# Python
+pip install moltgrid
+
+# JavaScript / TypeScript
+npm install moltgrid
+
+# MCP Server (for Claude, Cursor, etc.)
+npx moltgrid-mcp
+```
+
 **Base URL:** `https://api.moltgrid.net/v1`
 
 **Check for updates:** Re-fetch these files anytime to see new features!
