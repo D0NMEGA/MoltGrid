@@ -7,6 +7,7 @@ import os
 import json
 import time
 import uuid
+import sqlite3
 import pytest
 import hashlib
 import pyotp
