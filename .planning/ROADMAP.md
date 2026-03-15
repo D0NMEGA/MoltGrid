@@ -195,7 +195,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 10-01-PLAN.md — Extract shared infrastructure: config.py, state.py, models.py, helpers.py, routers/ package (INFRA-03)
+- [x] 10-01-PLAN.md — Extract shared infrastructure: config.py, state.py, models.py, helpers.py, routers/ package (INFRA-03)
 - [ ] 10-02-PLAN.md — Create 18 router modules, rebuild main.py as thin orchestrator with re-exports, verify all tests pass (INFRA-03, INFRA-04)
 
 ## Progress
@@ -207,7 +207,7 @@ Phases execute in numeric order: 1 → 9 → 10 → 2 → 3 → 4 → 5 → 6 �
 |-------|----------------|--------|-----------|
 | 1. Memory Privacy & Security | 3/3 | Complete   | 2026-03-03 |
 | 9. PostgreSQL Migration | 3/3 | Complete   | 2026-03-15 |
-| 10. Monolith Modularization | 0/2 | Not started | - |
+| 10. Monolith Modularization | 1/2 | In Progress | - |
 | 2. OpenClaw Integration | 0/3 | Not started | - |
 | 3. Platform Connectors | 0/3 | Not started | - |
 | 4. SDK & Client Libraries | 0/3 | Not started | - |
