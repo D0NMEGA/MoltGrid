@@ -709,7 +709,7 @@ def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
     expires = datetime.now(timezone.utc) + timedelta(hours=1)
     with get_db() as db:
         db.execute(
-            "INSERT OR REPLACE INTO password_resets (token, user_id, expires_at) VALUES (?, ?, ?)",
+            "INSERT INTO password_resets (token, user_id, expires_at) VALUES (?, ?, ?) ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, expires_at = EXCLUDED.expires_at",
             (reset_token, user_row["user_id"], expires.isoformat())
         )
     reset_url = f"https://api.moltgrid.net/dashboard#/reset-password?token={reset_token}"
@@ -2255,7 +2255,7 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
             ).fetchone()
             if tmpl and tmpl["starter_code"]:
                 db.execute(
-                    "INSERT OR REPLACE INTO memory (agent_id, namespace, key, value, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT (agent_id, namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
                     (agent_id, "default", "template_starter_code", tmpl["starter_code"], now, now),
                 )
 

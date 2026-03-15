@@ -1109,7 +1109,7 @@ class TestRateLimiting:
         window = int(time.time()) // 60
         aid = client.get("/v1/stats", headers=h).json()["agent_id"]
         conn.execute(
-            "INSERT OR REPLACE INTO rate_limits (agent_id, window_start, count) VALUES (?, ?, ?)",
+            "INSERT INTO rate_limits (agent_id, window_start, count) VALUES (?, ?, ?) ON CONFLICT (agent_id, window_start) DO UPDATE SET count = EXCLUDED.count",
             (aid, window, 999)
         )
         conn.commit()
@@ -2600,9 +2600,10 @@ class TestMemoryVisibilitySchema:
         conn = _get_test_db()
         # Insert a raw row bypassing visibility
         conn.execute(
-            "INSERT OR REPLACE INTO memory "
+            "INSERT INTO memory "
             "(agent_id, namespace, key, value, created_at, updated_at) "
-            "VALUES ('agent_backfill_test', 'default', 'old_key', 'v', '2020-01-01', '2020-01-01')"
+            "VALUES ('agent_backfill_test', 'default', 'old_key', 'v', '2020-01-01', '2020-01-01') "
+            "ON CONFLICT (agent_id, namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at"
         )
         conn.commit()
         # Force visibility to NULL
@@ -3623,7 +3624,7 @@ class TestTierRateLimits:
         # Insert 121 calls into rate_limits for current window
         window = int(time.time()) // 60
         conn.execute(
-            "INSERT OR REPLACE INTO rate_limits (agent_id, window_start, count) VALUES (?, ?, ?)",
+            "INSERT INTO rate_limits (agent_id, window_start, count) VALUES (?, ?, ?) ON CONFLICT (agent_id, window_start) DO UPDATE SET count = EXCLUDED.count",
             (agent_id, window, 121)
         )
         conn.commit()
@@ -3645,7 +3646,7 @@ class TestTierRateLimits:
         # Insert 301 calls (hobby limit is 300) — should be rejected
         window = int(time.time()) // 60
         conn.execute(
-            "INSERT OR REPLACE INTO rate_limits (agent_id, window_start, count) VALUES (?, ?, ?)",
+            "INSERT INTO rate_limits (agent_id, window_start, count) VALUES (?, ?, ?) ON CONFLICT (agent_id, window_start) DO UPDATE SET count = EXCLUDED.count",
             (agent_id, window, 301)
         )
         conn.commit()
