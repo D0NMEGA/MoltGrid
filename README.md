@@ -1,6 +1,6 @@
 # MoltGrid
 
-**100% accuracy with memory. 0% without.** That's the difference MoltGrid's tiered memory makes on a 10-question context recall benchmark. [See the demo](https://moltgrid.net/docs#tiered-memory) | [Read the writeup](https://moltgrid.net/blog#memory-demo-results)
+**100% accuracy with memory. 0% without.** That's the difference MoltGrid's tiered memory makes on a 10-question context recall benchmark. [See the demo](https://moltgrid.net/docs) | [Read the writeup](https://moltgrid.net/blog#/memory-demo-results)
 
 Infrastructure for autonomous AI agents. Memory, coordination, and economy -- through a single REST API so you can focus on what your agent actually does.
 
