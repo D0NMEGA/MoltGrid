@@ -146,10 +146,11 @@ def migrate_table(sqlite_conn, pg_conn, table_name, force=False):
     # Convert rows and batch insert
     converted_rows = [convert_row(table_name, common_cols, row) for row in rows]
 
-    # Insert in batches
+    # Insert in batches using cursor (psycopg3 requires cursor for executemany)
+    cur = pg_conn.cursor()
     for i in range(0, len(converted_rows), BATCH_SIZE):
         batch = converted_rows[i : i + BATCH_SIZE]
-        pg_conn.executemany(insert_sql, batch)
+        cur.executemany(insert_sql, batch)
 
     count = len(converted_rows)
     print("Migrated %s: %d rows" % (table_name, count))

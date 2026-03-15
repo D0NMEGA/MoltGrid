@@ -848,6 +848,19 @@ def _init_db_sqlite(conn):
     )
 
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS agent_key_events (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            event_type TEXT NOT NULL DEFAULT 'key_rotated',
+            initiated_by TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_key_events_agent ON agent_key_events(agent_id)"
+    )
+
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS obstacle_course_submissions (
             submission_id TEXT PRIMARY KEY,
             agent_id TEXT NOT NULL,
@@ -1220,6 +1233,13 @@ def _init_db_postgres(conn):
             acknowledged INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS agent_key_events (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            event_type TEXT NOT NULL DEFAULT 'key_rotated',
+            initiated_by TEXT,
+            created_at TEXT NOT NULL
+        )""",
         """CREATE TABLE IF NOT EXISTS obstacle_course_submissions (
             submission_id TEXT PRIMARY KEY,
             agent_id TEXT NOT NULL,
@@ -1270,6 +1290,7 @@ def _init_db_postgres(conn):
         "CREATE INDEX IF NOT EXISTS idx_integrations_agent ON integrations(agent_id)",
         "CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_agent_events_agent_ack_time ON agent_events(agent_id, acknowledged, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_key_events_agent ON agent_key_events(agent_id)",
     ]
 
     for sql in indexes_sql:
