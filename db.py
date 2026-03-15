@@ -109,7 +109,8 @@ class _PsycopgConnWrapper:
 
     def executemany(self, sql, params_seq):
         translated = _translate_sql(sql)
-        return self._conn.executemany(translated, params_seq)
+        cur = self._conn.cursor()
+        return cur.executemany(translated, params_seq)
 
     def executescript(self, sql):
         """Split on semicolons and execute each statement individually."""
