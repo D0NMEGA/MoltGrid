@@ -2,19 +2,23 @@
 
 import json
 import uuid
+import logging
 from datetime import datetime, timezone
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Depends
 
-from db import get_db
-from helpers import get_agent_id, _embed_text, _log_memory_access, _encrypt, _decrypt
+from db import get_db, DB_BACKEND
+from helpers import get_agent_id, _log_memory_access, _encrypt, _decrypt
+from routers.vector import _embed_text
 from routers.sessions import _auto_summarize, _estimate_tokens
 from models import (
     TieredStoreEventRequest, TieredStoreEventResponse,
     TieredRecallRequest, TieredRecallResponse,
     TieredSummarizeResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Tiered Memory"])
 
@@ -36,6 +40,8 @@ def tiered_store_event(req: TieredStoreEventRequest, agent_id: str = Depends(get
     content = json.dumps(req.data) if isinstance(req.data, dict) else str(req.data)
 
     with get_db() as db:
+        if DB_BACKEND == "sqlite":
+            db.execute("BEGIN IMMEDIATE")
         # Validate session exists and belongs to agent
         row = db.execute(
             "SELECT messages, token_count, max_tokens FROM sessions WHERE session_id=? AND agent_id=?",
@@ -76,8 +82,11 @@ def tiered_store_event(req: TieredStoreEventRequest, agent_id: str = Depends(get
                   enc_value, now))
             persisted = True
 
-    # Log memory access OUTSIDE the get_db() block
-    _log_memory_access("tiered_store_event", agent_id, "session", req.session_id, actor_agent_id=agent_id)
+    # Log memory access OUTSIDE the get_db() block (best-effort)
+    try:
+        _log_memory_access("tiered_store_event", agent_id, "session", req.session_id, actor_agent_id=agent_id)
+    except Exception:
+        logger.warning("Failed to log memory access for tiered_store_event", exc_info=True)
 
     return {
         "status": "stored",
@@ -160,6 +169,8 @@ def tiered_summarize(session_id: str, agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
 
     with get_db() as db:
+        if DB_BACKEND == "sqlite":
+            db.execute("BEGIN IMMEDIATE")
         row = db.execute(
             "SELECT messages FROM sessions WHERE session_id=? AND agent_id=?",
             (session_id, agent_id)
@@ -204,8 +215,11 @@ def tiered_summarize(session_id: str, agent_id: str = Depends(get_agent_id)):
                   summary_text, embedding_blob, metadata, now))
             promoted = True
 
-    # Log OUTSIDE the get_db() block
-    _log_memory_access("tiered_summarize", agent_id, "long_term", vec_key, actor_agent_id=agent_id)
+    # Log OUTSIDE the get_db() block (best-effort)
+    try:
+        _log_memory_access("tiered_summarize", agent_id, "long_term", vec_key, actor_agent_id=agent_id)
+    except Exception:
+        logger.warning("Failed to log memory access for tiered_summarize", exc_info=True)
 
     return {
         "status": "summarized",

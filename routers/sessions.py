@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
 
-from db import get_db
+from db import get_db, DB_BACKEND
 from helpers import get_agent_id
 from models import SessionCreateRequest, SessionAppendRequest
 
@@ -95,6 +95,8 @@ def session_append(session_id: str, req: SessionAppendRequest, agent_id: str = D
     now = datetime.now(timezone.utc).isoformat()
 
     with get_db() as db:
+        if DB_BACKEND == "sqlite":
+            db.execute("BEGIN IMMEDIATE")
         row = db.execute(
             "SELECT messages, token_count, max_tokens FROM sessions WHERE session_id=? AND agent_id=?",
             (session_id, agent_id)
@@ -135,6 +137,8 @@ def session_summarize(session_id: str, agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
 
     with get_db() as db:
+        if DB_BACKEND == "sqlite":
+            db.execute("BEGIN IMMEDIATE")
         row = db.execute(
             "SELECT messages FROM sessions WHERE session_id=? AND agent_id=?",
             (session_id, agent_id)

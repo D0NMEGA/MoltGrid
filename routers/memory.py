@@ -30,7 +30,10 @@ def memory_get_cross_agent(target_agent_id: str, key: str, namespace: str = "def
             raise HTTPException(404, "Key not found")
         allowed = _check_memory_visibility(db, target_agent_id, namespace, key, agent_id)
         d = dict(row) if allowed else None
-    _log_memory_access("cross_agent_read", target_agent_id, namespace, key, actor_agent_id=agent_id, authorized=1 if allowed else 0)
+    try:
+        _log_memory_access("cross_agent_read", target_agent_id, namespace, key, actor_agent_id=agent_id, authorized=1 if allowed else 0)
+    except Exception:
+        pass
     if not allowed:
         raise HTTPException(403, "Access denied: memory entry is private or not shared with you")
     d["value"] = _decrypt(d["value"])
@@ -47,7 +50,10 @@ def memory_set_visibility(key: str, req: MemoryVisibilityRequest, agent_id: str 
         if not old:
             raise HTTPException(404, "Key not found")
         db.execute("UPDATE memory SET visibility=?, shared_agents=? WHERE agent_id=? AND namespace=? AND key=?", (vis, sa_json, agent_id, req.namespace, key))
-    _log_memory_access("visibility_changed", agent_id, req.namespace, key, actor_agent_id=agent_id, old_visibility=old["visibility"] or "private", new_visibility=vis)
+    try:
+        _log_memory_access("visibility_changed", agent_id, req.namespace, key, actor_agent_id=agent_id, old_visibility=old["visibility"] or "private", new_visibility=vis)
+    except Exception:
+        pass
     return {"status": "updated", "key": key, "visibility": vis}
 
 
@@ -69,7 +75,10 @@ def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
             DO UPDATE SET value=?, updated_at=?, expires_at=?, visibility=?, shared_agents=?
         """, (agent_id, req.namespace, req.key, enc_value, now.isoformat(), now.isoformat(), expires, vis, sa_json,
               enc_value, now.isoformat(), expires, vis, sa_json))
-    _log_memory_access("write", agent_id, req.namespace, req.key, actor_agent_id=agent_id)
+    try:
+        _log_memory_access("write", agent_id, req.namespace, req.key, actor_agent_id=agent_id)
+    except Exception:
+        pass
     if is_first:
         _track_event("agent.first_memory", agent_id=agent_id)
     return {"status": "stored", "key": req.key, "namespace": req.namespace, "visibility": vis}
@@ -83,7 +92,10 @@ def memory_get(key: str, namespace: str = "default", agent_id: str = Depends(get
             raise HTTPException(404, "Key not found or expired")
         d = dict(row)
         d["value"] = _decrypt(d["value"])
-    _log_memory_access("read", agent_id, namespace, key, actor_agent_id=agent_id)
+    try:
+        _log_memory_access("read", agent_id, namespace, key, actor_agent_id=agent_id)
+    except Exception:
+        pass
     return MemoryGetResponse(**d)
 
 @router.delete("/v1/memory/{key}", tags=["Memory"], response_model=MemoryDeleteResponse)
@@ -92,7 +104,10 @@ def memory_delete(key: str, namespace: str = "default", agent_id: str = Depends(
         r = db.execute("DELETE FROM memory WHERE agent_id=? AND namespace=? AND key=?", (agent_id, namespace, key))
         if r.rowcount == 0:
             raise HTTPException(404, "Key not found")
-    _log_memory_access("delete", agent_id, namespace, key, actor_agent_id=agent_id)
+    try:
+        _log_memory_access("delete", agent_id, namespace, key, actor_agent_id=agent_id)
+    except Exception:
+        pass
     return {"status": "deleted", "key": key}
 
 @router.get("/v1/memory", response_model=MemoryListResponse, tags=["Memory"])
