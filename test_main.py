@@ -30,6 +30,52 @@ if _DB_BACKEND in ("postgres", "dual"):
     db_module.init_pool()
 
 
+def _table_exists(conn, table_name):
+    """Check if a table exists, abstracting over SQLite/Postgres."""
+    if _DB_BACKEND in ("postgres", "dual"):
+        row = conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = %s",
+            (table_name,)
+        ).fetchone()
+        return row is not None
+    else:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,)
+        ).fetchone()
+        return row is not None
+
+
+def _index_exists(conn, index_name):
+    """Check if an index exists, abstracting over SQLite/Postgres."""
+    if _DB_BACKEND in ("postgres", "dual"):
+        row = conn.execute(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = %s",
+            (index_name,)
+        ).fetchone()
+        return row is not None
+    else:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+            (index_name,)
+        ).fetchone()
+        return row is not None
+
+
+def _list_tables(conn):
+    """List all user tables, abstracting over SQLite/Postgres."""
+    if _DB_BACKEND in ("postgres", "dual"):
+        rows = conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        ).fetchall()
+        return {r[0] if isinstance(r, tuple) else r["tablename"] for r in rows}
+    else:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        return {row[0] for row in rows}
+
+
 def _get_table_columns(conn, table_name):
     """Get column names for a table, abstracting over SQLite/Postgres."""
     if _DB_BACKEND in ("postgres", "dual"):
@@ -2521,8 +2567,9 @@ class TestAnalytics:
 
     def test_analytics_events_table_exists(self):
         """The analytics_events table is created by init_db."""
-        rows = self._query_analytics("SELECT name FROM sqlite_master WHERE type='table' AND name='analytics_events'")
-        assert len(rows) == 1
+        conn = _get_test_db()
+        assert _table_exists(conn, "analytics_events"), "analytics_events table must exist"
+        conn.close()
 
 
 # =============================================================================
@@ -2571,18 +2618,13 @@ class TestMemoryVisibilitySchema:
     def test_memory_access_log_table_exists(self):
         """init_db() creates memory_access_log table."""
         conn = self._raw_db()
-        row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_access_log'"
-        ).fetchone()
+        assert _table_exists(conn, "memory_access_log"), "memory_access_log table must exist after init_db()"
         conn.close()
-        assert row is not None, "memory_access_log table must exist after init_db()"
 
     def test_memory_access_log_index_exists(self):
         """init_db() creates idx_mal_agent index on memory_access_log."""
         conn = self._raw_db()
-        row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_mal_agent'"
-        ).fetchone()
+        assert _index_exists(conn, "idx_mal_agent"), "idx_mal_agent index must exist after init_db()"
         conn.close()
         assert row is not None, "idx_mal_agent index must exist after init_db()"
 
@@ -4082,10 +4124,8 @@ class TestOrgAccounts:
 
     def test_org_schema_tables_exist(self):
         """organizations and org_members tables must exist."""
-        from main import DB_PATH
-        import sqlite3
         conn = _get_test_db()
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        tables = _list_tables(conn)
         conn.close()
         assert "organizations" in tables, "organizations table missing"
         assert "org_members" in tables, "org_members table missing"
