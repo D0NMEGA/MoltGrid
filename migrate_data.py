@@ -224,10 +224,9 @@ def verify():
         sys.exit(1)
 
     import psycopg
-    from psycopg.rows import dict_row
 
     sqlite_conn = sqlite3.connect(DB_PATH)
-    pg_conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    pg_conn = psycopg.connect(DATABASE_URL)
 
     try:
         tables = get_sqlite_tables(sqlite_conn)
