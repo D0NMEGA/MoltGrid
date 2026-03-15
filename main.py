@@ -402,7 +402,7 @@ async def get_agent_id(request: Request) -> str:
         db.execute("""
             INSERT INTO rate_limits (agent_id, window_start, count)
             VALUES (?, ?, 1)
-            ON CONFLICT(agent_id, window_start) DO UPDATE SET count = count + 1
+            ON CONFLICT(agent_id, window_start) DO UPDATE SET count = rate_limits.count + 1
         """, (row["agent_id"], window))
         rl = db.execute(
             "SELECT count FROM rate_limits WHERE agent_id = ? AND window_start = ?",
