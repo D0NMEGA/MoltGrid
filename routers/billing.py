@@ -84,8 +84,9 @@ def billing_checkout(req: CheckoutRequest, user_id: str = Depends(get_user_id)):
     session = stripe.checkout.Session.create(
         customer=customer_id, mode="subscription",
         line_items=[{"price": price_id, "quantity": 1}],
-        success_url="https://api.moltgrid.net/dashboard#/billing",
-        cancel_url="https://api.moltgrid.net/dashboard#/billing",
+        success_url="https://moltgrid.net/dashboard#/billing",
+        cancel_url="https://moltgrid.net/dashboard#/billing",
+        allow_promotion_codes=True,
         metadata={"moltgrid_user_id": user_id, "tier": req.tier},
     )
     _track_event("billing.checkout_started", user_id=user_id, metadata={"tier": req.tier})
@@ -101,7 +102,7 @@ def billing_portal(user_id: str = Depends(get_user_id)):
             raise HTTPException(400, "No Stripe customer found. Subscribe first.")
     session = stripe.billing_portal.Session.create(
         customer=user["stripe_customer_id"],
-        return_url="https://api.moltgrid.net/dashboard#/billing",
+        return_url="https://moltgrid.net/dashboard#/billing",
     )
     return {"portal_url": session.url}
 
