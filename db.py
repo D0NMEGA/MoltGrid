@@ -63,15 +63,15 @@ import re as _re
 
 # Precompile patterns for SQLite-to-PostgreSQL SQL translation
 _RE_DATETIME_OFFSET = _re.compile(
-    r"datetime\(([^,]+),\s*'(-?\d+)\s+seconds'\)",
+    r"datetime\(([^(),]+),\s*'(-?\d+)\s+seconds'\)",
     _re.IGNORECASE,
 )
 _RE_DATETIME_DYNAMIC_OFFSET = _re.compile(
-    r"datetime\(([^,]+),\s*'-'\s*\|\|\s*\(([^)]+)\)\s*\|\|\s*'\s*seconds'\)",
+    r"datetime\(([^(),]+),\s*'-'\s*\|\|\s*\((.+?)\)\s*\|\|\s*'\s*seconds'\)",
     _re.IGNORECASE,
 )
 _RE_DATETIME_SIMPLE = _re.compile(
-    r"datetime\(([^)]+)\)",
+    r"datetime\(([^()]+)\)",
     _re.IGNORECASE,
 )
 
