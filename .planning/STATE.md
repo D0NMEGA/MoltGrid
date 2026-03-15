@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-last_updated: "2026-03-15T05:04:00Z"
+last_updated: "2026-03-15T07:49:00Z"
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
+  total_phases: 4
+  completed_phases: 4
+  total_plans: 10
+  completed_plans: 10
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** OpenClaw running on MoltGrid and posting on MoltBook IS the product — every feature should ask "how does this serve the MoltGrid -> OpenClaw -> MoltBook loop?"
-**Current focus:** Phase 10 complete -- Monolith fully modularized
+**Current focus:** Phase 14 complete -- Quickstarts and Playground
 
 ## Current Position
 
-Phase: 10 (Monolith Modularization) -- COMPLETE
+Phase: 14 (Quickstarts and Playground) -- COMPLETE
 Plan: 2 of 2 in current phase (all plans complete)
-Status: Phase 10 complete -- main.py decomposed from 6752 lines to 189-line orchestrator with 18 router modules. 332 tests passing.
-Last activity: 2026-03-15 -- Plan 10-02 complete: router extraction + slim main.py
+Status: Phase 14 complete -- 3 framework quickstart guides, expanded MCP guide, Bruno API collection
+Last activity: 2026-03-15 -- Plan 14-01 complete: LangGraph/CrewAI/OpenAI guides + MCP expansion
 
 Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 30 min
-- Total execution time: 4 hours
+- Total plans completed: 10
+- Average duration: 25 min
+- Total execution time: 4.1 hours
 
 **By Phase:**
 
@@ -43,9 +43,10 @@ Progress: [██████████] 100%
 | 01-memory-privacy-and-security | 3 | 99min | 33min |
 | 09-postgresql-migration | 3 | 100min | 33min |
 | 10-monolith-modularization | 2/2 | 39min | 20min |
+| 14-quickstarts-and-playground | 2/2 | 4min | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 30min, 25min, 45min, 8min, 31min
+- Last 5 plans: 45min, 8min, 31min, 1min, 3min
 - Trend: consistent
 
 *Updated after each plan completion*
@@ -84,6 +85,10 @@ Recent decisions affecting current work:
 - [10-02] MOLTBOOK_SERVICE_KEY accessed via lazy import from main for test patching compatibility
 - [10-02] __file__ paths in routers use parent.parent to resolve project root
 - [10-02] models.py corrected: MemorySetRequest visibility field, TOTP field names, ConfigDict on response models
+- [14-02] Bruno DSL format chosen over JSON for human readability and native Bruno app compatibility
+- [14-02] Single api_key variable covers all agent-authenticated endpoints; jwt_token separate for user auth
+- [14-01] Used actual SDK method names (memory_set, memory_get) not dot-notation aliases in guides
+- [14-01] All guides use MoltGrid class import matching SDK source, not MoltGridClient
 
 ### Pending Todos
 
@@ -96,5 +101,5 @@ None -- all phases complete.
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: Completed 10-02-PLAN.md -- Phase 10 complete. Monolith fully modularized. 332 tests passing, 0 failures.
+Stopped at: Completed 14-01-PLAN.md -- Phase 14 complete. 3 framework guides + MCP expansion + Bruno collection.
 Resume file: None

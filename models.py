@@ -3,7 +3,7 @@ MoltGrid Pydantic Models — all request/response BaseModel subclasses.
 Extracted from main.py to serve as the shared models module for router modules.
 """
 
-from typing import Optional, List, Dict, Union
+from typing import Optional, List, Dict, Union, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from config import MAX_MEMORY_VALUE_SIZE, MAX_QUEUE_PAYLOAD_SIZE
@@ -1287,3 +1287,53 @@ class EventStreamItem(BaseModel):
 class EventPollResponse(BaseModel):
     """Wrapper for event poll list — not used as response_model since endpoint returns bare list."""
     pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TIERED MEMORY MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TieredStoreEventRequest(BaseModel):
+    session_id: str = Field(..., max_length=64)
+    data: Any = Field(..., description="Event content -- string or any JSON-serializable dict")
+    role: str = Field("user", pattern="^(user|assistant|system)$")
+    persist: bool = Field(False, description="If True, also write to mid-term notes (Tier 2)")
+    note_key: Optional[str] = Field(None, max_length=256, description="Key for mid-term note (required if persist=True)")
+
+class TieredStoreEventResponse(BaseModel):
+    status: str
+    session_id: str
+    message_count: int
+    token_count: int
+    persisted: bool
+    note_key: Optional[str] = None
+
+class TieredRecallRequest(BaseModel):
+    query: str = Field(..., max_length=10000)
+    k: int = Field(5, ge=1, le=50, description="Number of results to return")
+    namespace: str = Field("default", max_length=64, description="Namespace to search in Tier 2 and 3")
+    tiers: List[Literal["mid", "long"]] = Field(["mid", "long"], description="Which tiers to search")
+    min_similarity: float = Field(0.0, ge=0.0, le=1.0)
+
+class TieredRecallResultItem(BaseModel):
+    tier: str
+    key: str
+    text: str
+    score: float
+    metadata: Optional[dict] = None
+
+class TieredRecallResponse(BaseModel):
+    results: List[TieredRecallResultItem]
+    count: int
+    query: str
+
+class TieredSummarizeResponse(BaseModel):
+    status: str
+    session_id: str
+    original_message_count: int
+    new_message_count: int
+    token_count: int
+    summary_text: str
+    promoted: bool
+    vector_key: str
+    vector_namespace: str

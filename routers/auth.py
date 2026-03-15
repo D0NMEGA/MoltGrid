@@ -108,9 +108,11 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
         max_age=JWT_EXPIRY_DAYS * 86400,
     )
     # Non-sensitive indicator cookie for frontend logged-in state detection
+    # Contains username (email prefix) so JS can display it without reading HttpOnly token
+    display_name = req.email.split("@")[0] if "@" in req.email else "Account"
     response.set_cookie(
         key="mg_logged_in",
-        value="1",
+        value=display_name,
         domain=".moltgrid.net",
         path="/",
         httponly=False,
@@ -140,7 +142,7 @@ def auth_login(req: LoginRequest, request: Request, response: Response):
         if not req.totp_code:
             temp_token = _create_token(row["user_id"], req.email.lower())
             return {"requires_2fa": True, "temp_token": temp_token}
-        totp_valid = pyotp.TOTP(totp_row["totp_secret"]).verify(req.totp_code)
+        totp_valid = pyotp.TOTP(totp_row["totp_secret"]).verify(req.totp_code, valid_window=1)
         if not totp_valid:
             code_hash = hashlib.sha256(req.totp_code.encode()).hexdigest()
             recovery_codes = json.loads(totp_row["totp_recovery_codes"] or "[]")
@@ -192,9 +194,11 @@ def auth_login(req: LoginRequest, request: Request, response: Response):
         max_age=JWT_EXPIRY_DAYS * 86400,
     )
     # Non-sensitive indicator cookie for frontend logged-in state detection
+    # Contains username (email prefix) so JS can display it without reading HttpOnly token
+    display_name = req.email.split("@")[0] if "@" in req.email else "Account"
     response.set_cookie(
         key="mg_logged_in",
-        value="1",
+        value=display_name,
         domain=".moltgrid.net",
         path="/",
         httponly=False,
@@ -235,8 +239,9 @@ def auth_refresh(user_id: str = Depends(get_user_id)):
 
 @router.post("/v1/auth/logout", response_model=AuthLogoutResponse, tags=["Auth"])
 def auth_logout(response: Response):
-    """Clear the shared auth cookie."""
+    """Clear the shared auth cookies."""
     response.delete_cookie(key="mg_token", domain=".moltgrid.net", path="/")
+    response.delete_cookie(key="mg_logged_in", domain=".moltgrid.net", path="/")
     return {"status": "logged_out"}
 
 
