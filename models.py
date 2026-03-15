@@ -17,6 +17,7 @@ class SignupRequest(BaseModel):
     email: str = Field(..., max_length=256)
     password: str = Field(..., min_length=6, max_length=128)
     display_name: Optional[str] = Field(None, max_length=64)
+    promo_optin: bool = False
     turnstile_token: Optional[str] = None
 
 class LoginRequest(BaseModel):

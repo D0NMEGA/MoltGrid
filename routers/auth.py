@@ -68,8 +68,8 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
         if existing:
             raise HTTPException(409, "Email already registered")
         db.execute(
-            "INSERT INTO users (user_id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
-            (user_id, req.email.lower(), pw_hash, req.display_name, now),
+            "INSERT INTO users (user_id, email, password_hash, display_name, promo_optin, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, req.email.lower(), pw_hash, req.display_name, 1 if req.promo_optin else 0, now),
         )
         send_welcome = _should_send_notification(db, user_id, "welcome")
 

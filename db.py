@@ -728,6 +728,7 @@ def _init_db_sqlite(conn):
             ("totp_secret", "TEXT"),
             ("totp_enabled", "INTEGER DEFAULT 0"),
             ("totp_recovery_codes", "TEXT"),
+            ("promo_optin", "INTEGER DEFAULT 0"),
         ]:
             if col not in u_existing:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
@@ -1157,7 +1158,8 @@ def _init_db_postgres(conn):
             known_login_ips TEXT DEFAULT '[]',
             totp_secret TEXT,
             totp_enabled INTEGER DEFAULT 0,
-            totp_recovery_codes TEXT
+            totp_recovery_codes TEXT,
+            promo_optin INTEGER DEFAULT 0
         )""",
         """CREATE TABLE IF NOT EXISTS email_queue (
             id TEXT PRIMARY KEY,
