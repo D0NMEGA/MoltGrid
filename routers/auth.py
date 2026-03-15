@@ -3,7 +3,7 @@
 import json
 import uuid
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import pyotp
@@ -250,7 +250,7 @@ def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
         # Don't reveal whether the email exists
         return {"message": "If that email is registered, a reset link has been sent."}
     reset_token = secrets.token_urlsafe(32)
-    expires = datetime.now(timezone.utc) + __import__('datetime').timedelta(hours=1)
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
     with get_db() as db:
         db.execute(
             "INSERT INTO password_resets (token, user_id, expires_at) VALUES (?, ?, ?) ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, expires_at = EXCLUDED.expires_at",

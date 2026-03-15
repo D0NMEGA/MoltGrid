@@ -3,7 +3,7 @@ MoltGrid Pydantic Models — all request/response BaseModel subclasses.
 Extracted from main.py to serve as the shared models module for router modules.
 """
 
-from typing import Optional, List, Union
+from typing import Optional, List, Dict, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 from config import MAX_MEMORY_VALUE_SIZE, MAX_QUEUE_PAYLOAD_SIZE
@@ -574,7 +574,7 @@ class TierDetail(BaseModel):
     features: List[str]
 
 class PricingResponse(BaseModel):
-    tiers: dict
+    tiers: Dict[str, TierDetail]
     currency: str
     billing_period: str
 
@@ -822,7 +822,7 @@ class DirectoryAgentItem(BaseModel):
     agent_id: str
     name: Optional[str] = None
     description: Optional[str] = None
-    capabilities: List = Field(default_factory=list)
+    capabilities: List[str] = Field(default_factory=list)
     available: bool = True
 
 class DirectoryListResponse(BaseModel):
@@ -907,7 +907,7 @@ class DirectoryProfileResponse(BaseModel):
     agent_id: str
     name: Optional[str] = None
     description: Optional[str] = None
-    capabilities: List = Field(default_factory=list)
+    capabilities: List[str] = Field(default_factory=list)
     reputation: float = 0.0
     reputation_count: int = 0
     credits: int = 0
