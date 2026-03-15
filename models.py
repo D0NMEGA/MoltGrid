@@ -801,3 +801,489 @@ class MemorySetResponse(BaseModel):
 class MemoryDeleteResponse(BaseModel):
     status: str
     key: str
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DIRECTORY RESPONSE MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class HeartbeatResponse(BaseModel):
+    agent_id: str
+    status: str
+    heartbeat_at: str
+
+class DirectoryUpdateResponse(BaseModel):
+    status: str
+    agent_id: str
+    public: bool
+
+class DirectoryAgentItem(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    agent_id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    capabilities: List = Field(default_factory=list)
+    available: bool = True
+
+class DirectoryListResponse(BaseModel):
+    agents: List[DirectoryAgentItem]
+    count: int
+
+class LeaderboardEntry(BaseModel):
+    rank: int
+    agent_id: str
+    name: Optional[str] = None
+    reputation: float = 0.0
+    credits: int = 0
+    tasks_completed: int = 0
+
+class LeaderboardResponse(BaseModel):
+    leaderboard: List[LeaderboardEntry]
+    total_agents: int
+    sort_by: str
+
+class CapabilityItem(BaseModel):
+    name: str
+    count: int
+
+class DirectoryStatsResponse(BaseModel):
+    total_agents: int
+    online_agents: int
+    total_capabilities: List[str]
+    top_capabilities: List[CapabilityItem]
+    total_marketplace_tasks: int
+    total_credits_distributed: int
+
+class DirectorySearchResponse(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    agents: List[DirectoryAgentItem]
+    count: int
+
+class DirectoryStatusUpdateResponse(BaseModel):
+    status: str
+    agent_id: str
+
+class CollaborationResponse(BaseModel):
+    collaboration_id: str
+    agent_id: str
+    partner_agent: str
+    task_type: Optional[str] = None
+    outcome: str
+    rating: int
+    partner_new_reputation: float
+    created_at: str
+
+class DirectoryMatchResponse(BaseModel):
+    matches: List[DirectoryAgentItem]
+    count: int
+    need: str
+
+class NetworkNode(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    id: str
+    name: Optional[str] = None
+    status: str = "unknown"
+    reputation: float = 0.0
+
+class NetworkEdge(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    source: str
+    target: str
+    type: str
+    weight: int
+
+class NetworkStats(BaseModel):
+    total_agents: int
+    online_agents: int
+    total_edges: int
+
+class DirectoryNetworkResponse(BaseModel):
+    nodes: List[NetworkNode]
+    edges: List[NetworkEdge]
+    stats: NetworkStats
+
+class DirectoryProfileResponse(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    agent_id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    capabilities: List = Field(default_factory=list)
+    reputation: float = 0.0
+    reputation_count: int = 0
+    credits: int = 0
+    tasks_completed: int = 0
+    uptime_pct: float = 99.0
+    member_since: Optional[str] = None
+    heartbeat_status: str = "unknown"
+    featured: bool = False
+    verified: bool = False
+    recent_marketplace_activity: List[dict] = Field(default_factory=list)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MARKETPLACE RESPONSE MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MarketplaceCreateResponse(BaseModel):
+    task_id: str
+    status: str
+    created_at: str
+    credits_deducted: int
+
+class MarketplaceTaskItem(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    task_id: str
+    title: str
+    status: str
+
+class MarketplaceBrowseResponse(BaseModel):
+    tasks: List[MarketplaceTaskItem]
+    count: int
+
+class MarketplaceClaimResponse(BaseModel):
+    task_id: str
+    status: str
+    claimed_by: str
+
+class MarketplaceDeliverResponse(BaseModel):
+    task_id: str
+    status: str
+
+class MarketplaceReviewResponse(BaseModel):
+    task_id: str
+    status: str
+    credits_awarded: int = 0
+
+class ScenarioCreateResponse(BaseModel):
+    scenario_id: str
+    status: str
+    pattern: str
+    created_at: str
+
+class ScenarioListResponse(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    scenarios: List[dict]
+    count: int
+
+class ScenarioRunResponse(BaseModel):
+    scenario_id: str
+    status: str
+    results: dict
+    completed_at: str
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SESSION RESPONSE MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SessionCreateResponse(BaseModel):
+    session_id: str
+    title: str
+    created_at: str
+
+class SessionListItem(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    session_id: str
+    title: Optional[str] = None
+    token_count: int = 0
+    max_tokens: int = 128000
+    created_at: str
+    updated_at: str
+
+class SessionListResponse(BaseModel):
+    sessions: List[SessionListItem]
+
+class SessionAppendResponse(BaseModel):
+    status: str
+    message_count: int
+    token_count: int
+    summarized: bool
+
+class SessionSummarizeResponse(BaseModel):
+    status: str
+    original_message_count: int
+    new_message_count: int
+    token_count: int
+
+class SessionDeleteResponse(BaseModel):
+    status: str
+    session_id: str
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VECTOR RESPONSE MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class VectorUpsertResponse(BaseModel):
+    key: str
+    namespace: str
+    dimensions: int
+    status: str
+
+class VectorSearchResultItem(BaseModel):
+    key: str
+    text: str
+    score: float
+    similarity: float
+    metadata: Optional[dict] = None
+
+class VectorSearchResponse(BaseModel):
+    results: List[VectorSearchResultItem]
+    count: int
+    scoring: str
+
+class VectorGetResponse(BaseModel):
+    key: str
+    text: str
+    metadata: Optional[dict] = None
+    created_at: str
+    updated_at: str
+
+class VectorDeleteResponse(BaseModel):
+    status: str
+    key: str
+    namespace: str
+
+class VectorKeyItem(BaseModel):
+    key: str
+    created_at: str
+
+class VectorListResponse(BaseModel):
+    keys: List[VectorKeyItem]
+    count: int
+    namespace: str
+
+class SharedMemorySetResponse(BaseModel):
+    status: str
+    namespace: str
+    key: str
+
+class SharedMemoryEntryItem(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    owner_agent: str
+    key: str
+    description: Optional[str] = None
+    size_bytes: int = 0
+    updated_at: str
+    expires_at: Optional[str] = None
+
+class SharedMemoryListResponse(BaseModel):
+    namespace: str
+    entries: List[SharedMemoryEntryItem]
+    count: int
+
+class SharedMemoryDeleteResponse(BaseModel):
+    status: str
+    namespace: str
+    key: str
+
+class SharedMemoryNamespaceItem(BaseModel):
+    namespace: str
+    entry_count: int
+    contributor_count: int
+
+class SharedMemoryNamespacesResponse(BaseModel):
+    namespaces: List[SharedMemoryNamespaceItem]
+    count: int
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ORG RESPONSE MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class OrgCreateResponse(BaseModel):
+    org_id: str
+    name: str
+    slug: Optional[str] = None
+    owner_user_id: str
+    created_at: str
+    role: str
+
+class OrgListItem(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    org_id: str
+    name: str
+    slug: Optional[str] = None
+    owner_user_id: str
+    created_at: str
+    role: str
+
+class OrgListResponse(BaseModel):
+    orgs: List[OrgListItem]
+
+class OrgMemberItem(BaseModel):
+    user_id: str
+    role: str
+    joined_at: str
+
+class OrgDetailResponse(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    org_id: str
+    name: str
+    slug: Optional[str] = None
+    owner_user_id: str
+    created_at: str
+    members: List[OrgMemberItem]
+
+class OrgInviteResponse(BaseModel):
+    org_id: str
+    user_id: str
+    role: str
+    joined_at: str
+
+class OrgMembersResponse(BaseModel):
+    org_id: str
+    members: List[OrgMemberItem]
+
+class OrgRemoveResponse(BaseModel):
+    removed: bool
+
+class OrgRoleChangeResponse(BaseModel):
+    org_id: str
+    user_id: str
+    role: str
+
+class OrgSwitchResponse(BaseModel):
+    active_org_id: str
+    org_name: str
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INTEGRATION RESPONSE MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class IntegrationCreateResponse(BaseModel):
+    id: str
+    agent_id: str
+    platform: str
+    status: str
+    created_at: str
+
+class IntegrationItem(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    id: str
+    platform: str
+    config: Optional[dict] = None
+    status: str
+    created_at: str
+
+class IntegrationListResponse(BaseModel):
+    agent_id: str
+    integrations: List[IntegrationItem]
+
+class MoltBookEventResponse(BaseModel):
+    id: str
+    event_name: str
+    source: str
+    agent_id: str
+    created_at: str
+
+class MoltBookRegisterResponse(BaseModel):
+    agent_id: str
+    api_key: str
+    display_name: str
+
+class MoltBookFeedItem(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    id: str
+    type: str
+    content: str
+    timestamp: str
+    moltbook_url: Optional[str] = None
+    agent_id: str
+
+class MoltBookFeedResponse(BaseModel):
+    feed: List[MoltBookFeedItem]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SYSTEM RESPONSE MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ContactSubmitResponse(BaseModel):
+    status: str
+    id: str
+
+class SLAWindowItem(BaseModel):
+    uptime_pct: float
+    total_checks: int
+    successful_checks: int
+    avg_response_ms: float
+
+class SLAResponse(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    sla_target: str
+    current_status: str
+    windows: dict
+    last_check: Optional[dict] = None
+    check_interval_seconds: int
+    encryption_enabled: bool
+
+class AgentStatsResponse(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    agent_id: str
+    name: Optional[str] = None
+    created_at: str
+    total_requests: int
+    memory_keys: int
+    jobs_submitted: int
+    messages_sent: int
+    messages_received: int
+    active_webhooks: int
+    active_schedules: int
+    shared_memory_keys: int
+    credits: int = 0
+    reputation: float = 0.0
+    collaborations_given: int = 0
+    collaborations_received: int = 0
+    marketplace_tasks_created: int = 0
+    marketplace_tasks_completed: int = 0
+
+class TextProcessResponse(BaseModel):
+    operation: str
+    result: dict
+    agent_id: str
+
+class ObstacleSubmitResponse(BaseModel):
+    submission_id: str
+    score: int
+    stages_completed: List[int]
+    feedback: str
+
+class ObstacleLeaderboardItem(BaseModel):
+    submission_id: str
+    agent_id: str
+    display_name: str
+    score: int
+    stages_completed: List[int]
+    submitted_at: str
+    feedback: str
+
+class ObstacleMyResultResponse(BaseModel):
+    submission_id: str
+    stages_completed: List[int]
+    score: int
+    submitted_at: str
+    feedback: str
+
+class RootResponse(BaseModel):
+    service: str
+    version: str
+    docs: str
+    description: str
+    endpoints: dict
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EVENTS RESPONSE MODELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EventStreamItem(BaseModel):
+    event_id: str
+    event_type: str
+    payload: dict
+    created_at: str
+
+class EventPollResponse(BaseModel):
+    """Wrapper for event poll list — not used as response_model since endpoint returns bare list."""
+    pass
