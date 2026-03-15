@@ -1,0 +1,275 @@
+"""User account settings routes."""
+
+import json
+import uuid
+import hashlib
+import secrets
+from datetime import datetime, timezone
+
+import bcrypt as _bcrypt
+from fastapi import APIRouter, HTTPException, Depends, Request, Response
+from pydantic import BaseModel, Field
+from typing import Optional, List
+
+from db import get_db
+from helpers import (
+    get_user_id, _create_token, _decode_token,
+    _track_event, _log_audit, _get_client_ip,
+    _queue_email, _branded_email, hash_key,
+)
+
+router = APIRouter()
+
+
+# ── Models ────────────────────────────────────────────────────────────
+class ProfileUpdate(BaseModel):
+    display_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    timezone: Optional[str] = Field(None, max_length=64)
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+    confirm_password: str = Field(..., max_length=128)
+
+class CreateKeyRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    scope: str = Field("live", pattern="^(live|test)$")
+
+class DeleteAccountRequest(BaseModel):
+    confirm_email: str = Field(..., max_length=256)
+
+
+# ── Profile ───────────────────────────────────────────────────────────
+@router.get("/v1/user/profile", tags=["User Settings"])
+def get_profile(user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        user = db.execute(
+            "SELECT user_id, email, display_name, timezone, avatar_url, "
+            "totp_enabled, subscription_tier, created_at FROM users WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        if not user:
+            raise HTTPException(404, "User not found")
+    return dict(user)
+
+
+@router.patch("/v1/user/profile", tags=["User Settings"])
+def update_profile(req: ProfileUpdate, user_id: str = Depends(get_user_id)):
+    VALID_TIMEZONES = [
+        "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+        "America/Anchorage", "Pacific/Honolulu", "America/Phoenix",
+        "America/Toronto", "America/Vancouver", "America/Sao_Paulo",
+        "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow",
+        "Asia/Tokyo", "Asia/Shanghai", "Asia/Kolkata", "Asia/Singapore",
+        "Asia/Dubai", "Australia/Sydney", "Pacific/Auckland", "UTC",
+    ]
+    if req.timezone and req.timezone not in VALID_TIMEZONES:
+        raise HTTPException(422, f"Invalid timezone. Must be one of: {', '.join(VALID_TIMEZONES)}")
+
+    updates = []
+    params = []
+    if req.display_name is not None:
+        updates.append("display_name = ?")
+        params.append(req.display_name)
+    if req.timezone is not None:
+        updates.append("timezone = ?")
+        params.append(req.timezone)
+    if not updates:
+        raise HTTPException(422, "No fields to update")
+    params.append(user_id)
+
+    with get_db() as db:
+        db.execute(f"UPDATE users SET {', '.join(updates)} WHERE user_id = ?", params)
+    _log_audit("user.profile_updated", user_id, None, json.dumps({"fields": [u.split(" = ")[0] for u in updates]}), None)
+    return {"message": "Profile updated"}
+
+
+# ── Password ──────────────────────────────────────────────────────────
+@router.post("/v1/auth/change-password", tags=["User Settings"])
+def change_password(req: ChangePasswordRequest, user_id: str = Depends(get_user_id)):
+    if req.new_password != req.confirm_password:
+        raise HTTPException(422, "Passwords do not match")
+    with get_db() as db:
+        user = db.execute("SELECT password_hash FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(404, "User not found")
+        if not _bcrypt.checkpw(req.current_password.encode(), user["password_hash"].encode()):
+            raise HTTPException(401, "Current password is incorrect")
+        new_hash = _bcrypt.hashpw(req.new_password.encode(), _bcrypt.gensalt()).decode()
+        db.execute("UPDATE users SET password_hash = ? WHERE user_id = ?", (new_hash, user_id))
+        # Revoke all other sessions
+        db.execute("UPDATE user_sessions SET revoked = 1 WHERE user_id = ? AND revoked = 0", (user_id,))
+    _log_audit("user.password_changed", user_id, None, None, None)
+    return {"message": "Password changed successfully"}
+
+
+# ── API Keys ──────────────────────────────────────────────────────────
+@router.get("/v1/user/keys", tags=["User Settings"])
+def list_keys(user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        keys = db.execute(
+            "SELECT id, name, key_prefix, key_hint, created_at, last_used, status "
+            "FROM user_keys WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,)
+        ).fetchall()
+    return [dict(k) for k in keys]
+
+
+@router.post("/v1/user/keys", tags=["User Settings"])
+def create_key(req: CreateKeyRequest, user_id: str = Depends(get_user_id)):
+    prefix = "mg_live_" if req.scope == "live" else "mg_test_"
+    raw_key = prefix + secrets.token_hex(32)
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    key_hint = raw_key[-4:]
+    key_id = uuid.uuid4().hex[:16]
+    now = datetime.now(timezone.utc).isoformat()
+
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO user_keys (id, user_id, name, key_prefix, key_hash, key_hint, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (key_id, user_id, req.name, prefix, key_hash, key_hint, now)
+        )
+    _log_audit("user.key_created", user_id, None, json.dumps({"key_name": req.name}), None)
+    return {"id": key_id, "name": req.name, "key": raw_key, "key_hint": key_hint, "created_at": now}
+
+
+@router.delete("/v1/user/keys/{key_id}", tags=["User Settings"])
+def revoke_key(key_id: str, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        key = db.execute("SELECT id FROM user_keys WHERE id = ? AND user_id = ?", (key_id, user_id)).fetchone()
+        if not key:
+            raise HTTPException(404, "Key not found")
+        db.execute("UPDATE user_keys SET status = 'revoked' WHERE id = ?", (key_id,))
+    _log_audit("user.key_revoked", user_id, None, json.dumps({"key_id": key_id}), None)
+    return {"message": "Key revoked"}
+
+
+# ── Sessions ──────────────────────────────────────────────────────────
+@router.get("/v1/user/sessions", tags=["User Settings"])
+def list_sessions(request: Request, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        sessions = db.execute(
+            "SELECT id, device, browser, ip_address, last_active, created_at "
+            "FROM user_sessions WHERE user_id = ? AND revoked = 0 ORDER BY last_active DESC",
+            (user_id,)
+        ).fetchall()
+    return [dict(s) for s in sessions]
+
+
+@router.delete("/v1/user/sessions/{session_id}", tags=["User Settings"])
+def revoke_session(session_id: str, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        session = db.execute(
+            "SELECT id FROM user_sessions WHERE id = ? AND user_id = ? AND revoked = 0",
+            (session_id, user_id)
+        ).fetchone()
+        if not session:
+            raise HTTPException(404, "Session not found")
+        db.execute("UPDATE user_sessions SET revoked = 1 WHERE id = ?", (session_id,))
+    return {"message": "Session revoked"}
+
+
+@router.post("/v1/user/sessions/revoke-all", tags=["User Settings"])
+def revoke_all_sessions(user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        result = db.execute(
+            "UPDATE user_sessions SET revoked = 1 WHERE user_id = ? AND revoked = 0",
+            (user_id,)
+        )
+        count = result.rowcount
+    return {"message": f"Revoked {count} sessions"}
+
+
+# ── Data Export ───────────────────────────────────────────────────────
+@router.post("/v1/user/export", tags=["User Settings"])
+def export_data(user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        user = db.execute(
+            "SELECT user_id, email, display_name, timezone, subscription_tier, "
+            "totp_enabled, created_at, last_login FROM users WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        if not user:
+            raise HTTPException(404, "User not found")
+
+        agents = db.execute(
+            "SELECT agent_id, name, description, capabilities, created_at, last_seen "
+            "FROM agents WHERE owner_id = ?", (user_id,)
+        ).fetchall()
+
+        agent_ids = [a["agent_id"] for a in agents]
+        memory = []
+        webhooks = []
+        for aid in agent_ids:
+            mem = db.execute(
+                "SELECT agent_id, namespace, key, value, visibility, created_at "
+                "FROM memory WHERE agent_id = ?", (aid,)
+            ).fetchall()
+            memory.extend([dict(m) for m in mem])
+            wh = db.execute(
+                "SELECT webhook_id, agent_id, url, event_type, active, created_at "
+                "FROM webhooks WHERE agent_id = ?", (aid,)
+            ).fetchall()
+            webhooks.extend([dict(w) for w in wh])
+
+        keys = db.execute(
+            "SELECT id, name, key_prefix, key_hint, created_at, last_used, status "
+            "FROM user_keys WHERE user_id = ?", (user_id,)
+        ).fetchall()
+
+    export = {
+        "export_version": "1.0",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "user": dict(user),
+        "agents": [dict(a) for a in agents],
+        "memory": memory,
+        "webhooks": webhooks,
+        "api_keys": [dict(k) for k in keys],
+    }
+    _log_audit("user.data_exported", user_id, None, None, None)
+    return Response(
+        content=json.dumps(export, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename=moltgrid-export-{datetime.now().strftime('%Y%m%d')}.json"}
+    )
+
+
+# ── Account Deletion ─────────────────────────────────────────────────
+@router.delete("/v1/user/account", tags=["User Settings"])
+def delete_account(req: DeleteAccountRequest, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        user = db.execute("SELECT email FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(404, "User not found")
+        if req.confirm_email.lower() != user["email"].lower():
+            raise HTTPException(422, "Email does not match")
+
+        # Get all agent IDs owned by this user
+        agent_ids = [r["agent_id"] for r in db.execute(
+            "SELECT agent_id FROM agents WHERE owner_id = ?", (user_id,)
+        ).fetchall()]
+
+        # Cascade delete all agent data
+        for aid in agent_ids:
+            db.execute("DELETE FROM memory WHERE agent_id = ?", (aid,))
+            db.execute("DELETE FROM vector_memory WHERE agent_id = ?", (aid,))
+            db.execute("DELETE FROM queue WHERE agent_id = ?", (aid,))
+            db.execute("DELETE FROM relay WHERE from_agent = ? OR to_agent = ?", (aid, aid))
+            db.execute("DELETE FROM webhooks WHERE agent_id = ?", (aid,))
+            db.execute("DELETE FROM scheduled_tasks WHERE agent_id = ?", (aid,))
+            db.execute("DELETE FROM sessions WHERE agent_id = ?", (aid,))
+
+        # Delete agents
+        db.execute("DELETE FROM agents WHERE owner_id = ?", (user_id,))
+
+        # Delete user data
+        db.execute("DELETE FROM user_keys WHERE user_id = ?", (user_id,))
+        db.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+        db.execute("DELETE FROM audit_logs WHERE user_id = ?", (user_id,))
+
+        # Delete user
+        db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+
+    _log_audit("user.account_deleted", user_id, None, None, None)
+    return {"message": "Account deleted"}

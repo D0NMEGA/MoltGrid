@@ -923,6 +923,54 @@ def _init_db_sqlite(conn):
             except Exception:
                 pass
 
+    # ── Phase 4: Account Settings tables ────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            jti TEXT NOT NULL UNIQUE,
+            device TEXT DEFAULT 'Unknown',
+            browser TEXT DEFAULT 'Unknown',
+            ip_address TEXT,
+            last_active TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            revoked INTEGER DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_jti ON user_sessions(jti)")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_keys (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            key_prefix TEXT NOT NULL,
+            key_hash TEXT NOT NULL,
+            key_hint TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_used TEXT,
+            status TEXT DEFAULT 'active',
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_keys_user ON user_keys(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_keys_hash ON user_keys(key_hash)")
+
+    # Migrate users table — add timezone and avatar
+    try:
+        u_existing2 = _get_existing_columns(conn, "users")
+        for col, typedef in [
+            ("timezone", "TEXT DEFAULT 'America/Chicago'"),
+            ("avatar_url", "TEXT"),
+            ("deletion_requested_at", "TEXT"),
+        ]:
+            if col not in u_existing2:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
+    except Exception:
+        pass
+
 
 def _init_db_postgres(conn):
     """PostgreSQL schema initialization — CREATE TABLE IF NOT EXISTS with PG types.
@@ -1159,7 +1207,10 @@ def _init_db_postgres(conn):
             totp_secret TEXT,
             totp_enabled INTEGER DEFAULT 0,
             totp_recovery_codes TEXT,
-            promo_optin INTEGER DEFAULT 0
+            promo_optin INTEGER DEFAULT 0,
+            timezone TEXT DEFAULT 'America/Chicago',
+            avatar_url TEXT,
+            deletion_requested_at TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS email_queue (
             id TEXT PRIMARY KEY,
@@ -1292,6 +1343,30 @@ def _init_db_postgres(conn):
             status TEXT DEFAULT 'active',
             created_at TEXT NOT NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS user_sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            jti TEXT NOT NULL UNIQUE,
+            device TEXT DEFAULT 'Unknown',
+            browser TEXT DEFAULT 'Unknown',
+            ip_address TEXT,
+            last_active TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            revoked INTEGER DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )""",
+        """CREATE TABLE IF NOT EXISTS user_keys (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            key_prefix TEXT NOT NULL,
+            key_hash TEXT NOT NULL,
+            key_hint TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_used TEXT,
+            status TEXT DEFAULT 'active',
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )""",
     ]
 
     for sql in tables_sql:
@@ -1327,6 +1402,10 @@ def _init_db_postgres(conn):
         "CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_agent_events_agent_ack_time ON agent_events(agent_id, acknowledged, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_agent_key_events_agent ON agent_key_events(agent_id)",
+        "CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_user_sessions_jti ON user_sessions(jti)",
+        "CREATE INDEX IF NOT EXISTS idx_user_keys_user ON user_keys(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_user_keys_hash ON user_keys(key_hash)",
     ]
 
     for sql in indexes_sql:
