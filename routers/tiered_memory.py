@@ -8,7 +8,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Depends
 
 from db import get_db
-from helpers import get_agent_id, _embed_text, _log_memory_access, _encrypt
+from helpers import get_agent_id, _embed_text, _log_memory_access, _encrypt, _decrypt
 from routers.sessions import _auto_summarize, _estimate_tokens
 from models import (
     TieredStoreEventRequest, TieredStoreEventResponse,
@@ -27,6 +27,9 @@ def _cosine_similarity(vec1, vec2):
 @router.post("/v1/tiered/store_event", response_model=TieredStoreEventResponse)
 def tiered_store_event(req: TieredStoreEventRequest, agent_id: str = Depends(get_agent_id)):
     """Append an event to the session buffer (Tier 1). Optionally persist to mid-term notes (Tier 2)."""
+    if req.persist and not req.note_key:
+        raise HTTPException(422, "note_key is required when persist=True")
+
     now = datetime.now(timezone.utc).isoformat()
 
     # Prepare content string
@@ -125,7 +128,6 @@ def tiered_recall(req: TieredRecallRequest, agent_id: str = Depends(get_agent_id
             for row in mid_rows:
                 val = row["value"] or ""
                 # Try to decrypt if encrypted
-                from helpers import _decrypt
                 val = _decrypt(val)
                 val_lower = val.lower()
                 key_lower = row["key"].lower()

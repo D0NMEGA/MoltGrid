@@ -3,7 +3,7 @@ MoltGrid Pydantic Models — all request/response BaseModel subclasses.
 Extracted from main.py to serve as the shared models module for router modules.
 """
 
-from typing import Optional, List, Dict, Union
+from typing import Optional, List, Dict, Union, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from config import MAX_MEMORY_VALUE_SIZE, MAX_QUEUE_PAYLOAD_SIZE
@@ -1293,8 +1293,6 @@ class EventPollResponse(BaseModel):
 # TIERED MEMORY MODELS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-from typing import Any
-
 class TieredStoreEventRequest(BaseModel):
     session_id: str = Field(..., max_length=64)
     data: Any = Field(..., description="Event content -- string or any JSON-serializable dict")
@@ -1314,7 +1312,7 @@ class TieredRecallRequest(BaseModel):
     query: str = Field(..., max_length=10000)
     k: int = Field(5, ge=1, le=50, description="Number of results to return")
     namespace: str = Field("default", max_length=64, description="Namespace to search in Tier 2 and 3")
-    tiers: list = Field(["mid", "long"], description="Which tiers to search")
+    tiers: List[Literal["mid", "long"]] = Field(["mid", "long"], description="Which tiers to search")
     min_similarity: float = Field(0.0, ge=0.0, le=1.0)
 
 class TieredRecallResultItem(BaseModel):
@@ -1325,7 +1323,7 @@ class TieredRecallResultItem(BaseModel):
     metadata: Optional[dict] = None
 
 class TieredRecallResponse(BaseModel):
-    results: list
+    results: List[TieredRecallResultItem]
     count: int
     query: str
 
