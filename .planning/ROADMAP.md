@@ -21,8 +21,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 7: Backlog Quick Tasks** - Ship agent discovery, org accounts, 2FA, agent templates, enhanced audit logs, and MoltBook deep integration
 - [ ] **Phase 8: Agent Usability & Obstacle Course** - Write skill.md, ship unified event stream + WebSocket layer, persistent worker daemon, and obstacle course
 - [x] **Phase 9: PostgreSQL Migration** - Database abstraction layer, migration scripts, backend-agnostic test suite (completed 2026-03-15)
-- [ ] **Phase 10: Monolith Modularization** - Extract 6752-line main.py into modular router architecture with shared config/models/helpers (INSERTED)
-- [ ] **Phase 14: Quickstarts & API Playground** - Framework quickstart guides (LangGraph, CrewAI, OpenAI), expanded MCP guide, Bruno API collection, Swagger UI playground (INSERTED)
+- [x] **Phase 10: Monolith Modularization** - Extract 6752-line main.py into modular router architecture with shared config/models/helpers (completed 2026-03-15)
+- [x] **Phase 14: Quickstarts & API Playground** - Framework quickstart guides (LangGraph, CrewAI, OpenAI), expanded MCP guide, Bruno API collection, Swagger UI playground (completed 2026-03-15)
 
 ## Phase Details
 
@@ -197,7 +197,7 @@ Plans:
 
 Plans:
 - [x] 10-01-PLAN.md — Extract shared infrastructure: config.py, state.py, models.py, helpers.py, routers/ package (INFRA-03)
-- [ ] 10-02-PLAN.md — Create 18 router modules, rebuild main.py as thin orchestrator with re-exports, verify all tests pass (INFRA-03, INFRA-04)
+- [x] 10-02-PLAN.md — Create 18 router modules, rebuild main.py as thin orchestrator with re-exports, verify all tests pass (INFRA-03, INFRA-04)
 
 ### Phase 14: Quickstarts & API Playground (INSERTED)
 **Goal**: Developers integrating LangGraph, CrewAI, or OpenAI Agents can follow a framework-specific quickstart guide to connect to MoltGrid in under 10 minutes; the MCP guide covers advanced patterns; a Bruno API collection lets developers explore all endpoints without code; Swagger UI playground is confirmed accessible
@@ -211,8 +211,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 14-01-PLAN.md — Write 3 framework quickstart guides (LangGraph, CrewAI, OpenAI) + expand MCP guide + register new slugs in GUIDE_PLATFORMS
-- [ ] 14-02-PLAN.md — Create Bruno API collection with 17+ request files and 2 environments + verify /api-docs playground
+- [x] 14-01-PLAN.md — Write 3 framework quickstart guides (LangGraph, CrewAI, OpenAI) + expand MCP guide + register new slugs in GUIDE_PLATFORMS
+- [x] 14-02-PLAN.md — Create Bruno API collection with 17+ request files and 2 environments + verify /api-docs playground
 
 ## Progress
 
@@ -223,8 +223,8 @@ Phases execute in numeric order: 1 → 9 → 10 → 2 → 3 → 4 → 5 → 6 �
 |-------|----------------|--------|-----------|
 | 1. Memory Privacy & Security | 3/3 | Complete   | 2026-03-03 |
 | 9. PostgreSQL Migration | 3/3 | Complete   | 2026-03-15 |
-| 10. Monolith Modularization | 1/2 | In Progress | - |
-| 14. Quickstarts & API Playground | 0/2 | Not started | - |
+| 10. Monolith Modularization | 2/2 | Complete | 2026-03-15 |
+| 14. Quickstarts & API Playground | 2/2 | Complete | 2026-03-15 |
 | 2. OpenClaw Integration | 0/3 | Not started | - |
 | 3. Platform Connectors | 0/3 | Not started | - |
 | 4. SDK & Client Libraries | 0/3 | Not started | - |
