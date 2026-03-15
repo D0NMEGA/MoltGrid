@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse
 
@@ -72,10 +73,18 @@ app = FastAPI(
     "Persistent memory, task queues, message relay, and text utilities.",
     version="0.9.0",
     lifespan=lifespan,
-    docs_url="/api-docs",
+    docs_url=None,
     redoc_url=None,
-    swagger_favicon_url="/public/favicon/favicon.ico",
 )
+
+
+@app.get("/api-docs", include_in_schema=False)
+async def custom_swagger_ui():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " — API Docs",
+        swagger_favicon_url="/public/favicon/favicon.ico",
+    )
 
 
 # ─── Exception Handlers ─────────────────────────────────────────────────────

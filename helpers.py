@@ -305,18 +305,28 @@ def _decode_token(token: str) -> dict:
         raise HTTPException(401, "Invalid token")
 
 async def get_user_id(request: Request) -> str:
+    # Check Authorization header first, then fall back to mg_token cookie
     auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(401, "Missing Bearer token")
-    claims = _decode_token(auth[7:])
-    return claims["user_id"]
+    if auth.startswith("Bearer "):
+        claims = _decode_token(auth[7:])
+        return claims["user_id"]
+    cookie_token = request.cookies.get("mg_token")
+    if cookie_token:
+        claims = _decode_token(cookie_token)
+        return claims["user_id"]
+    raise HTTPException(401, "Missing Bearer token")
 
 async def get_optional_user_id(request: Request) -> Optional[str]:
     auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer "):
+    token = None
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+    elif request.cookies.get("mg_token"):
+        token = request.cookies.get("mg_token")
+    if not token:
         return None
     try:
-        claims = _decode_token(auth[7:])
+        claims = _decode_token(token)
         return claims["user_id"]
     except HTTPException:
         return None
