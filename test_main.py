@@ -2449,8 +2449,8 @@ class TestPubSub:
         r = client.post("/v1/pubsub/publish", json={"channel": "wh-test", "payload": "test"}, headers=h1)
         assert r.json()["subscribers_notified"] == 1
         # Verify webhook delivery was queued
-        with __import__("contextlib").closing(__import__("sqlite3").connect(DB_PATH)) as conn:
-            conn.row_factory = __import__("sqlite3").Row
+        import contextlib
+        with contextlib.closing(_get_test_db()) as conn:
             row = conn.execute(
                 "SELECT * FROM webhook_deliveries WHERE event_type='message.broadcast'"
             ).fetchone()
