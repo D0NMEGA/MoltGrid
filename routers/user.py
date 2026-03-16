@@ -208,7 +208,7 @@ def export_data(user_id: str = Depends(get_user_id)):
             ).fetchall()
             memory.extend([dict(m) for m in mem])
             wh = db.execute(
-                "SELECT webhook_id, agent_id, url, event_type, active, created_at "
+                "SELECT webhook_id, agent_id, url, event_types, active, created_at "
                 "FROM webhooks WHERE agent_id = ?", (aid,)
             ).fetchall()
             webhooks.extend([dict(w) for w in wh])
