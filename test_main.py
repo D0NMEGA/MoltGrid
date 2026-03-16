@@ -1709,7 +1709,9 @@ class TestHeartbeat:
 class TestUserAuth:
     """Tests for user accounts, JWT auth, dashboard endpoints, and tier enforcement."""
 
-    def _signup(self, email="user@example.com", password="securePass1234!", display_name="Test"):
+    def _signup(self, email="user@example.com", password="securePass1234!", display_name=None):
+        if display_name is None:
+            display_name = email.split("@")[0].replace(".", "_").replace("-", "_")[:30]
         with patch("main._queue_email"):
             r = client.post("/v1/auth/signup", json={
                 "email": email, "password": password, "display_name": display_name,
@@ -1911,6 +1913,7 @@ class TestBilling:
         with patch("main._queue_email"):
             s = client.post("/v1/auth/signup", json={
                 "email": "checkout@example.com", "password": "securePass1234!",
+                "display_name": "checkout_user",
             })
         token = s.json()["token"]
         r = client.post("/v1/billing/checkout", json={"tier": "invalid"},
@@ -1933,6 +1936,7 @@ class TestBilling:
         with patch("main._queue_email"):
             s = client.post("/v1/auth/signup", json={
                 "email": "freetier@example.com", "password": "securePass1234!",
+                "display_name": "freetier_user",
             })
         assert s.status_code == 200
         token = s.json()["token"]
@@ -3097,9 +3101,10 @@ def _register_user_and_agent(email="dashuser@example.com", password="testPass123
     _queue_email is mocked throughout to avoid sqlite lock contention from the background
     email thread (which runs every 30s and competes with test DB writes in WAL mode).
     """
+    display_name = email.split("@")[0].replace(".", "_").replace("-", "_")[:30]
     with patch("main._queue_email", return_value=None):
         r = client.post("/v1/auth/signup", json={
-            "email": email, "password": password, "display_name": "DashUser",
+            "email": email, "password": password, "display_name": display_name,
         })
         assert r.status_code == 200, f"signup failed: {r.text}"
         d = r.json()
@@ -3553,7 +3558,7 @@ class TestErrorFormat:
     def test_validation_error_returns_standard_shape(self):
         # Register agent first to get API key
         with patch("main._queue_email"):
-            r = client.post("/v1/auth/signup", json={"email": "t@t.com", "password": "Pass1234!"})
+            r = client.post("/v1/auth/signup", json={"email": "t@t.com", "password": "Pass1234!", "display_name": "err_shape_user"})
             token = r.json().get("token", "")
             r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
         api_key = r2.json().get("api_key", "badkey")
@@ -3583,7 +3588,7 @@ class TestInputLimits:
 
     def test_memory_value_size_limit(self):
         with patch("main._queue_email"):
-            r = client.post("/v1/auth/signup", json={"email": "t2@t.com", "password": "Pass1234!"})
+            r = client.post("/v1/auth/signup", json={"email": "t2@t.com", "password": "Pass1234!", "display_name": "input_lim_user"})
             token = r.json().get("token", "")
             r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
         api_key = r2.json().get("api_key", "badkey")
@@ -3593,7 +3598,7 @@ class TestInputLimits:
 
     def test_memory_value_at_limit_accepted(self):
         with patch("main._queue_email"):
-            r = client.post("/v1/auth/signup", json={"email": "t3@t.com", "password": "Pass1234!"})
+            r = client.post("/v1/auth/signup", json={"email": "t3@t.com", "password": "Pass1234!", "display_name": "input_ok_user"})
             token = r.json().get("token", "")
             r2 = client.post("/v1/register", json={"name": "test"}, headers={"Authorization": f"Bearer {token}"})
         api_key = r2.json().get("api_key", "badkey")
@@ -3638,7 +3643,8 @@ class TestTierRateLimits:
 
     def _make_agent(self, email, tier="free"):
         with patch("main._queue_email"):
-            r = client.post("/v1/auth/signup", json={"email": email, "password": "Pass1234!"})
+            dn = email.split("@")[0].replace(".", "_").replace("-", "_")[:30]
+            r = client.post("/v1/auth/signup", json={"email": email, "password": "Pass1234!", "display_name": dn})
         token = r.json().get("token", "")
         # Set subscription tier directly in DB for test
         import sqlite3, os as _os
@@ -3713,7 +3719,7 @@ class TestWebhookRetry:
 
     def test_webhook_delivery_max_attempts_is_5(self):
         with patch("main._queue_email"):
-            r = client.post("/v1/auth/signup", json={"email": "whr@t.com", "password": "Pass1234!"})
+            r = client.post("/v1/auth/signup", json={"email": "whr@t.com", "password": "Pass1234!", "display_name": "wh_retry_user"})
         token = r.json().get("token", "")
         with patch("main._queue_email"):
             r2 = client.post("/v1/register", json={"name": "wha"}, headers={"Authorization": f"Bearer {token}"})
@@ -3750,7 +3756,8 @@ class TestWebhookTest:
 
     def _setup(self, email="whtest@t.com"):
         with patch("main._queue_email"):
-            r = client.post("/v1/auth/signup", json={"email": email, "password": "Pass1234!"})
+            dn = email.split("@")[0].replace(".", "_").replace("-", "_")[:30]
+            r = client.post("/v1/auth/signup", json={"email": email, "password": "Pass1234!", "display_name": dn})
         token = r.json().get("token", "")
         with patch("main._queue_email"):
             r2 = client.post("/v1/register", json={"name": "whtestagent"}, headers={"Authorization": f"Bearer {token}"})
@@ -3782,7 +3789,7 @@ class TestWebhookTest:
             return
         # Create a different agent
         with patch("main._queue_email"):
-            r = client.post("/v1/auth/signup", json={"email": "other_wh@t.com", "password": "Pass1234!"})
+            r = client.post("/v1/auth/signup", json={"email": "other_wh@t.com", "password": "Pass1234!", "display_name": "other_wh_user"})
         token = r.json().get("token", "")
         with patch("main._queue_email"):
             r2 = client.post("/v1/register", json={"name": "otherwh"}, headers={"Authorization": f"Bearer {token}"})
@@ -3832,7 +3839,7 @@ class TestStripeEmailConfirmation:
 
     def test_checkout_completed_queues_email(self):
         with patch("main._queue_email"):
-            r = client.post("/v1/auth/signup", json={"email": "stripe@t.com", "password": "Pass1234!"})
+            r = client.post("/v1/auth/signup", json={"email": "stripe@t.com", "password": "Pass1234!", "display_name": "stripe_user"})
         user_id = r.json().get("user_id", "")
         if not user_id:
             return
@@ -3863,7 +3870,7 @@ class TestSecurityAlertEmails:
 
     def test_key_rotation_triggers_alert_email(self):
         with patch("main._queue_email"):
-            r = client.post("/v1/auth/signup", json={"email": "keyrot@t.com", "password": "Pass1234!"})
+            r = client.post("/v1/auth/signup", json={"email": "keyrot@t.com", "password": "Pass1234!", "display_name": "keyrot_user"})
         token = r.json().get("token", "")
         with patch("main._queue_email"):
             r2 = client.post("/v1/register", json={"name": "rota"}, headers={"Authorization": f"Bearer {token}"})
@@ -3878,7 +3885,7 @@ class TestSecurityAlertEmails:
     def test_new_ip_login_no_crash(self):
         """Login with new IP header should not crash — basic smoke test."""
         with patch("main._queue_email"):
-            client.post("/v1/auth/signup", json={"email": "iptest@t.com", "password": "Pass1234!"})
+            client.post("/v1/auth/signup", json={"email": "iptest@t.com", "password": "Pass1234!", "display_name": "iptest_user"})
         # First login — establish baseline IP
         with patch("main._queue_email"):
             client.post("/v1/auth/login", json={"email": "iptest@t.com", "password": "Pass1234!"})
@@ -3934,7 +3941,9 @@ class TestDirectoryFeatured:
 class TestOrgAccounts:
     """Tests for multi-user organization accounts (BL-02)."""
 
-    def _signup(self, email="org-user@example.com", password="securePass1234!", display_name="OrgUser"):
+    def _signup(self, email="org-user@example.com", password="securePass1234!", display_name=None):
+        if display_name is None:
+            display_name = email.split("@")[0].replace(".", "_").replace("-", "_")[:30]
         with patch("main._queue_email"):
             r = client.post("/v1/auth/signup", json={
                 "email": email, "password": password, "display_name": display_name,
@@ -4167,7 +4176,7 @@ class TestOrgAccounts:
 class TestTOTP2FA:
     @patch("main._queue_email")
     def test_2fa_setup_returns_secret(self, mock_email):
-        client.post("/v1/auth/signup", json={"email": "2fa_setup@test.com", "password": "Pass1234!", "display_name": "T"})
+        client.post("/v1/auth/signup", json={"email": "2fa_setup@test.com", "password": "Pass1234!", "display_name": "TotpSetup"})
         token = client.post("/v1/auth/login", json={"email": "2fa_setup@test.com", "password": "Pass1234!"}).json()["token"]
         r = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 200
@@ -4178,7 +4187,7 @@ class TestTOTP2FA:
 
     @patch("main._queue_email")
     def test_2fa_verify_enables_and_returns_recovery_codes(self, mock_email):
-        client.post("/v1/auth/signup", json={"email": "2fa_verify@test.com", "password": "Pass1234!", "display_name": "T"})
+        client.post("/v1/auth/signup", json={"email": "2fa_verify@test.com", "password": "Pass1234!", "display_name": "TotpVerify"})
         token = client.post("/v1/auth/login", json={"email": "2fa_verify@test.com", "password": "Pass1234!"}).json()["token"]
         setup = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"}).json()
         code = pyotp.TOTP(setup["secret"]).now()
@@ -4189,7 +4198,7 @@ class TestTOTP2FA:
 
     @patch("main._queue_email")
     def test_login_with_2fa_enabled_no_code_returns_requires_2fa(self, mock_email):
-        client.post("/v1/auth/signup", json={"email": "2fa_login@test.com", "password": "Pass1234!", "display_name": "T"})
+        client.post("/v1/auth/signup", json={"email": "2fa_login@test.com", "password": "Pass1234!", "display_name": "TotpLogin"})
         token = client.post("/v1/auth/login", json={"email": "2fa_login@test.com", "password": "Pass1234!"}).json()["token"]
         setup = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"}).json()
         code = pyotp.TOTP(setup["secret"]).now()
@@ -4202,7 +4211,7 @@ class TestTOTP2FA:
 
     @patch("main._queue_email")
     def test_login_with_valid_totp_code_returns_jwt(self, mock_email):
-        client.post("/v1/auth/signup", json={"email": "2fa_fulllogin@test.com", "password": "Pass1234!", "display_name": "T"})
+        client.post("/v1/auth/signup", json={"email": "2fa_fulllogin@test.com", "password": "Pass1234!", "display_name": "TotpFullLogin"})
         token = client.post("/v1/auth/login", json={"email": "2fa_fulllogin@test.com", "password": "Pass1234!"}).json()["token"]
         setup = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"}).json()
         code = pyotp.TOTP(setup["secret"]).now()
@@ -4215,7 +4224,7 @@ class TestTOTP2FA:
 
     @patch("main._queue_email")
     def test_recovery_code_login(self, mock_email):
-        client.post("/v1/auth/signup", json={"email": "2fa_recovery@test.com", "password": "Pass1234!", "display_name": "T"})
+        client.post("/v1/auth/signup", json={"email": "2fa_recovery@test.com", "password": "Pass1234!", "display_name": "TotpRecovery"})
         token = client.post("/v1/auth/login", json={"email": "2fa_recovery@test.com", "password": "Pass1234!"}).json()["token"]
         setup = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"}).json()
         code = pyotp.TOTP(setup["secret"]).now()
@@ -4227,7 +4236,7 @@ class TestTOTP2FA:
 
     @patch("main._queue_email")
     def test_disable_2fa(self, mock_email):
-        client.post("/v1/auth/signup", json={"email": "2fa_disable@test.com", "password": "Pass1234!", "display_name": "T"})
+        client.post("/v1/auth/signup", json={"email": "2fa_disable@test.com", "password": "Pass1234!", "display_name": "TotpDisable"})
         token = client.post("/v1/auth/login", json={"email": "2fa_disable@test.com", "password": "Pass1234!"}).json()["token"]
         setup = client.post("/v1/auth/2fa/setup", headers={"Authorization": f"Bearer {token}"}).json()
         code = pyotp.TOTP(setup["secret"]).now()
@@ -4308,7 +4317,7 @@ class TestAgentTemplates:
 class TestAuditLogs:
     @patch("main._queue_email")
     def test_login_creates_audit_entry(self, mock_email):
-        client.post("/v1/auth/signup", json={"email": "audit_user@test.com", "password": "Pass1234!", "display_name": "T"})
+        client.post("/v1/auth/signup", json={"email": "audit_user@test.com", "password": "Pass1234!", "display_name": "AuditUser"})
         client.post("/v1/auth/login", json={"email": "audit_user@test.com", "password": "Pass1234!"})
         token = client.post("/v1/auth/login", json={"email": "audit_user@test.com", "password": "Pass1234!"}).json()["token"]
         r = client.get("/v1/user/audit-log", headers={"Authorization": f"Bearer {token}"})
@@ -4318,7 +4327,7 @@ class TestAuditLogs:
 
     @patch("main._queue_email")
     def test_audit_log_filter_by_action(self, mock_email):
-        client.post("/v1/auth/signup", json={"email": "audit_filter@test.com", "password": "Pass1234!", "display_name": "T"})
+        client.post("/v1/auth/signup", json={"email": "audit_filter@test.com", "password": "Pass1234!", "display_name": "AuditFilter"})
         token = client.post("/v1/auth/login", json={"email": "audit_filter@test.com", "password": "Pass1234!"}).json()["token"]
         r = client.get("/v1/user/audit-log?action=user.login", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 200
@@ -4327,7 +4336,7 @@ class TestAuditLogs:
 
     @patch("main._queue_email")
     def test_audit_log_export_csv(self, mock_email):
-        client.post("/v1/auth/signup", json={"email": "audit_csv@test.com", "password": "Pass1234!", "display_name": "T"})
+        client.post("/v1/auth/signup", json={"email": "audit_csv@test.com", "password": "Pass1234!", "display_name": "AuditCsv"})
         token = client.post("/v1/auth/login", json={"email": "audit_csv@test.com", "password": "Pass1234!"}).json()["token"]
         r = client.get("/v1/user/audit-log/export", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 200
