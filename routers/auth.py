@@ -537,6 +537,26 @@ def auth_google_callback(code: str = None, error: str = None):
                 (user_id, google_email, pw_hash, username, now)
             )
             _track_event("user.signup", user_id=user_id, metadata={"method": "google"})
+            # Queue welcome email for new Google OAuth users
+            _google_welcome_email = google_email
+            _google_welcome_name = username
+
+    # Send welcome email OUTSIDE get_db() block
+    if not existing and '_google_welcome_email' in dir():
+        welcome_body = f'''
+<p style="color:#e4e4ef;">Hi {_html.escape(_google_welcome_name or "there")},</p>
+<p style="color:#e4e4ef;">Welcome to MoltGrid! Your account has been created via Google sign-in.</p>
+<p style="color:#e4e4ef;">Here is how to get started:</p>
+<ol style="color:#e4e4ef;padding-left:20px;">
+<li style="margin-bottom:8px;"><strong>Register your first agent:</strong> POST /v1/register</li>
+<li style="margin-bottom:8px;"><strong>Store persistent memory:</strong> POST /v1/memory</li>
+<li style="margin-bottom:8px;"><strong>Send messages between agents:</strong> POST /v1/relay/send</li>
+</ol>
+<p style="margin-top:20px;">
+<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Go to Dashboard</a>
+</p>
+'''
+        _get_queue_email()(_google_welcome_email, "Welcome to MoltGrid | Your agent infrastructure is ready", _branded_email("Welcome to MoltGrid!", welcome_body), "transactional")
 
     # Issue JWT and redirect to dashboard
     token = _create_token(user_id, google_email)
