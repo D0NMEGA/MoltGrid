@@ -137,9 +137,8 @@ async def events_ws(websocket: WebSocket, api_key: str = Query(None)):
 async def user_events_ws(websocket: WebSocket, token: str = Query(None)):
     """User-scoped event stream via WebSocket. Aggregates events from ALL agents owned by the user.
     Auth via ?token=<JWT> query param or mg_token cookie."""
-    import jwt, os, time as _time
-
-    JWT_SECRET = os.getenv("JWT_SECRET", "changeme")
+    import jwt, time as _time
+    from config import JWT_SECRET
 
     # Resolve token from query param or cookie
     ws_token = token
