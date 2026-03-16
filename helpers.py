@@ -87,7 +87,7 @@ def hash_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 def generate_api_key() -> str:
-    return f"af_{uuid.uuid4().hex}"
+    return f"mg_{uuid.uuid4().hex}"
 
 def _http_code_to_slug(status: int) -> str:
     return {
@@ -537,10 +537,25 @@ Memory. Coordination. Economy. Built for autonomous agents.
 </html>'''
 
 
-def _queue_email(to_email: str, subject: str, body_html: str):
-    """Queue an email for sending. Uses independent connection to avoid nested locks."""
+def _email_from(category: str = "transactional") -> str:
+    """Return the appropriate FROM display string for an email category.
+    Categories: transactional, support, marketing, founder"""
+    from email.utils import formataddr
+    mapping = {
+        "transactional": formataddr(("MoltGrid", "noreply@moltgrid.net")),
+        "support": formataddr(("MoltGrid Support", "support@moltgrid.net")),
+        "marketing": formataddr(("Donovan from MoltGrid", "updates@moltgrid.net")),
+        "founder": formataddr(("Donovan Santine", "donovan@moltgrid.net")),
+    }
+    return mapping.get(category, mapping["transactional"])
+
+
+def _queue_email(to_email: str, subject: str, body_html: str, category: str = "transactional"):
+    """Queue an email for sending. Uses independent connection to avoid nested locks.
+    category: transactional | support | marketing | founder"""
     email_id = f"email_{uuid.uuid4().hex[:16]}"
     now = datetime.now(timezone.utc).isoformat()
+    from_display = _email_from(category)
     conn = None
     try:
         conn = get_standalone_conn()
@@ -550,7 +565,7 @@ def _queue_email(to_email: str, subject: str, body_html: str):
             (email_id, to_email, subject, body_html, now)
         )
         conn.commit()
-        logger.info(f"Queued email {email_id} to {to_email}: {subject}")
+        logger.info(f"Queued email {email_id} to {to_email}: {subject} (from: {from_display})")
     except Exception as e:
         logger.error(f"Failed to queue email {email_id}: {e}")
     finally:
@@ -566,9 +581,10 @@ def _send_email_smtp(to_email: str, subject: str, body_html: str) -> bool:
         return False
 
     try:
+        from email.utils import formataddr
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = SMTP_FROM
+        msg["From"] = formataddr(("MoltGrid", SMTP_FROM))
         msg["To"] = to_email
 
         # Add HTML part

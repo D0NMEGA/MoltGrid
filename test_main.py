@@ -164,7 +164,7 @@ class TestRegistration:
         assert r.status_code == 200
         d = r.json()
         assert d["agent_id"].startswith("agent_")
-        assert d["api_key"].startswith("af_")
+        assert d["api_key"].startswith("mg_")
         assert "Store your API key" in d["message"]
 
     def test_register_no_name(self):
@@ -190,7 +190,7 @@ class TestRegistration:
         d = r.json()
         assert d["status"] == "rotated"
         assert d["agent_id"] == aid
-        assert d["api_key"].startswith("af_")
+        assert d["api_key"].startswith("mg_")
         assert d["api_key"] != old_key
 
         new_h = {"X-API-Key": d["api_key"]}
@@ -4353,7 +4353,7 @@ class TestMoltBookDeepIntegration:
         data = r.json()
         assert "agent_id" in data
         assert "api_key" in data
-        assert data["api_key"].startswith("af_")
+        assert data["api_key"].startswith("mg_")
 
     @patch.dict(os.environ, {"MOLTBOOK_SERVICE_KEY": "test-moltbook-service-key"})
     def test_moltbook_register_duplicate_returns_409(self):
