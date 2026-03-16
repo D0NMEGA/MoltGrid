@@ -146,17 +146,34 @@ async def stripe_webhook(request: Request):
                     _apply_tier(db, user["user_id"], tier)
         elif event_type == "customer.subscription.deleted":
             cust_id = data_obj.get("customer")
-            user = db.execute("SELECT user_id FROM users WHERE stripe_customer_id = ?", (cust_id,)).fetchone()
+            user = db.execute("SELECT user_id, email FROM users WHERE stripe_customer_id = ?", (cust_id,)).fetchone()
             if user:
                 _apply_tier(db, user["user_id"], "free")
                 db.execute("UPDATE users SET stripe_subscription_id = NULL WHERE user_id = ?", (user["user_id"],))
                 _track_event("billing.subscription_cancelled", user_id=user["user_id"])
+                cancel_body = (
+                    '<p style="color:#e4e4ef;">Your MoltGrid subscription has been cancelled. '
+                    'Your account has been downgraded to the <strong>Free</strong> tier.</p>'
+                    '<p style="color:#e4e4ef;">You can re-subscribe anytime from your billing page.</p>'
+                    '<p style="margin-top:20px;">'
+                    '<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">View Billing</a>'
+                    '</p>'
+                )
+                _get_queue_email()(user["email"], "MoltGrid: subscription cancelled", _branded_email("Subscription cancelled", cancel_body), "transactional")
         elif event_type == "invoice.payment_failed":
             cust_id = data_obj.get("customer")
-            user = db.execute("SELECT user_id FROM users WHERE stripe_customer_id = ?", (cust_id,)).fetchone()
+            user = db.execute("SELECT user_id, email FROM users WHERE stripe_customer_id = ?", (cust_id,)).fetchone()
             if user:
                 db.execute("UPDATE users SET payment_failed = 1 WHERE user_id = ?", (user["user_id"],))
                 logger.warning(f"Payment failed for user {user['user_id']}")
+                failed_body = (
+                    '<p style="color:#e4e4ef;">We were unable to process your MoltGrid subscription payment.</p>'
+                    '<p style="color:#e4e4ef;">Please update your payment method to avoid service interruption.</p>'
+                    '<p style="margin-top:20px;">'
+                    '<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Update Payment</a>'
+                    '</p>'
+                )
+                _get_queue_email()(user["email"], "MoltGrid: payment failed | action required", _branded_email("Payment failed", failed_body), "transactional")
     if _checkout_user_id:
         _log_audit("billing.tier_change", user_id=_checkout_user_id, details=_checkout_tier)
         with get_db() as email_db:
