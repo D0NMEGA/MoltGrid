@@ -271,5 +271,7 @@ def delete_account(req: DeleteAccountRequest, user_id: str = Depends(get_user_id
         # Delete user
         db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
 
+    # NOTE: Issued JWTs remain valid until expiry. A revoked_tokens table
+    # or per-request user existence check should be added in a future security hardening pass.
     _log_audit("user.account_deleted", user_id, None, None, None)
     return {"message": "Account deleted"}

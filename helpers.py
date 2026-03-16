@@ -851,7 +851,8 @@ def _run_webhook_delivery_tick():
                     raise ValueError("Webhook URL points to a private/internal address")
                 headers = {"Content-Type": "application/json", "X-MoltGrid-Event": row["event_type"]}
                 if row["secret"]:
-                    sig = _hmac.new(row["secret"].encode(), body.encode(), hashlib.sha256).hexdigest()
+                    decrypted_secret = _decrypt(row["secret"]) if row["secret"] else ""
+                    sig = _hmac.new(decrypted_secret.encode(), body.encode(), hashlib.sha256).hexdigest()
                     headers["X-MoltGrid-Signature"] = sig
                 with httpx.Client(timeout=WEBHOOK_TIMEOUT) as hc:
                     resp = hc.post(row["url"], content=body, headers=headers)

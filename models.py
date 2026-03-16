@@ -15,7 +15,7 @@ from config import MAX_MEMORY_VALUE_SIZE, MAX_QUEUE_PAYLOAD_SIZE
 
 class SignupRequest(BaseModel):
     email: str = Field(..., max_length=256)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     display_name: Optional[str] = Field(None, max_length=64)
     promo_optin: bool = False
     turnstile_token: Optional[str] = None
@@ -31,7 +31,7 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    new_password: str = Field(..., min_length=6, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 class TOTP2FAVerifyRequest(BaseModel):
     code: str = Field(..., min_length=6, max_length=8)

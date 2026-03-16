@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Depends, Request
 
 from db import get_db
-from helpers import get_agent_id, _is_safe_url, _run_webhook_delivery_tick
+from helpers import get_agent_id, _is_safe_url, _run_webhook_delivery_tick, _check_auth_rate_limit, _encrypt, _decrypt
 from models import WebhookRegisterRequest, WebhookResponse, WebhookListResponse, WebhookDeleteResponse, WebhookTestResponse
 
 router = APIRouter()
@@ -33,7 +33,7 @@ def webhook_register(req: WebhookRegisterRequest, agent_id: str = Depends(get_ag
     with get_db() as db:
         db.execute(
             "INSERT INTO webhooks (webhook_id, agent_id, url, event_types, secret, created_at) VALUES (?,?,?,?,?,?)",
-            (webhook_id, agent_id, req.url, json.dumps(req.event_types), req.secret, now)
+            (webhook_id, agent_id, req.url, json.dumps(req.event_types), _encrypt(req.secret) if req.secret else None, now)
         )
     return WebhookResponse(
         webhook_id=webhook_id, url=req.url,
@@ -111,6 +111,7 @@ def webhook_test(webhook_id: str, request: Request, agent_id: str = Depends(get_
 @router.post("/v1/agents/{agent_id}/webhooks/openclaw", tags=["Webhooks"])
 async def receive_openclaw_event(agent_id: str, request: Request):
     """Receive an OpenClaw event and enqueue it for the agent."""
+    _check_auth_rate_limit(request)
     body = await request.body()
     signature = request.headers.get("X-OpenClaw-Signature", "")
 
@@ -129,8 +130,8 @@ async def receive_openclaw_event(agent_id: str, request: Request):
         if not webhook or not webhook["secret"]:
             raise HTTPException(404, "No active OpenClaw webhook for this agent")
 
-        # Verify HMAC signature — secret stored as plaintext for verification
-        secret = webhook["secret"]
+        # Verify HMAC signature — secret stored encrypted at rest
+        secret = _decrypt(webhook["secret"]) if webhook["secret"] else ""
         expected = _hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
         if not _hmac.compare_digest(signature, expected):
             raise HTTPException(401, "Invalid signature")

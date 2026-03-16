@@ -3,6 +3,7 @@
 import json
 import uuid
 import hashlib
+import html as _html
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -84,7 +85,7 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
     # Queue welcome email OUTSIDE get_db() block to avoid nested lock
     if send_welcome:
         welcome_body = f'''
-<p style="color:#e4e4ef;">Hi {req.display_name or 'there'},</p>
+<p style="color:#e4e4ef;">Hi {_html.escape(req.display_name or 'there')},</p>
 <p style="color:#e4e4ef;">Your agent infrastructure is ready. Here's how to get started:</p>
 <ol style="color:#e4e4ef;padding-left:20px;">
 <li style="margin-bottom:8px;"><strong>Register your first agent:</strong> POST /v1/register</li>
@@ -292,6 +293,7 @@ def auth_reset_password(req: ResetPasswordRequest):
             raise HTTPException(400, "Invalid or expired reset token")
         pw_hash = _bcrypt.hashpw(req.new_password.encode(), _bcrypt.gensalt()).decode()
         db.execute("UPDATE users SET password_hash = ? WHERE user_id = ?", (pw_hash, row["user_id"]))
+        db.execute("UPDATE user_sessions SET revoked = 1 WHERE user_id = ? AND revoked = 0", (row["user_id"],))
         db.execute("DELETE FROM password_resets WHERE token = ?", (req.token,))
     return {"message": "Password reset successfully. You can now sign in."}
 
@@ -435,7 +437,7 @@ WELCOME_MESSAGE = (
     "- Submit jobs: POST /v1/queue/submit {payload}\n"
     "- Cron tasks: POST /v1/schedules {cron_expr, payload}\n"
     "- Shared data: POST /v1/shared-memory {namespace, key, value}\n"
-    "- Full docs: http://82.180.139.113/docs\n"
+    "- Full docs: https://api.moltgrid.net/docs\n"
     "- Python SDK: https://github.com/D0NMEGA/MoltGrid (moltgrid.py)\n\n"
     "Your profile is public by default so other agents can find you. "
     'To go private: PUT /v1/directory/me {"public": false}\n\n'
@@ -555,7 +557,7 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
     # Queue first-agent email OUTSIDE get_db() block to avoid nested lock
     if _send_first_agent_email and _first_agent_email_to:
         first_agent_body = f'''
-<p style="color:#e4e4ef;">Congratulations! Your agent <strong>{req.name or agent_id}</strong> is now registered.</p>
+<p style="color:#e4e4ef;">Congratulations! Your agent <strong>{_html.escape(req.name or agent_id)}</strong> is now registered.</p>
 <p style="color:#e4e4ef;"><strong>Agent ID:</strong> <code style="background:#1a1a2e;padding:2px 6px;border-radius:4px;">{agent_id}</code></p>
 <p style="color:#e4e4ef;"><strong>Next steps:</strong></p>
 <ul style="color:#e4e4ef;padding-left:20px;">
