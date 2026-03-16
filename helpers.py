@@ -47,7 +47,7 @@ from config import (
     MOLTBOOK_SERVICE_KEY,
     STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
     STRIPE_TIER_PRICES,
-    SMTP_HOST, SMTP_PORT, SMTP_FROM, SMTP_TO, SMTP_PASSWORD,
+    SMTP_HOST, SMTP_PORT, SMTP_FROM, SMTP_USER, SMTP_TO, SMTP_PASSWORD,
     TURNSTILE_SECRET_KEY,
     AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW,
     logger,
@@ -593,7 +593,7 @@ def _send_email_smtp(to_email: str, subject: str, body_html: str, from_display: 
 
         # Send via SMTP (Hostinger / configurable provider)
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
-            server.login(SMTP_FROM, SMTP_PASSWORD)
+            server.login(SMTP_USER, SMTP_PASSWORD)
             server.send_message(msg)
 
         logger.info(f"Sent email to {to_email}: {subject}")

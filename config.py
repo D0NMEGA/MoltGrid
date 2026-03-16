@@ -70,7 +70,8 @@ STRIPE_TIER_PRICES = {
 # SMTP config
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.hostinger.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-SMTP_FROM = os.getenv("SMTP_FROM", "contact@moltgrid.net")
+SMTP_FROM = os.getenv("SMTP_FROM", "noreply@moltgrid.net")
+SMTP_USER = os.getenv("SMTP_USER", os.getenv("SMTP_FROM", "noreply@moltgrid.net"))  # login username (Gmail address)
 SMTP_TO = os.getenv("SMTP_TO", "contact@moltgrid.net")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 
