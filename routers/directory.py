@@ -11,12 +11,18 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 
 from db import get_db
 from helpers import get_agent_id, _encrypt, _decrypt, _sanitize_text
-from models import HeartbeatRequest, DirectoryUpdateRequest, StatusUpdateRequest, CollaborationRequest
+from models import (
+    HeartbeatRequest, DirectoryUpdateRequest, StatusUpdateRequest, CollaborationRequest,
+    HeartbeatResponse, DirectoryUpdateResponse, DirectoryListResponse,
+    LeaderboardResponse, DirectoryStatsResponse, DirectorySearchResponse,
+    DirectoryStatusUpdateResponse, CollaborationResponse, DirectoryMatchResponse,
+    DirectoryNetworkResponse, DirectoryProfileResponse,
+)
 
 router = APIRouter()
 
-@router.post("/v1/agents/heartbeat", tags=["Directory"])
-@router.post("/v1/heartbeat", tags=["Directory"])
+@router.post("/v1/agents/heartbeat", response_model=HeartbeatResponse, tags=["Directory"])
+@router.post("/v1/heartbeat", response_model=HeartbeatResponse, tags=["Directory"])
 def agent_heartbeat(req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = Depends(get_agent_id)):
     """Send a heartbeat to indicate this agent is alive. Call periodically (default every 60s)."""
     now = datetime.now(timezone.utc).isoformat()
@@ -33,7 +39,7 @@ def agent_heartbeat(req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = 
     return {"agent_id": agent_id, "status": req.status, "heartbeat_at": now}
 
 
-@router.put("/v1/directory/me", tags=["Directory"])
+@router.put("/v1/directory/me", response_model=DirectoryUpdateResponse, tags=["Directory"])
 def directory_update(req: DirectoryUpdateRequest, agent_id: str = Depends(get_agent_id)):
     """Update your agent's directory listing."""
     # Sanitize text fields to prevent XSS
@@ -67,7 +73,7 @@ def directory_me(agent_id: str = Depends(get_agent_id)):
     d["available"] = bool(d.get("available", 1))
     return d
 
-@router.get("/v1/directory", tags=["Directory"])
+@router.get("/v1/directory", response_model=DirectoryListResponse, tags=["Directory"])
 def directory_list(
     capability: Optional[str] = None,
     limit: int = Query(50, le=200),
@@ -99,7 +105,7 @@ def directory_list(
         agents.append(d)
     return {"agents": agents, "count": len(agents)}
 
-@router.get("/v1/leaderboard", tags=["Directory"])
+@router.get("/v1/leaderboard", response_model=LeaderboardResponse, tags=["Directory"])
 def leaderboard(
     sort_by: str = Query("reputation", regex="^(reputation|credits|tasks_completed|requests)$"),
     limit: int = Query(20, ge=1, le=100)
@@ -165,7 +171,7 @@ def leaderboard(
         "sort_by": sort_by
     }
 
-@router.get("/v1/directory/stats", tags=["Directory"])
+@router.get("/v1/directory/stats", response_model=DirectoryStatsResponse, tags=["Directory"])
 def directory_stats():
     """Public directory statistics. No auth required."""
     with get_db() as db:
@@ -234,7 +240,7 @@ class CollaborationRequest(BaseModel):
     outcome: str = Field(..., description="success, failure, or partial")
     rating: int = Field(..., ge=1, le=5, description="Rating 1-5 for the partner")
 
-@router.get("/v1/directory/search", tags=["Directory"])
+@router.get("/v1/directory/search", response_model=DirectorySearchResponse, tags=["Directory"])
 def directory_search(
     q: Optional[str] = Query(None, description="Text search query — matches name, description, capabilities, skills, interests"),
     capability: Optional[str] = None,
@@ -278,11 +284,18 @@ def directory_search(
         params.append(min_reputation)
     where = " AND ".join(conditions)
     params.append(limit)
-    cols = ("agent_id, name, description, capabilities, skills, interests, available, looking_for, busy_until, "
-            "reputation, credits, heartbeat_status, heartbeat_at, created_at")
+    cols = ("a.agent_id, a.name, a.description, a.capabilities, a.skills, a.interests, a.available, a.looking_for, a.busy_until, "
+            "a.reputation, a.credits, a.heartbeat_status, a.heartbeat_at, a.created_at, a.owner_id, u.display_name AS owner_name")
+    # Prefix conditions with table alias
+    where_aliased = where.replace("public=", "a.public=").replace("available=", "a.available=").replace(
+        "heartbeat_status=", "a.heartbeat_status=").replace("heartbeat_at", "a.heartbeat_at").replace(
+        "heartbeat_interval", "a.heartbeat_interval").replace("busy_until", "a.busy_until").replace(
+        "reputation", "a.reputation").replace("name LIKE", "a.name LIKE").replace(
+        "description LIKE", "a.description LIKE").replace("capabilities LIKE", "a.capabilities LIKE").replace(
+        "skills LIKE", "a.skills LIKE").replace("interests LIKE", "a.interests LIKE")
     with get_db() as db:
         rows = db.execute(
-            f"SELECT {cols} FROM agents WHERE {where} ORDER BY reputation DESC, created_at DESC LIMIT ?",
+            f"SELECT {cols} FROM agents a LEFT JOIN users u ON a.owner_id = u.user_id WHERE {where_aliased} ORDER BY a.reputation DESC, a.created_at DESC LIMIT ?",
             params
         ).fetchall()
     agents = []
@@ -296,7 +309,7 @@ def directory_search(
         agents.append(d)
     return {"agents": agents, "count": len(agents)}
 
-@router.patch("/v1/directory/me/status", tags=["Directory"])
+@router.patch("/v1/directory/me/status", response_model=DirectoryStatusUpdateResponse, tags=["Directory"])
 def directory_status_update(req: StatusUpdateRequest, agent_id: str = Depends(get_agent_id)):
     """Update your availability status."""
     updates = []
@@ -319,7 +332,7 @@ def directory_status_update(req: StatusUpdateRequest, agent_id: str = Depends(ge
         db.execute(f"UPDATE agents SET {', '.join(updates)} WHERE agent_id=?", params)
     return {"status": "updated", "agent_id": agent_id}
 
-@router.post("/v1/directory/collaborations", tags=["Directory"])
+@router.post("/v1/directory/collaborations", response_model=CollaborationResponse, tags=["Directory"])
 def log_collaboration(req: CollaborationRequest, agent_id: str = Depends(get_agent_id)):
     """Log a collaboration outcome. Updates the partner's reputation."""
     if req.outcome not in ("success", "failure", "partial"):
@@ -353,7 +366,7 @@ def log_collaboration(req: CollaborationRequest, agent_id: str = Depends(get_age
         "partner_new_reputation": new_rep, "created_at": now,
     }
 
-@router.get("/v1/directory/match", tags=["Directory"])
+@router.get("/v1/directory/match", response_model=DirectoryMatchResponse, tags=["Directory"])
 def directory_match(
     need: str = Query(..., description="Capability you're looking for"),
     min_reputation: float = Query(0.0, ge=0.0),
@@ -379,7 +392,7 @@ def directory_match(
         matches.append(d)
     return {"matches": matches, "count": len(matches), "need": need}
 
-@router.get("/v1/directory/network", tags=["Directory"])
+@router.get("/v1/directory/network", response_model=DirectoryNetworkResponse, tags=["Directory"])
 def directory_network():
     """Get network graph data for agent visualization. No auth required.
     Returns nodes (agents) and edges (collaborations/messages between them)."""
@@ -464,7 +477,7 @@ def directory_network():
         "stats": {"total_agents": len(nodes), "online_agents": online_count, "total_edges": len(edges)}
     }
 
-@router.get("/v1/directory/{agent_id}", tags=["Directory"])
+@router.get("/v1/directory/{agent_id}", response_model=DirectoryProfileResponse, tags=["Directory"])
 def directory_profile(agent_id: str):
     """Get a public agent profile. No auth required. Returns 404 if agent is private."""
     with get_db() as db:
