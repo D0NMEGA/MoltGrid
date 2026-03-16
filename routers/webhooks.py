@@ -106,3 +106,47 @@ def webhook_test(webhook_id: str, request: Request, agent_id: str = Depends(get_
         "status": result["status"] if result else "unknown",
         "error": result["last_error"] if result else None,
     }
+
+
+@router.post("/v1/agents/{agent_id}/webhooks/openclaw", tags=["Webhooks"])
+async def receive_openclaw_event(agent_id: str, request: Request):
+    """Receive an OpenClaw event and enqueue it for the agent."""
+    body = await request.body()
+    signature = request.headers.get("X-OpenClaw-Signature", "")
+
+    if not signature:
+        raise HTTPException(401, "Missing X-OpenClaw-Signature header")
+
+    with get_db() as db:
+        agent = db.execute("SELECT agent_id FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+        if not agent:
+            raise HTTPException(404, "Agent not found")
+
+        webhook = db.execute(
+            "SELECT secret FROM webhooks WHERE agent_id = ? AND event_types = 'openclaw.*' AND active = 1",
+            (agent_id,)
+        ).fetchone()
+        if not webhook or not webhook["secret"]:
+            raise HTTPException(404, "No active OpenClaw webhook for this agent")
+
+        # Verify HMAC signature — secret stored as plaintext for verification
+        secret = webhook["secret"]
+        expected = _hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        if not _hmac.compare_digest(signature, expected):
+            raise HTTPException(401, "Invalid signature")
+
+        # Parse body
+        try:
+            payload = json.loads(body)
+        except Exception:
+            raise HTTPException(422, "Invalid JSON body")
+
+        # Enqueue as a job
+        job_id = f"job_{uuid.uuid4().hex[:16]}"
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "INSERT INTO queue (job_id, agent_id, queue_name, payload, status, priority, created_at) VALUES (?,?,?,?,?,?,?)",
+            (job_id, agent_id, "openclaw", json.dumps(payload), "pending", 5, now)
+        )
+
+    return {"status": "accepted", "job_id": job_id}

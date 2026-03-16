@@ -503,6 +503,43 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
                     (agent_id, "default", "template_starter_code", tmpl["starter_code"], now, now),
                 )
 
+                # OpenClaw template special handling
+                import json as _json
+                starter = _json.loads(tmpl["starter_code"])
+                if starter.get("auto_webhook"):
+                    # Auto-register OpenClaw webhook
+                    import secrets as _secrets
+                    webhook_secret = _secrets.token_hex(32)
+                    webhook_id = f"wh_{uuid.uuid4().hex[:12]}"
+                    webhook_url = f"https://api.moltgrid.net/v1/agents/{agent_id}/webhooks/openclaw"
+                    db.execute(
+                        "INSERT INTO webhooks (webhook_id, agent_id, url, event_types, secret, created_at, active) VALUES (?,?,?,?,?,?,1)",
+                        (webhook_id, agent_id, webhook_url, "openclaw.*", webhook_secret, now)
+                    )
+                    # Seed openclaw_config memory (encrypted, private)
+                    openclaw_config = _json.dumps({
+                        "version": "1.0",
+                        "webhook_secret": webhook_secret,
+                        "webhook_url": webhook_url,
+                        "event_subscriptions": ["openclaw.*"]
+                    })
+                    db.execute(
+                        "INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at, visibility) VALUES (?,?,?,?,?,?,?) ON CONFLICT (agent_id, namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+                        (agent_id, "default", "openclaw_config", _encrypt(openclaw_config), now, now, "private")
+                    )
+                    # Seed empty channel_list
+                    db.execute(
+                        "INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at, visibility) VALUES (?,?,?,?,?,?,?) ON CONFLICT (agent_id, namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+                        (agent_id, "default", "channel_list", "[]", now, now, "private")
+                    )
+                # Set agent as public with description and capabilities from template
+                if starter.get("is_public"):
+                    db.execute("UPDATE agents SET public = 1 WHERE agent_id = ?", (agent_id,))
+                if starter.get("description"):
+                    db.execute("UPDATE agents SET description = ? WHERE agent_id = ?", (starter["description"], agent_id))
+                if starter.get("capabilities"):
+                    db.execute("UPDATE agents SET capabilities = ? WHERE agent_id = ?", (_json.dumps(starter["capabilities"]), agent_id))
+
         # Send welcome message from MyFirstAgent
         welcome_exists = db.execute(
             "SELECT agent_id FROM agents WHERE agent_id=?", (WELCOME_AGENT_ID,)

@@ -802,7 +802,7 @@ def _init_db_sqlite(conn):
         )
     """)
 
-    # Seed 4 built-in templates — INSERT OR IGNORE so re-seeding is always safe
+    # Seed 5 built-in templates — INSERT OR IGNORE so re-seeding is always safe
     _templates_seed = [
         (
             "tmpl_openclaw_social",
@@ -810,6 +810,14 @@ def _init_db_sqlite(conn):
             "An agent that posts to MoltBook and tracks social engagement via MoltGrid analytics.",
             "social",
             '{"memory_keys": ["moltbook_profile_id", "last_post_id", "follower_count"], "capabilities": ["moltbook_post", "moltbook_reply", "moltbook_upvote"], "starter_tasks": [{"action": "heartbeat", "interval": 60}, {"action": "poll_moltbook_events", "queue": "social"}], "example_post": "POST /v1/moltbook/events"}',
+            "2026-01-01T00:00:00Z",
+        ),
+        (
+            "tmpl_openclaw",
+            "OpenClaw Agent",
+            "OpenClaw-compatible autonomous agent with messaging, memory, and scheduling capabilities.",
+            "openclaw",
+            '{"description": "OpenClaw-compatible autonomous agent", "capabilities": ["messaging", "memory", "scheduling"], "tags": ["openclaw", "autonomous", "multi-channel"], "is_public": true, "memory_keys": ["openclaw_config", "channel_list"], "auto_webhook": true}',
             "2026-01-01T00:00:00Z",
         ),
         (
@@ -1411,7 +1419,7 @@ def _init_db_postgres(conn):
     for sql in indexes_sql:
         conn.execute(sql)
 
-    # Seed templates with ON CONFLICT DO NOTHING (postgres equivalent of INSERT OR IGNORE)
+    # Seed 5 built-in templates with ON CONFLICT DO NOTHING (postgres equivalent of INSERT OR IGNORE)
     _templates_seed = [
         (
             "tmpl_openclaw_social",
@@ -1419,6 +1427,14 @@ def _init_db_postgres(conn):
             "An agent that posts to MoltBook and tracks social engagement via MoltGrid analytics.",
             "social",
             '{"memory_keys": ["moltbook_profile_id", "last_post_id", "follower_count"], "capabilities": ["moltbook_post", "moltbook_reply", "moltbook_upvote"], "starter_tasks": [{"action": "heartbeat", "interval": 60}, {"action": "poll_moltbook_events", "queue": "social"}], "example_post": "POST /v1/moltbook/events"}',
+            "2026-01-01T00:00:00Z",
+        ),
+        (
+            "tmpl_openclaw",
+            "OpenClaw Agent",
+            "OpenClaw-compatible autonomous agent with messaging, memory, and scheduling capabilities.",
+            "openclaw",
+            '{"description": "OpenClaw-compatible autonomous agent", "capabilities": ["messaging", "memory", "scheduling"], "tags": ["openclaw", "autonomous", "multi-channel"], "is_public": true, "memory_keys": ["openclaw_config", "channel_list"], "auto_webhook": true}',
             "2026-01-01T00:00:00Z",
         ),
         (
