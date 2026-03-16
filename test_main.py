@@ -1829,8 +1829,8 @@ class TestUserAuth:
         assert agents.json()["count"] == 2
 
     def test_user_agents_isolation(self):
-        r_a = self._signup(email="a@example.com")
-        r_b = self._signup(email="b@example.com")
+        r_a = self._signup(email="iso_alpha@example.com")
+        r_b = self._signup(email="iso_beta@example.com")
         token_a = r_a.json()["token"]
         token_b = r_b.json()["token"]
         # User A registers an agent
