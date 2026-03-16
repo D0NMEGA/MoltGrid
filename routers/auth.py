@@ -70,12 +70,19 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
             raise HTTPException(422, "Username can only contain letters, numbers, and underscores")
         if len(req.display_name) > 30:
             raise HTTPException(422, "Username must be 30 characters or fewer")
+        if len(req.display_name) < 3:
+            raise HTTPException(422, "Username must be at least 3 characters")
 
     send_welcome = False
     with get_db() as db:
         existing = db.execute("SELECT user_id FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
         if existing:
             raise HTTPException(409, "Email already registered")
+        # Check username uniqueness (case-insensitive)
+        if req.display_name:
+            existing_name = db.execute("SELECT user_id FROM users WHERE LOWER(display_name) = LOWER(?)", (req.display_name,)).fetchone()
+            if existing_name:
+                raise HTTPException(409, "Username already taken. Choose a different one.")
         db.execute(
             "INSERT INTO users (user_id, email, password_hash, display_name, promo_optin, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (user_id, req.email.lower(), pw_hash, req.display_name, 1 if req.promo_optin else 0, now),

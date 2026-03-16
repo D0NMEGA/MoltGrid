@@ -3,8 +3,9 @@ MoltGrid Pydantic Models — all request/response BaseModel subclasses.
 Extracted from main.py to serve as the shared models module for router modules.
 """
 
+import re
 from typing import Optional, List, Dict, Union, Any, Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, validator
 
 from config import MAX_MEMORY_VALUE_SIZE, MAX_QUEUE_PAYLOAD_SIZE
 
@@ -13,12 +14,28 @@ from config import MAX_MEMORY_VALUE_SIZE, MAX_QUEUE_PAYLOAD_SIZE
 # AUTH MODELS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _validate_password_strength(v):
+    """Shared password strength validator for signup, reset, and change flows."""
+    if not re.search(r'[A-Z]', v):
+        raise ValueError('Password must contain at least one uppercase letter')
+    if not re.search(r'[0-9]', v):
+        raise ValueError('Password must contain at least one number')
+    if not re.search(r'[!@#$%^&*()_+\-=\[\]{};:\'",.<>?/\\|`~]', v):
+        raise ValueError('Password must contain at least one special character')
+    if not re.match(r'^[\x20-\x7E]+$', v):
+        raise ValueError('Password must contain only standard ASCII characters')
+    return v
+
 class SignupRequest(BaseModel):
     email: str = Field(..., max_length=256)
     password: str = Field(..., min_length=8, max_length=128)
-    display_name: Optional[str] = Field(None, max_length=64)
+    display_name: Optional[str] = Field(None, max_length=30)
     promo_optin: bool = False
     turnstile_token: Optional[str] = None
+
+    @validator('password')
+    def password_strength(cls, v):
+        return _validate_password_strength(v)
 
 class LoginRequest(BaseModel):
     email: str = Field(..., max_length=256)
@@ -32,6 +49,10 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str = Field(..., min_length=8, max_length=128)
+
+    @validator('new_password')
+    def password_strength(cls, v):
+        return _validate_password_strength(v)
 
 class TOTP2FAVerifyRequest(BaseModel):
     code: str = Field(..., min_length=6, max_length=8)

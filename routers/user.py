@@ -6,9 +6,10 @@ import hashlib
 import secrets
 from datetime import datetime, timezone
 
+import re
 import bcrypt as _bcrypt
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional, List
 
 from db import get_db
@@ -30,6 +31,18 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., max_length=128)
     new_password: str = Field(..., min_length=8, max_length=128)
     confirm_password: str = Field(..., max_length=128)
+
+    @validator('new_password')
+    def password_strength(cls, v):
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('Password must contain at least one number')
+        if not re.search(r'[!@#$%^&*()_+\-=\[\]{};:\'",.<>?/\\|`~]', v):
+            raise ValueError('Password must contain at least one special character')
+        if not re.match(r'^[\x20-\x7E]+$', v):
+            raise ValueError('Password must contain only standard ASCII characters')
+        return v
 
 class CreateKeyRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
