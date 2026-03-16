@@ -4,7 +4,7 @@ import json
 import uuid
 import hashlib
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import re
 import bcrypt as _bcrypt
@@ -82,6 +82,35 @@ def update_profile(req: ProfileUpdate, user_id: str = Depends(get_user_id)):
     updates = []
     params = []
     if req.display_name is not None:
+        # Validate username format
+        if not re.match(r'^[A-Za-z0-9_]+$', req.display_name):
+            raise HTTPException(422, "Username can only contain letters, numbers, and underscores")
+        if len(req.display_name) < 3:
+            raise HTTPException(422, "Username must be at least 3 characters")
+        if len(req.display_name) > 30:
+            raise HTTPException(422, "Username must be 30 characters or fewer")
+        # Check cooldown and uniqueness
+        with get_db() as db:
+            current = db.execute(
+                "SELECT display_name, last_username_change FROM users WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            if current and current["display_name"] and current["display_name"].lower() != req.display_name.lower():
+                # Different username -- enforce cooldown
+                if current.get("last_username_change"):
+                    last_change = datetime.fromisoformat(current["last_username_change"])
+                    if datetime.now(timezone.utc) - last_change < timedelta(days=14):
+                        days_left = 14 - (datetime.now(timezone.utc) - last_change).days
+                        raise HTTPException(429, f"Username can only be changed once every 14 days. {days_left} days remaining.")
+                # Check uniqueness
+                existing = db.execute(
+                    "SELECT user_id FROM users WHERE LOWER(display_name) = LOWER(?) AND user_id != ?",
+                    (req.display_name, user_id)
+                ).fetchone()
+                if existing:
+                    raise HTTPException(409, "Username already taken")
+                # Track the change timestamp
+                updates.append("last_username_change = ?")
+                params.append(datetime.now(timezone.utc).isoformat())
         updates.append("display_name = ?")
         params.append(req.display_name)
     if req.timezone is not None:

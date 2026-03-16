@@ -308,6 +308,26 @@ def auth_reset_password(req: ResetPasswordRequest):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# USERNAME AVAILABILITY CHECK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/v1/auth/check-username", tags=["Auth"])
+def check_username(username: str):
+    """Check if a username is available. No auth required."""
+    if not username or len(username) < 3:
+        return {"available": False, "reason": "Must be at least 3 characters"}
+    if len(username) > 30:
+        return {"available": False, "reason": "Must be 30 characters or fewer"}
+    if not re.match(r'^[A-Za-z0-9_]+$', username):
+        return {"available": False, "reason": "Letters, numbers, and underscores only"}
+    with get_db() as db:
+        existing = db.execute("SELECT user_id FROM users WHERE LOWER(display_name) = LOWER(?)", (username,)).fetchone()
+    if existing:
+        return {"available": False, "reason": "Already taken"}
+    return {"available": True, "reason": "Available"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # TOTP 2FA
 # ═══════════════════════════════════════════════════════════════════════════════
 

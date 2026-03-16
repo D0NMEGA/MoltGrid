@@ -973,6 +973,7 @@ def _init_db_sqlite(conn):
             ("timezone", "TEXT DEFAULT 'America/Chicago'"),
             ("avatar_url", "TEXT"),
             ("deletion_requested_at", "TEXT"),
+            ("last_username_change", "TEXT"),
         ]:
             if col not in u_existing2:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
@@ -1229,7 +1230,8 @@ def _init_db_postgres(conn):
             promo_optin INTEGER DEFAULT 0,
             timezone TEXT DEFAULT 'America/Chicago',
             avatar_url TEXT,
-            deletion_requested_at TEXT
+            deletion_requested_at TEXT,
+            last_username_change TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS email_queue (
             id TEXT PRIMARY KEY,
