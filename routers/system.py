@@ -122,7 +122,7 @@ def submit_contact(form: ContactForm):
 </div>
 <p style="color:#7a7a92;font-size:13px;">If you need immediate help, check our <a href="https://api.moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">documentation</a>.</p>
 '''
-    _get_queue_email()(form.email, "We received your message — MoltGrid", _branded_email("Message Received", confirm_body))
+    _get_queue_email()(form.email, "We received your message | MoltGrid", _branded_email("Message Received", confirm_body))
 
     # Send the actual message to the team at don.mega306@gmail.com
     team_body = f'''

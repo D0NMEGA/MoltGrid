@@ -100,7 +100,7 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
 <a href="https://github.com/D0NMEGA/MoltGrid" style="color:#ff3333;text-decoration:none;">GitHub</a>
 </p>
 '''
-        _get_queue_email()(req.email.lower(), "Welcome to MoltGrid — your agent infrastructure is ready", _branded_email("Welcome to MoltGrid!", welcome_body))
+        _get_queue_email()(req.email.lower(), "Welcome to MoltGrid | Your agent infrastructure is ready", _branded_email("Welcome to MoltGrid!", welcome_body))
 
     token = _create_token(user_id, req.email.lower())
     _track_event("user.signup", user_id=user_id)
