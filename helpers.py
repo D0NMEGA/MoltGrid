@@ -482,8 +482,17 @@ def _get_client_ip(request: Request) -> str:
 # EMAIL
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _branded_email(title: str, body_content: str) -> str:
-    """Generate a branded MoltGrid HTML email with dark theme, logo, header, and footer."""
+def _branded_email(title: str, body_content: str, unsubscribe: bool = False) -> str:
+    """Generate a branded MoltGrid HTML email with dark theme, logo, header, and footer.
+    Set unsubscribe=True for promo/blog emails to include an unsubscribe link."""
+    unsub_html = ""
+    if unsubscribe:
+        unsub_html = (
+            '<tr><td style="padding:12px 32px 0;text-align:center;">'
+            '<a href="https://moltgrid.net/dashboard#/settings/notifications" '
+            'style="color:#7a7a92;text-decoration:none;font-size:11px;">Unsubscribe from these emails</a>'
+            '</td></tr>'
+        )
     return f'''<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -506,17 +515,19 @@ def _branded_email(title: str, body_content: str) -> str:
 <!-- Footer -->
 <tr><td style="padding:20px 32px;border-top:1px solid #2a2a3a;background:#0a0a0f;">
 <table width="100%" cellpadding="0" cellspacing="0">
-<tr><td style="color:#7a7a92;font-size:12px;">
-<a href="https://moltgrid.net" style="color:#ff3333;text-decoration:none;">moltgrid.net</a> &nbsp;&middot;&nbsp;
-<a href="https://moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">Docs</a> &nbsp;&middot;&nbsp;
+<tr><td style="color:#7a7a92;font-size:12px;text-align:center;">
+MoltGrid v0.9.0 &mdash;
 <a href="https://github.com/D0NMEGA/MoltGrid" style="color:#ff3333;text-decoration:none;">GitHub</a> &nbsp;&middot;&nbsp;
-<a href="https://moltgrid.net/dashboard" style="color:#ff3333;text-decoration:none;">Dashboard</a>
+<a href="https://moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">API Docs</a> &nbsp;&middot;&nbsp;
+<a href="https://moltgrid.net/contact" style="color:#ff3333;text-decoration:none;">Contact</a> &nbsp;&middot;&nbsp;
+<a href="https://moltgrid.net/privacy" style="color:#ff3333;text-decoration:none;">Privacy Policy</a> &nbsp;&middot;&nbsp;
+<a href="https://moltgrid.net/terms" style="color:#ff3333;text-decoration:none;">Terms of Service</a> &nbsp;&middot;&nbsp;
+<a href="https://moltgrid.net" style="color:#ff3333;text-decoration:none;">Home</a>
 </td></tr>
-<tr><td style="color:#7a7a92;font-size:11px;padding-top:12px;">
-MoltGrid &mdash; Infrastructure for Autonomous Agents<br>
-<a href="https://moltgrid.net/privacy" style="color:#7a7a92;text-decoration:none;">Privacy Policy</a> &nbsp;&middot;&nbsp;
-<a href="https://moltgrid.net/terms" style="color:#7a7a92;text-decoration:none;">Terms of Service</a>
+<tr><td style="color:#7a7a92;font-size:11px;padding-top:12px;text-align:center;">
+Memory. Coordination. Economy. Built for autonomous agents.
 </td></tr>
+{unsub_html}
 </table>
 </td></tr>
 </table>
