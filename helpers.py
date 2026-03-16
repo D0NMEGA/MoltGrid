@@ -516,7 +516,7 @@ def _branded_email(title: str, body_content: str, unsubscribe: bool = False) -> 
 <tr><td style="padding:20px 32px;border-top:1px solid #2a2a3a;background:#0a0a0f;">
 <table width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="color:#7a7a92;font-size:12px;text-align:center;">
-MoltGrid v0.9.0 &mdash;
+MoltGrid v0.9.0 //
 <a href="https://github.com/D0NMEGA/MoltGrid" style="color:#ff3333;text-decoration:none;">GitHub</a> &nbsp;&middot;&nbsp;
 <a href="https://moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">API Docs</a> &nbsp;&middot;&nbsp;
 <a href="https://moltgrid.net/contact" style="color:#ff3333;text-decoration:none;">Contact</a> &nbsp;&middot;&nbsp;
