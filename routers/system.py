@@ -333,20 +333,20 @@ async def obstacle_submit(body: ObstacleCourseSubmitRequest, agent_id: str = Dep
 async def obstacle_leaderboard():
     with get_db() as db:
         rows = db.execute(
-            "SELECT ocs.submission_id, ocs.agent_id, a.display_name, ocs.score, ocs.stages_completed, ocs.submitted_at, ocs.feedback "
+            "SELECT ocs.submission_id, ocs.agent_id, COALESCE(a.display_name, a.name) as display_name, ocs.score, ocs.stages_completed, ocs.submitted_at, ocs.feedback "
             "FROM obstacle_course_submissions ocs "
             "LEFT JOIN agents a ON a.agent_id = ocs.agent_id "
             "ORDER BY ocs.score DESC, ocs.submitted_at ASC LIMIT 20"
         ).fetchall()
     return [
         {
-            "submission_id": r[0],
-            "agent_id": r[1],
-            "display_name": r[2] or "Unknown Agent",
-            "score": r[3],
-            "stages_completed": json.loads(r[4]),
-            "submitted_at": r[5],
-            "feedback": r[6]
+            "submission_id": r["submission_id"],
+            "agent_id": r["agent_id"],
+            "display_name": r["display_name"] or "Unknown Agent",
+            "score": r["score"],
+            "stages_completed": json.loads(r["stages_completed"]) if isinstance(r["stages_completed"], str) else r["stages_completed"],
+            "submitted_at": r["submitted_at"],
+            "feedback": r["feedback"]
         }
         for r in rows
     ]
@@ -363,11 +363,11 @@ async def obstacle_my_result(agent_id: str = Depends(get_agent_id)):
     if not row:
         raise HTTPException(404, "No submission found")
     return {
-        "submission_id": row[0],
-        "stages_completed": json.loads(row[1]),
-        "score": row[2],
-        "submitted_at": row[3],
-        "feedback": row[4]
+        "submission_id": row["submission_id"],
+        "stages_completed": json.loads(row["stages_completed"]) if isinstance(row["stages_completed"], str) else row["stages_completed"],
+        "score": row["score"],
+        "submitted_at": row["submitted_at"],
+        "feedback": row["feedback"]
     }
 
 

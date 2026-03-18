@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from config import MAX_QUEUE_PAYLOAD_SIZE
 from db import get_db
@@ -45,7 +45,17 @@ def queue_status(job_id: str, agent_id: str = Depends(get_agent_id)):
         return QueueJobResponse(**d)
 
 @router.post("/v1/queue/claim", tags=["Queue"])
-def queue_claim(queue_name: str = "default", agent_id: str = Depends(get_agent_id)):
+async def queue_claim(request: Request, queue_name: str = Query("default"), agent_id: str = Depends(get_agent_id)):
+    # Accept queue_name from body JSON (body takes priority over query param)
+    try:
+        body_bytes = await request.body()
+        if body_bytes:
+            import json as _json
+            body = _json.loads(body_bytes)
+            if isinstance(body, dict) and "queue_name" in body:
+                queue_name = body["queue_name"]
+    except Exception:
+        pass
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         row = db.execute("SELECT job_id, payload, priority FROM queue WHERE queue_name=? AND status='pending' AND (next_retry_at IS NULL OR next_retry_at <= ?) ORDER BY priority DESC, created_at ASC LIMIT 1", (queue_name, now)).fetchone()

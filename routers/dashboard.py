@@ -45,7 +45,7 @@ def user_activity(
         agent_rows = db.execute(
             "SELECT agent_id FROM agents WHERE owner_id=?", (str(user_id),)
         ).fetchall()
-        agent_ids = [r[0] for r in agent_rows]
+        agent_ids = [r["agent_id"] if isinstance(r, dict) else r[0] for r in agent_rows]
         if not agent_ids:
             return {"events": []}
         ph = ",".join("?" * len(agent_ids))
@@ -63,9 +63,9 @@ def user_activity(
         except (json.JSONDecodeError, TypeError):
             payload = {"raw": str(r[3])[:200] if r[3] else ""}
         events.append({
-            "event_id": r[0],
-            "agent_id": r[1],
-            "event_type": r[2],
+            "event_id": r["event_id"],
+            "agent_id": r["agent_id"],
+            "event_type": r["event_type"],
             "payload": payload,
             "created_at": r[4],
         })

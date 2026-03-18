@@ -72,7 +72,7 @@ class NotificationPreferencesRequest(BaseModel):
 
 class MemoryVisibilityRequest(BaseModel):
     namespace: str = Field("default", max_length=64)
-    key: str = Field(..., max_length=256)
+    key: Optional[str] = Field(None, max_length=256)
     visibility: str = Field(..., description="private | public | shared")
     shared_agents: List[str] = Field(default_factory=list)
 

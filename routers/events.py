@@ -28,9 +28,9 @@ async def events_stream(agent_id: str = Depends(get_agent_id)):
             ).fetchone()
         if row:
             return {
-                "event_id": row[0],
-                "event_type": row[1],
-                "payload": json.loads(row[2]),
+                "event_id": row["event_id"],
+                "event_type": row["event_type"],
+                "payload": json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"],
                 "created_at": row[3]
             }
         await asyncio.sleep(0.5)
@@ -46,7 +46,7 @@ async def events_poll(agent_id: str = Depends(get_agent_id)):
             "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 20",
             (agent_id,)
         ).fetchall()
-    return [{"event_id": r[0], "event_type": r[1], "payload": json.loads(r[2]), "created_at": r[3]} for r in rows]
+    return [{"event_id": r["event_id"], "event_type": r["event_type"], "payload": json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"], "created_at": r["created_at"]} for r in rows]
 
 
 @router.post("/v1/events/ack", response_model=EventAckResponse, tags=["Events"])
@@ -79,7 +79,7 @@ async def events_ws(websocket: WebSocket, api_key: str = Query(None)):
     if not row:
         await websocket.close(code=4001)
         return
-    agent_id = row[0]
+    agent_id = row["agent_id"] if isinstance(row, dict) else row[0]
 
     await websocket.accept()
     await websocket.send_json({"type": "connected", "agent_id": agent_id})
@@ -102,9 +102,9 @@ async def events_ws(websocket: WebSocket, api_key: str = Query(None)):
             for ws_row in ws_rows:
                 event = {
                     "type": "event",
-                    "event_id": ws_row[0],
-                    "event_type": ws_row[1],
-                    "payload": json.loads(ws_row[2]),
+                    "event_id": ws_row["event_id"],
+                    "event_type": ws_row["event_type"],
+                    "payload": json.loads(ws_row["payload"]) if isinstance(ws_row["payload"], str) else ws_row["payload"],
                     "created_at": ws_row[3]
                 }
                 await websocket.send_json(event)
@@ -168,7 +168,7 @@ async def user_events_ws(websocket: WebSocket, token: str = Query(None)):
         agent_rows = db.execute(
             "SELECT agent_id FROM agents WHERE owner_id=?", (str(user_id),)
         ).fetchall()
-    agent_ids = [r[0] for r in agent_rows]
+    agent_ids = [r["agent_id"] if isinstance(r, dict) else r[0] for r in agent_rows]
 
     await websocket.accept()
     await websocket.send_json({
@@ -191,7 +191,7 @@ async def user_events_ws(websocket: WebSocket, token: str = Query(None)):
                 agent_rows = db.execute(
                     "SELECT agent_id FROM agents WHERE owner_id=?", (str(user_id),)
                 ).fetchall()
-            agent_ids = [r[0] for r in agent_rows]
+            agent_ids = [r["agent_id"] if isinstance(r, dict) else r[0] for r in agent_rows]
 
             # Query unacknowledged events across all user's agents
             if agent_ids:
@@ -208,9 +208,9 @@ async def user_events_ws(websocket: WebSocket, token: str = Query(None)):
                 for ws_row in ws_rows:
                     event = {
                         "type": "event",
-                        "event_id": ws_row[0],
-                        "agent_id": ws_row[1],
-                        "event_type": ws_row[2],
+                        "event_id": ws_row["event_id"],
+                        "agent_id": ws_row["agent_id"],
+                        "event_type": ws_row["event_type"],
                         "payload": json.loads(ws_row[3]),
                         "created_at": ws_row[4],
                     }
