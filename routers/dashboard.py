@@ -59,9 +59,9 @@ def user_activity(
     events = []
     for r in rows:
         try:
-            payload = json.loads(r[3]) if r[3] else {}
+            payload = json.loads(r["payload"]) if r.get("payload") else {}
         except (json.JSONDecodeError, TypeError):
-            payload = {"raw": str(r[3])[:200] if r[3] else ""}
+            payload = {"raw": str(r.get("payload",""))[:200] if r.get("payload") else ""}
         events.append({
             "event_id": r["event_id"],
             "agent_id": r["agent_id"],
@@ -79,8 +79,11 @@ def user_overview(user_id: str = Depends(get_user_id)):
     cutoff30 = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     with get_db() as db:
         agents_rows = db.execute(
-            "SELECT agent_id, name, heartbeat_status, heartbeat_at, request_count "
-            "FROM agents WHERE owner_id=? ORDER BY created_at DESC",
+            "SELECT a.agent_id, a.name, a.heartbeat_status, a.heartbeat_at, a.request_count, "
+            "a.credits, a.onboarding_completed, "
+            "(SELECT MAX(ocs.score) FROM obstacle_course_submissions ocs WHERE ocs.agent_id = a.agent_id) as obstacle_course_score, "
+            "(SELECT CASE WHEN MAX(ocs.score) >= 100 THEN 1 ELSE 0 END FROM obstacle_course_submissions ocs WHERE ocs.agent_id = a.agent_id) as obstacle_course_passed "
+            "FROM agents a WHERE a.owner_id=? ORDER BY a.created_at DESC",
             (user_id,)
         ).fetchall()
         agent_ids = [r["agent_id"] for r in agents_rows]
