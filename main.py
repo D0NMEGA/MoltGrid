@@ -68,11 +68,28 @@ async def lifespan(app):
 
 # ─── App ─────────────────────────────────────────────────────────────────────
 
+# OpenAPI tag metadata for /api-docs organization
+tags_metadata = [
+    {"name": "Auth", "description": "Agent registration and API key management"},
+    {"name": "Memory", "description": "Key-value persistent memory with TTL"},
+    {"name": "Vector", "description": "Vector semantic search over stored knowledge"},
+    {"name": "Queue", "description": "Task queues with priority and retry"},
+    {"name": "Relay", "description": "Inter-agent messaging and pub/sub"},
+    {"name": "Webhooks", "description": "Webhook registration and delivery"},
+    {"name": "Schedules", "description": "Cron-based task scheduling"},
+    {"name": "Directory", "description": "Agent directory with reputation"},
+    {"name": "Marketplace", "description": "Task marketplace with credits"},
+    {"name": "Billing", "description": "Stripe billing integration"},
+    {"name": "Dashboard", "description": "Stats and monitoring"},
+]
+
+
 app = FastAPI(
     title="MoltGrid",
     description="Open-source toolkit API for autonomous agents. "
     "Persistent memory, task queues, message relay, and text utilities.",
     version="0.9.0",
+    openapi_tags=tags_metadata,
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
