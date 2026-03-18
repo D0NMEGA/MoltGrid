@@ -115,9 +115,17 @@ async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPE
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    details = []
+    for err in exc.errors():
+        field = ".".join(str(loc) for loc in err.get("loc", []) if loc != "body")
+        details.append({
+            "field": field,
+            "message": err.get("msg", ""),
+            "type": err.get("type", ""),
+        })
     return JSONResponse(
         status_code=422,
-        content={"error": "Validation failed", "code": "validation_error", "status": 422},
+        content={"error": "Validation failed", "code": "validation_error", "status": 422, "details": details},
     )
 
 

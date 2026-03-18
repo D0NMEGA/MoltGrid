@@ -194,7 +194,7 @@ class HeartbeatRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class MemorySetRequest(BaseModel):
-    key: str = Field(..., max_length=256)
+    key: str = Field(..., min_length=1, max_length=256)
     value: str = Field(..., max_length=MAX_MEMORY_VALUE_SIZE)
     namespace: str = Field("default", max_length=64)
     ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000, description="Auto-expire after N seconds (60s-30d)")
