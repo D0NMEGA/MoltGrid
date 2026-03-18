@@ -33,6 +33,45 @@ router = APIRouter()
 WEBHOOK_EVENT_TYPES = {"message.received", "message.broadcast", "job.completed", "job.failed", "marketplace.task.claimed", "marketplace.task.delivered", "marketplace.task.completed"}
 
 
+@router.get("/v1/user/activity", tags=["User Dashboard"])
+def user_activity(
+    user_id: str = Depends(get_user_id),
+    limit: int = Query(20, ge=1, le=100),
+    days: int = Query(1, ge=1, le=90),
+):
+    """Recent activity events across all user's agents."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with get_db() as db:
+        agent_rows = db.execute(
+            "SELECT agent_id FROM agents WHERE user_id=?", (str(user_id),)
+        ).fetchall()
+        agent_ids = [r[0] for r in agent_rows]
+        if not agent_ids:
+            return {"events": []}
+        ph = ",".join("?" * len(agent_ids))
+        rows = db.execute(
+            "SELECT event_id, agent_id, event_type, payload, created_at "
+            "FROM agent_events "
+            f"WHERE agent_id IN ({ph}) AND created_at >= ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            agent_ids + [cutoff, limit],
+        ).fetchall()
+    events = []
+    for r in rows:
+        try:
+            payload = json.loads(r[3]) if r[3] else {}
+        except (json.JSONDecodeError, TypeError):
+            payload = {"raw": str(r[3])[:200] if r[3] else ""}
+        events.append({
+            "event_id": r[0],
+            "agent_id": r[1],
+            "event_type": r[2],
+            "payload": payload,
+            "created_at": r[4],
+        })
+    return {"events": events}
+
+
 @router.get("/v1/user/overview", tags=["User Dashboard"])
 def user_overview(user_id: str = Depends(get_user_id)):
     """Aggregated account overview: agents, totals, and 30-day charts."""
