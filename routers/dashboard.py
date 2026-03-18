@@ -43,7 +43,7 @@ def user_activity(
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     with get_db() as db:
         agent_rows = db.execute(
-            "SELECT agent_id FROM agents WHERE user_id=?", (str(user_id),)
+            "SELECT agent_id FROM agents WHERE owner_id=?", (str(user_id),)
         ).fetchall()
         agent_ids = [r[0] for r in agent_rows]
         if not agent_ids:

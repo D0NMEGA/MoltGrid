@@ -166,7 +166,7 @@ async def user_events_ws(websocket: WebSocket, token: str = Query(None)):
     # Look up all agent_ids for this user
     with get_db() as db:
         agent_rows = db.execute(
-            "SELECT agent_id FROM agents WHERE user_id=?", (str(user_id),)
+            "SELECT agent_id FROM agents WHERE owner_id=?", (str(user_id),)
         ).fetchall()
     agent_ids = [r[0] for r in agent_rows]
 
@@ -189,7 +189,7 @@ async def user_events_ws(websocket: WebSocket, token: str = Query(None)):
             # Refresh agent list (user may register new agents)
             with get_db() as db:
                 agent_rows = db.execute(
-                    "SELECT agent_id FROM agents WHERE user_id=?", (str(user_id),)
+                    "SELECT agent_id FROM agents WHERE owner_id=?", (str(user_id),)
                 ).fetchall()
             agent_ids = [r[0] for r in agent_rows]
 
