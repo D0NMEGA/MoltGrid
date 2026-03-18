@@ -9,7 +9,11 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from db import get_db
 from helpers import get_agent_id
-from models import SessionCreateRequest, SessionAppendRequest
+from models import (
+    SessionCreateRequest, SessionAppendRequest,
+    SessionCreateResponse, SessionListResponse, SessionAppendResponse,
+    SessionSummarizeResponse, SessionDeleteResponse,
+)
 
 router = APIRouter()
 
@@ -47,7 +51,7 @@ def _auto_summarize(messages: list) -> list:
     return system_msgs + [summary_msg] + keep
 
 
-@router.post("/v1/sessions", tags=["Sessions"])
+@router.post("/v1/sessions", response_model=SessionCreateResponse, tags=["Sessions"])
 def session_create(req: SessionCreateRequest, agent_id: str = Depends(get_agent_id)):
     """Create a new conversation session."""
     now = datetime.now(timezone.utc).isoformat()
@@ -63,7 +67,7 @@ def session_create(req: SessionCreateRequest, agent_id: str = Depends(get_agent_
     return {"session_id": session_id, "title": title, "created_at": now}
 
 
-@router.get("/v1/sessions", tags=["Sessions"])
+@router.get("/v1/sessions", response_model=SessionListResponse, tags=["Sessions"])
 def session_list(agent_id: str = Depends(get_agent_id)):
     """List all sessions for this agent."""
     with get_db() as db:
@@ -89,7 +93,7 @@ def session_get(session_id: str, agent_id: str = Depends(get_agent_id)):
     return d
 
 
-@router.post("/v1/sessions/{session_id}/messages", tags=["Sessions"])
+@router.post("/v1/sessions/{session_id}/messages", response_model=SessionAppendResponse, tags=["Sessions"])
 def session_append(session_id: str, req: SessionAppendRequest, agent_id: str = Depends(get_agent_id)):
     """Append a message to a session. Auto-summarizes if near token limit."""
     now = datetime.now(timezone.utc).isoformat()
@@ -129,7 +133,7 @@ def session_append(session_id: str, req: SessionAppendRequest, agent_id: str = D
     }
 
 
-@router.post("/v1/sessions/{session_id}/summarize", tags=["Sessions"])
+@router.post("/v1/sessions/{session_id}/summarize", response_model=SessionSummarizeResponse, tags=["Sessions"])
 def session_summarize(session_id: str, agent_id: str = Depends(get_agent_id)):
     """Force-summarize a session: collapse history to summary + recent 10 messages."""
     now = datetime.now(timezone.utc).isoformat()
@@ -160,7 +164,7 @@ def session_summarize(session_id: str, agent_id: str = Depends(get_agent_id)):
     }
 
 
-@router.delete("/v1/sessions/{session_id}", tags=["Sessions"])
+@router.delete("/v1/sessions/{session_id}", response_model=SessionDeleteResponse, tags=["Sessions"])
 def session_delete(session_id: str, agent_id: str = Depends(get_agent_id)):
     """Delete a session."""
     with get_db() as db:

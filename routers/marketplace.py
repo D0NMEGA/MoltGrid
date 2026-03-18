@@ -14,7 +14,12 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 
 from db import get_db
 from helpers import get_agent_id, _encrypt, _decrypt, _fire_webhooks
-from models import MarketplaceCreateRequest, MarketplaceDeliverRequest, MarketplaceReviewRequest, ScenarioCreateRequest
+from models import (
+    MarketplaceCreateRequest, MarketplaceDeliverRequest, MarketplaceReviewRequest, ScenarioCreateRequest,
+    MarketplaceCreateResponse, MarketplaceBrowseResponse, MarketplaceClaimResponse,
+    MarketplaceDeliverResponse, MarketplaceReviewResponse,
+    ScenarioCreateResponse, ScenarioListResponse, ScenarioRunResponse,
+)
 
 router = APIRouter()
 
@@ -65,7 +70,7 @@ def _parse_marketplace_row(row):
         d["result"] = _decrypt(d["result"])
     return d
 
-@router.post("/v1/marketplace/tasks", tags=["Marketplace"])
+@router.post("/v1/marketplace/tasks", response_model=MarketplaceCreateResponse, tags=["Marketplace"])
 def marketplace_create(req: MarketplaceCreateRequest, agent_id: str = Depends(get_agent_id)):
     """Post a task to the marketplace for other agents to claim. Costs credits upfront."""
     task_id = f"mktask_{uuid.uuid4().hex[:12]}"
@@ -96,7 +101,7 @@ def marketplace_create(req: MarketplaceCreateRequest, agent_id: str = Depends(ge
         )
     return {"task_id": task_id, "status": "open", "created_at": now, "credits_deducted": req.reward_credits}
 
-@router.get("/v1/marketplace/tasks", tags=["Marketplace"])
+@router.get("/v1/marketplace/tasks", response_model=MarketplaceBrowseResponse, tags=["Marketplace"])
 def marketplace_browse(
     category: Optional[str] = None,
     status: str = Query("open"),
@@ -136,7 +141,7 @@ def marketplace_detail(task_id: str):
         raise HTTPException(404, "Task not found")
     return _parse_marketplace_row(row)
 
-@router.post("/v1/marketplace/tasks/{task_id}/claim", tags=["Marketplace"])
+@router.post("/v1/marketplace/tasks/{task_id}/claim", response_model=MarketplaceClaimResponse, tags=["Marketplace"])
 def marketplace_claim(task_id: str, agent_id: str = Depends(get_agent_id)):
     """Claim an open marketplace task."""
     now = datetime.now(timezone.utc).isoformat()
@@ -159,7 +164,7 @@ def marketplace_claim(task_id: str, agent_id: str = Depends(get_agent_id)):
     })
     return {"task_id": task_id, "status": "claimed", "claimed_by": agent_id}
 
-@router.post("/v1/marketplace/tasks/{task_id}/deliver", tags=["Marketplace"])
+@router.post("/v1/marketplace/tasks/{task_id}/deliver", response_model=MarketplaceDeliverResponse, tags=["Marketplace"])
 def marketplace_deliver(task_id: str, req: MarketplaceDeliverRequest, agent_id: str = Depends(get_agent_id)):
     """Submit a deliverable for a claimed task."""
     now = datetime.now(timezone.utc).isoformat()
@@ -180,7 +185,7 @@ def marketplace_deliver(task_id: str, req: MarketplaceDeliverRequest, agent_id: 
     })
     return {"task_id": task_id, "status": "delivered"}
 
-@router.post("/v1/marketplace/tasks/{task_id}/review", tags=["Marketplace"])
+@router.post("/v1/marketplace/tasks/{task_id}/review", response_model=MarketplaceReviewResponse, tags=["Marketplace"])
 def marketplace_review(task_id: str, req: MarketplaceReviewRequest, agent_id: str = Depends(get_agent_id)):
     """Accept or reject a delivery. Accepting awards credits to the worker."""
     with get_db() as db:
@@ -336,7 +341,7 @@ def _run_coordination_pattern(pattern: str, agent_count: int, timeout_seconds: i
 
     return {"pattern": pattern, "success": False, "error": "Unknown pattern"}
 
-@router.post("/v1/testing/scenarios", tags=["Testing"])
+@router.post("/v1/testing/scenarios", response_model=ScenarioCreateResponse, tags=["Testing"])
 def scenario_create(req: ScenarioCreateRequest, agent_id: str = Depends(get_agent_id)):
     """Create a coordination test scenario."""
     if req.pattern not in COORDINATION_PATTERNS:
@@ -353,7 +358,7 @@ def scenario_create(req: ScenarioCreateRequest, agent_id: str = Depends(get_agen
         )
     return {"scenario_id": scenario_id, "status": "created", "pattern": req.pattern, "created_at": now}
 
-@router.get("/v1/testing/scenarios", tags=["Testing"])
+@router.get("/v1/testing/scenarios", response_model=ScenarioListResponse, tags=["Testing"])
 def scenario_list(
     pattern: Optional[str] = None,
     status: Optional[str] = None,
@@ -384,7 +389,7 @@ def scenario_list(
         scenarios.append(d)
     return {"scenarios": scenarios, "count": len(scenarios)}
 
-@router.post("/v1/testing/scenarios/{scenario_id}/run", tags=["Testing"])
+@router.post("/v1/testing/scenarios/{scenario_id}/run", response_model=ScenarioRunResponse, tags=["Testing"])
 def scenario_run(scenario_id: str, agent_id: str = Depends(get_agent_id)):
     """Run a coordination test scenario."""
     with get_db() as db:

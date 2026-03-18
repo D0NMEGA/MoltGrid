@@ -9,11 +9,16 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from db import get_db
 from helpers import get_user_id
-from models import OrgCreateRequest, OrgInviteRequest, OrgRoleUpdateRequest
+from models import (
+    OrgCreateRequest, OrgInviteRequest, OrgRoleUpdateRequest,
+    OrgCreateResponse, OrgListResponse, OrgDetailResponse,
+    OrgInviteResponse, OrgMembersResponse, OrgRemoveResponse,
+    OrgRoleChangeResponse, OrgSwitchResponse,
+)
 
 router = APIRouter()
 
-@router.post("/v1/orgs", tags=["Orgs"])
+@router.post("/v1/orgs", response_model=OrgCreateResponse, tags=["Orgs"])
 def create_org(req: OrgCreateRequest, user_id: str = Depends(get_user_id)):
     org_id = f"org_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
@@ -36,7 +41,7 @@ def create_org(req: OrgCreateRequest, user_id: str = Depends(get_user_id)):
     return {"org_id": org_id, "name": req.name, "slug": slug, "owner_user_id": user_id, "created_at": now, "role": "owner"}
 
 
-@router.get("/v1/orgs", tags=["Orgs"])
+@router.get("/v1/orgs", response_model=OrgListResponse, tags=["Orgs"])
 def list_orgs(user_id: str = Depends(get_user_id)):
     with get_db() as db:
         rows = db.execute(
@@ -49,7 +54,7 @@ def list_orgs(user_id: str = Depends(get_user_id)):
     return {"orgs": [dict(r) for r in rows]}
 
 
-@router.get("/v1/orgs/{org_id}", tags=["Orgs"])
+@router.get("/v1/orgs/{org_id}", response_model=OrgDetailResponse, tags=["Orgs"])
 def get_org(org_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         org = db.execute(
@@ -74,7 +79,7 @@ def get_org(org_id: str, user_id: str = Depends(get_user_id)):
     }
 
 
-@router.post("/v1/orgs/{org_id}/members", tags=["Orgs"])
+@router.post("/v1/orgs/{org_id}/members", response_model=OrgInviteResponse, tags=["Orgs"])
 def invite_member(org_id: str, req: OrgInviteRequest, user_id: str = Depends(get_user_id)):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
@@ -106,7 +111,7 @@ def invite_member(org_id: str, req: OrgInviteRequest, user_id: str = Depends(get
     return {"org_id": org_id, "user_id": req.user_id, "role": req.role, "joined_at": now}
 
 
-@router.get("/v1/orgs/{org_id}/members", tags=["Orgs"])
+@router.get("/v1/orgs/{org_id}/members", response_model=OrgMembersResponse, tags=["Orgs"])
 def list_org_members(org_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         org = db.execute("SELECT org_id FROM organizations WHERE org_id = ?", (org_id,)).fetchone()
@@ -125,7 +130,7 @@ def list_org_members(org_id: str, user_id: str = Depends(get_user_id)):
     return {"org_id": org_id, "members": [dict(m) for m in members]}
 
 
-@router.delete("/v1/orgs/{org_id}/members/{target_user_id}", tags=["Orgs"])
+@router.delete("/v1/orgs/{org_id}/members/{target_user_id}", response_model=OrgRemoveResponse, tags=["Orgs"])
 def remove_member(org_id: str, target_user_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         org = db.execute(
@@ -149,7 +154,7 @@ def remove_member(org_id: str, target_user_id: str, user_id: str = Depends(get_u
     return {"removed": True}
 
 
-@router.patch("/v1/orgs/{org_id}/members/{target_user_id}", tags=["Orgs"])
+@router.patch("/v1/orgs/{org_id}/members/{target_user_id}", response_model=OrgRoleChangeResponse, tags=["Orgs"])
 def change_member_role(
     org_id: str,
     target_user_id: str,
@@ -178,7 +183,7 @@ def change_member_role(
     return {"org_id": org_id, "user_id": target_user_id, "role": req.role}
 
 
-@router.post("/v1/orgs/{org_id}/switch", tags=["Orgs"])
+@router.post("/v1/orgs/{org_id}/switch", response_model=OrgSwitchResponse, tags=["Orgs"])
 def switch_org_context(org_id: str, user_id: str = Depends(get_user_id)):
     """Switch the user's active org context."""
     with get_db() as db:
