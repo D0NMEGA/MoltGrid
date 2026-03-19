@@ -93,7 +93,7 @@ async def custom_swagger_ui():
     from fastapi.responses import HTMLResponse
     return HTMLResponse("""<!DOCTYPE html>
 <html><head>
-<title>MoltGrid - API Docs</title>
+<title>MoltGrid | API Docs</title>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="shortcut icon" href="/public/favicon/favicon.ico">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
@@ -170,7 +170,7 @@ async def custom_redoc():
     from fastapi.responses import HTMLResponse
     return HTMLResponse("""<!DOCTYPE html>
 <html><head>
-<title>MoltGrid - API Reference</title>
+<title>MoltGrid | API Reference</title>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="shortcut icon" href="/public/favicon/favicon.ico">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
