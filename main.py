@@ -164,10 +164,20 @@ async def add_response_headers(request: Request, call_next):
     rate_limit_max = getattr(request.state, "rate_limit_max", RATE_LIMIT_MAX)
     response.headers["X-RateLimit-Limit"] = str(rate_limit_max if rate_limit_max is not None else RATE_LIMIT_MAX)
 
+    # Always include remaining and reset headers
     if request.state.rate_limit_remaining is not None:
         response.headers["X-RateLimit-Remaining"] = str(request.state.rate_limit_remaining)
+    else:
+        # Unauthenticated request: show full limit as remaining
+        response.headers["X-RateLimit-Remaining"] = str(rate_limit_max if rate_limit_max is not None else RATE_LIMIT_MAX)
+
     if request.state.rate_limit_reset is not None:
         response.headers["X-RateLimit-Reset"] = str(request.state.rate_limit_reset)
+    else:
+        # Calculate next window boundary
+        import time as _time
+        _window = (int(_time.time()) // RATE_LIMIT_WINDOW + 1) * RATE_LIMIT_WINDOW
+        response.headers["X-RateLimit-Reset"] = str(_window)
 
     return response
 

@@ -31,7 +31,7 @@ async def events_stream(agent_id: str = Depends(get_agent_id)):
                 "event_id": row["event_id"],
                 "event_type": row["event_type"],
                 "payload": json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"],
-                "created_at": row[3]
+                "created_at": row["created_at"]
             }
         await asyncio.sleep(0.5)
     return Response(status_code=204)
@@ -105,7 +105,7 @@ async def events_ws(websocket: WebSocket, api_key: str = Query(None)):
                     "event_id": ws_row["event_id"],
                     "event_type": ws_row["event_type"],
                     "payload": json.loads(ws_row["payload"]) if isinstance(ws_row["payload"], str) else ws_row["payload"],
-                    "created_at": ws_row[3]
+                    "created_at": ws_row["created_at"]
                 }
                 await websocket.send_json(event)
 
@@ -211,8 +211,8 @@ async def user_events_ws(websocket: WebSocket, token: str = Query(None)):
                         "event_id": ws_row["event_id"],
                         "agent_id": ws_row["agent_id"],
                         "event_type": ws_row["event_type"],
-                        "payload": json.loads(ws_row[3]),
-                        "created_at": ws_row[4],
+                        "payload": json.loads(ws_row["payload"]) if isinstance(ws_row["payload"], str) else ws_row["payload"],
+                        "created_at": ws_row["created_at"],
                     }
                     await websocket.send_json(event)
 

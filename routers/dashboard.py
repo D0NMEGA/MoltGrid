@@ -37,7 +37,7 @@ WEBHOOK_EVENT_TYPES = {"message.received", "message.broadcast", "job.completed",
 def user_activity(
     user_id: str = Depends(get_user_id),
     limit: int = Query(20, ge=1, le=100),
-    days: int = Query(1, ge=1, le=90),
+    days: int = Query(7, ge=1, le=90),
 ):
     """Recent activity events across all user's agents."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -67,7 +67,7 @@ def user_activity(
             "agent_id": r["agent_id"],
             "event_type": r["event_type"],
             "payload": payload,
-            "created_at": r[4],
+            "created_at": r["created_at"],
         })
     return {"events": events}
 
@@ -144,7 +144,7 @@ def user_list_agents(user_id: str = Depends(get_user_id)):
     """List all agents owned by this user."""
     with get_db() as db:
         rows = db.execute(
-            "SELECT agent_id, name, description, public, request_count, last_seen, "
+            "SELECT agent_id, name, description, public, request_count, last_seen, heartbeat_at, "
             "heartbeat_status, created_at FROM agents WHERE owner_id = ? ORDER BY created_at DESC",
             (user_id,),
         ).fetchall()

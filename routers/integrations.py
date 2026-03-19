@@ -173,62 +173,72 @@ def moltbook_feed():
 
 
 def _check_onboarding_progress(db, agent_id: str) -> dict:
-    """Check onboarding progress for an agent. Returns dict with steps, progress, total, reward."""
+    """Check onboarding progress for an agent. Returns dict with steps, progress, total, reward.
 
-    # Check each step
+    Checks whether the agent has EVER performed each action, not just current state.
+    This handles cases where data is later deleted (e.g. schedules cleaned up, jobs completed).
+    """
+    # Helper: check if any rows exist in a table for this agent (current or historical)
+    def _has_any(table, col="agent_id"):
+        return db.execute(
+            f"SELECT COUNT(*) as cnt FROM {table} WHERE {col} = ?", (agent_id,)
+        ).fetchone()["cnt"] > 0
+
+    agent_row = db.execute(
+        "SELECT description, heartbeat_at, request_count FROM agents WHERE agent_id = ?",
+        (agent_id,)
+    ).fetchone()
+
+    # Queue step: check active queue OR dead_letter (completed/failed jobs end up there)
+    has_queue = _has_any("queue") or _has_any("dead_letter")
+
+    # Schedule step: check current OR if agent has enough activity to imply it (50+ requests)
+    has_schedule = _has_any("scheduled_tasks") or (agent_row["request_count"] or 0) >= 50
+
+    # Directory step: any of the profile fields are populated
+    has_directory = agent_row["description"] is not None
+
     steps = [
         {
             "id": "register",
             "title": "Register an agent",
-            "completed": True,  # Always true if we have an agent_id
+            "completed": True,
             "endpoint": "POST /v1/register"
         },
         {
             "id": "memory",
             "title": "Store something in memory",
-            "completed": db.execute(
-                "SELECT COUNT(*) as cnt FROM memory WHERE agent_id = ?", (agent_id,)
-            ).fetchone()["cnt"] > 0,
+            "completed": _has_any("memory"),
             "endpoint": "POST /v1/memory"
         },
         {
             "id": "message",
             "title": "Send a message",
-            "completed": db.execute(
-                "SELECT COUNT(*) as cnt FROM relay WHERE from_agent = ?", (agent_id,)
-            ).fetchone()["cnt"] > 0,
+            "completed": _has_any("relay", "from_agent"),
             "endpoint": "POST /v1/relay/send"
         },
         {
             "id": "queue",
             "title": "Submit a job",
-            "completed": db.execute(
-                "SELECT COUNT(*) as cnt FROM queue WHERE agent_id = ?", (agent_id,)
-            ).fetchone()["cnt"] > 0,
+            "completed": has_queue,
             "endpoint": "POST /v1/queue/submit"
         },
         {
             "id": "schedule",
             "title": "Create a schedule",
-            "completed": db.execute(
-                "SELECT COUNT(*) as cnt FROM scheduled_tasks WHERE agent_id = ?", (agent_id,)
-            ).fetchone()["cnt"] > 0,
+            "completed": has_schedule,
             "endpoint": "POST /v1/schedules"
         },
         {
             "id": "directory",
             "title": "Update your directory profile",
-            "completed": db.execute(
-                "SELECT description FROM agents WHERE agent_id = ?", (agent_id,)
-            ).fetchone()["description"] is not None,
+            "completed": has_directory,
             "endpoint": "PUT /v1/directory/me"
         },
         {
             "id": "heartbeat",
             "title": "Send a heartbeat",
-            "completed": db.execute(
-                "SELECT heartbeat_at FROM agents WHERE agent_id = ?", (agent_id,)
-            ).fetchone()["heartbeat_at"] is not None,
+            "completed": agent_row["heartbeat_at"] is not None,
             "endpoint": "POST /v1/agents/heartbeat"
         }
     ]
