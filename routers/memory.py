@@ -18,6 +18,19 @@ from models import (
     MemorySetResponse, MemoryDeleteResponse, MemoryVisibilityResponse,
 )
 
+import re as _re
+
+_VALID_KEY_PATTERN = _re.compile(r'^[a-zA-Z0-9_\-\.]{1,256}$')
+
+def _validate_key(key: str):
+    """Reject path traversal and special chars in memory keys."""
+    if not _VALID_KEY_PATTERN.match(key):
+        from fastapi import HTTPException
+        raise HTTPException(422, "Key must be 1-256 characters: letters, digits, underscore, hyphen, dot only")
+    if '..' in key:
+        from fastapi import HTTPException
+        raise HTTPException(422, "Key must not contain path traversal sequences")
+
 router = APIRouter()
 
 
@@ -56,6 +69,9 @@ def memory_set_visibility(key: str, req: MemoryVisibilityRequest, namespace: str
 
 @router.post("/v1/memory", tags=["Memory"], response_model=MemorySetResponse)
 def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
+    _validate_key(req.key)
+    if "\x00" in req.value:
+        raise HTTPException(422, "Null bytes not allowed in values")
     now = datetime.now(timezone.utc)
     expires = None
     if req.ttl_seconds:

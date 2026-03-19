@@ -58,7 +58,7 @@ async def queue_claim(request: Request, queue_name: str = Query("default"), agen
         pass
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
-        row = db.execute("SELECT job_id, payload, priority FROM queue WHERE queue_name=? AND status='pending' AND (next_retry_at IS NULL OR next_retry_at <= ?) ORDER BY priority DESC, created_at ASC LIMIT 1", (queue_name, now)).fetchone()
+        row = db.execute("SELECT job_id, payload, priority FROM queue WHERE queue_name=? AND status='pending' AND (next_retry_at IS NULL OR next_retry_at <= ?) AND created_at >= datetime(?, '-86400 seconds') ORDER BY priority DESC, created_at ASC LIMIT 1", (queue_name, now, now)).fetchone()
         if not row: return {"status": "empty", "queue_name": queue_name}
         db.execute("UPDATE queue SET status='processing', started_at=? WHERE job_id=?", (now, row["job_id"]))
         return {"job_id": row["job_id"], "payload": _decrypt(row["payload"]), "priority": row["priority"]}

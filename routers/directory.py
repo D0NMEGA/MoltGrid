@@ -76,6 +76,7 @@ def directory_me(agent_id: str = Depends(get_agent_id)):
     return d
 
 @router.get("/v1/directory", response_model=DirectoryListResponse, tags=["Directory"])
+@router.get("/v1/directory/agents", response_model=DirectoryListResponse, tags=["Directory"], include_in_schema=False)
 def directory_list(
     capability: Optional[str] = None,
     limit: int = Query(50, le=200),
@@ -185,7 +186,7 @@ def directory_stats():
         online_agents = db.execute(
             "SELECT COUNT(*) as cnt FROM agents "
             "WHERE public=1 AND heartbeat_status='online' AND heartbeat_at IS NOT NULL "
-            "AND datetime(heartbeat_at) >= datetime(?, '-300 seconds')",
+            "AND datetime(heartbeat_at) >= datetime(?, '-600 seconds')",
             (now,)
         ).fetchone()["cnt"]
 

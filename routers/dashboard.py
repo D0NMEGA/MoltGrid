@@ -697,3 +697,29 @@ def user_audit_log(action: Optional[str] = None, from_date: Optional[str] = None
         rows = db.execute(base, params).fetchall()
         total = db.execute(count_base, count_params).fetchone()["cnt"]
     return {"entries": [dict(r) for r in rows], "total": total, "limit": capped_limit, "offset": offset}
+
+
+@router.delete("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
+def delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
+    """Delete an agent and all its data. Only the owner can delete."""
+    with get_db() as db:
+        agent = db.execute(
+            "SELECT agent_id FROM agents WHERE agent_id=? AND owner_id=?",
+            (agent_id, user_id)
+        ).fetchone()
+        if not agent:
+            raise HTTPException(404, "Agent not found or not owned by you")
+        # Cascade delete all agent data
+        for table_col in [
+            ("memory", "agent_id"), ("vector_memory", "agent_id"),
+            ("queue", "agent_id"), ("dead_letter", "agent_id"),
+            ("webhooks", "agent_id"), ("scheduled_tasks", "agent_id"),
+            ("sessions", "agent_id"), ("shared_memory", "owner_agent"),
+            ("agent_events", "agent_id"), ("collaborations", "agent_id"),
+            ("obstacle_course_submissions", "agent_id"),
+        ]:
+            db.execute(f"DELETE FROM {table_col[0]} WHERE {table_col[1]}=?", (agent_id,))
+        db.execute("DELETE FROM relay WHERE from_agent=? OR to_agent=?", (agent_id, agent_id))
+        db.execute("DELETE FROM collaborations WHERE partner_agent=?", (agent_id,))
+        db.execute("DELETE FROM agents WHERE agent_id=?", (agent_id,))
+    return {"status": "deleted", "agent_id": agent_id}
