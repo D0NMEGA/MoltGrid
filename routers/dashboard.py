@@ -164,14 +164,51 @@ def user_overview(user_id: str = Depends(get_user_id)):
 
 @router.get("/v1/user/agents", tags=["User Dashboard"])
 def user_list_agents(user_id: str = Depends(get_user_id)):
-    """List all agents owned by this user."""
+    """List all agents owned by this user, with computed stats for dashboard cards."""
     with get_db() as db:
         rows = db.execute(
-            "SELECT agent_id, name, description, public, request_count, last_seen, heartbeat_at, "
-            "heartbeat_status, created_at FROM agents WHERE owner_id = ? ORDER BY created_at DESC",
+            "SELECT a.agent_id, a.name, a.description, a.public, a.request_count, "
+            "a.last_seen, a.heartbeat_at, a.heartbeat_status, a.created_at, "
+            "a.credits, a.onboarding_completed, a.capabilities, a.skills, "
+            "(SELECT COUNT(*) FROM memory m WHERE m.agent_id = a.agent_id) as memory_keys, "
+            "(SELECT COUNT(*) FROM relay r WHERE r.from_agent = a.agent_id) as messages_sent, "
+            "(SELECT COUNT(*) FROM relay r WHERE r.to_agent = a.agent_id) as messages_received, "
+            "(SELECT MAX(ocs.score) FROM obstacle_course_submissions ocs WHERE ocs.agent_id = a.agent_id) as obstacle_course_score, "
+            "(SELECT CASE WHEN MAX(ocs.score) >= 100 THEN 1 ELSE 0 END FROM obstacle_course_submissions ocs WHERE ocs.agent_id = a.agent_id) as obstacle_course_passed "
+            "FROM agents a WHERE a.owner_id = ? ORDER BY a.created_at DESC",
             (user_id,),
         ).fetchall()
-    return {"agents": [dict(r) for r in rows], "count": len(rows)}
+
+        agents = []
+        for r in rows:
+            d = dict(r)
+            # Compute onboarding progress (0-7) for the dashboard card
+            aid = d["agent_id"]
+            progress = 1  # registration is always done
+            if d.get("memory_keys", 0) > 0:
+                progress += 1
+            if d.get("messages_sent", 0) > 0:
+                progress += 1
+            has_queue = db.execute("SELECT COUNT(*) as c FROM queue WHERE agent_id=?", (aid,)).fetchone()["c"] > 0
+            has_dlq = db.execute("SELECT COUNT(*) as c FROM dead_letter WHERE agent_id=?", (aid,)).fetchone()["c"] > 0
+            if has_queue or has_dlq:
+                progress += 1
+            has_sched = db.execute("SELECT COUNT(*) as c FROM scheduled_tasks WHERE agent_id=?", (aid,)).fetchone()["c"] > 0
+            if has_sched or (d.get("request_count") or 0) >= 50:
+                progress += 1
+            if d.get("description") is not None:
+                progress += 1
+            if d.get("heartbeat_at") is not None:
+                progress += 1
+
+            d["onboarding_progress"] = progress
+            d["credits_balance"] = d.get("credits") or 0
+            d["messages_count"] = (d.get("messages_sent") or 0) + (d.get("messages_received") or 0)
+            d["capabilities"] = json.loads(d["capabilities"]) if d.get("capabilities") else []
+            d["skills"] = json.loads(d["skills"]) if d.get("skills") else []
+            agents.append(d)
+
+    return {"agents": agents, "count": len(agents)}
 
 
 @router.get("/v1/user/agents/{agent_id}/activity", tags=["User Dashboard"])
