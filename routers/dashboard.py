@@ -27,6 +27,28 @@ from models import (
 # Import webhook validation
 from helpers import _is_safe_url
 
+
+def _fill_date_series(rows, days, keys, date_key="date"):
+    """Fill a sparse date-keyed result set with zeros for missing days.
+
+    Given a list of dicts like [{"date": "2026-03-18", "count": 5}],
+    returns a full series from (today - days) to today with 0s for gaps.
+    """
+    from datetime import datetime, timedelta, timezone
+    today = datetime.now(timezone.utc).date()
+    all_dates = [(today - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+    by_date = {r[date_key]: r for r in rows}
+    result = []
+    for d in all_dates:
+        if d in by_date:
+            result.append(dict(by_date[d]))
+        else:
+            entry = {date_key: d}
+            for k in keys:
+                entry[k] = 0
+            result.append(entry)
+    return result
+
 router = APIRouter()
 
 # Webhook event types (shared constant)
@@ -135,7 +157,8 @@ def user_overview(user_id: str = Depends(get_user_id)):
         "total_agents": total_agents, "online_count": online_count, "agents": agents,
         "totals": {"messages_sent": messages_sent, "messages_received": messages_received,
                    "jobs_completed": jobs_completed, "jobs_failed": jobs_failed, "memory_keys": memory_keys},
-        "msg_chart": [dict(r) for r in msg_rows], "job_chart": [dict(r) for r in job_rows]
+        "msg_chart": _fill_date_series([dict(r) for r in msg_rows], 30, ["count"]),
+        "job_chart": _fill_date_series([dict(r) for r in job_rows], 30, ["completed", "failed"]),
     }
 
 
@@ -266,8 +289,8 @@ def user_agent_charts(agent_id: str, days: int = Query(7, ge=1, le=90), user_id:
             (agent_id, cutoff)
         ).fetchall()
     return {
-        "messages": [dict(r) for r in msg_rows],
-        "jobs": [dict(r) for r in job_rows],
+        "messages": _fill_date_series([dict(r) for r in msg_rows], days, ["sent", "received"]),
+        "jobs": _fill_date_series([dict(r) for r in job_rows], days, ["completed", "failed", "pending"]),
     }
 
 @router.patch("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
