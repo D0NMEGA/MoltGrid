@@ -240,6 +240,36 @@ def user_agent_stats(agent_id: str, user_id: str = Depends(get_user_id)):
     }
 
 
+
+@router.get("/v1/user/agents/{agent_id}/charts", tags=["User Dashboard"])
+def user_agent_charts(agent_id: str, days: int = Query(7, ge=1, le=90), user_id: str = Depends(get_user_id)):
+    """Per-agent message and job charts for the given time window."""
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        msg_rows = db.execute(
+            "SELECT substr(created_at,1,10) as date, "
+            "SUM(CASE WHEN from_agent=? THEN 1 ELSE 0 END) as sent, "
+            "SUM(CASE WHEN to_agent=? THEN 1 ELSE 0 END) as received "
+            "FROM relay WHERE (from_agent=? OR to_agent=?) AND created_at >= ? "
+            "GROUP BY date ORDER BY date",
+            (agent_id, agent_id, agent_id, agent_id, cutoff)
+        ).fetchall()
+        job_rows = db.execute(
+            "SELECT substr(created_at,1,10) as date, "
+            "SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed, "
+            "SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed, "
+            "SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) as pending "
+            "FROM queue WHERE agent_id=? AND created_at >= ? "
+            "GROUP BY date ORDER BY date",
+            (agent_id, cutoff)
+        ).fetchall()
+    return {
+        "messages": [dict(r) for r in msg_rows],
+        "jobs": [dict(r) for r in job_rows],
+    }
+
 @router.patch("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
 def user_rename_agent(agent_id: str, body: dict, user_id: str = Depends(get_user_id)):
     """Rename an owned agent."""
@@ -277,15 +307,19 @@ def user_delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
     """Delete an owned agent and all its data."""
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
+        # Delete webhook_deliveries via webhook IDs (no agent_id column in that table)
+        wh_rows = db.execute("SELECT webhook_id FROM webhooks WHERE agent_id=?", (agent_id,)).fetchall()
+        wh_ids = [r["webhook_id"] if isinstance(r, dict) else r[0] for r in wh_rows]
+        if wh_ids:
+            ph = ",".join("?" * len(wh_ids))
+            db.execute(f"DELETE FROM webhook_deliveries WHERE webhook_id IN ({ph})", wh_ids)
+        # Cascade delete from all tables with agent_id column
         for tbl in ["memory", "queue", "webhooks", "scheduled_tasks",
                      "rate_limits", "vector_memory", "memory_access_log",
                      "sessions", "pubsub_subscriptions", "integrations",
-                     "agent_events", "dead_letter", "webhook_deliveries"]:
-            try:
-                db.execute(f"DELETE FROM {tbl} WHERE agent_id=?", (agent_id,))
-            except Exception:
-                pass  # table may not exist or lack agent_id column
-        # shared_memory uses owner_agent, not agent_id
+                     "agent_events", "dead_letter", "obstacle_course_submissions"]:
+            db.execute(f"DELETE FROM {tbl} WHERE agent_id=?", (agent_id,))
+        # Tables with different column names
         db.execute("DELETE FROM shared_memory WHERE owner_agent=?", (agent_id,))
         db.execute("DELETE FROM relay WHERE from_agent=? OR to_agent=?", (agent_id, agent_id))
         db.execute("DELETE FROM collaborations WHERE agent_id=? OR partner_agent=?", (agent_id, agent_id))
@@ -698,28 +732,3 @@ def user_audit_log(action: Optional[str] = None, from_date: Optional[str] = None
         total = db.execute(count_base, count_params).fetchone()["cnt"]
     return {"entries": [dict(r) for r in rows], "total": total, "limit": capped_limit, "offset": offset}
 
-
-@router.delete("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
-def delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
-    """Delete an agent and all its data. Only the owner can delete."""
-    with get_db() as db:
-        agent = db.execute(
-            "SELECT agent_id FROM agents WHERE agent_id=? AND owner_id=?",
-            (agent_id, user_id)
-        ).fetchone()
-        if not agent:
-            raise HTTPException(404, "Agent not found or not owned by you")
-        # Cascade delete all agent data
-        for table_col in [
-            ("memory", "agent_id"), ("vector_memory", "agent_id"),
-            ("queue", "agent_id"), ("dead_letter", "agent_id"),
-            ("webhooks", "agent_id"), ("scheduled_tasks", "agent_id"),
-            ("sessions", "agent_id"), ("shared_memory", "owner_agent"),
-            ("agent_events", "agent_id"), ("collaborations", "agent_id"),
-            ("obstacle_course_submissions", "agent_id"),
-        ]:
-            db.execute(f"DELETE FROM {table_col[0]} WHERE {table_col[1]}=?", (agent_id,))
-        db.execute("DELETE FROM relay WHERE from_agent=? OR to_agent=?", (agent_id, agent_id))
-        db.execute("DELETE FROM collaborations WHERE partner_agent=?", (agent_id,))
-        db.execute("DELETE FROM agents WHERE agent_id=?", (agent_id,))
-    return {"status": "deleted", "agent_id": agent_id}
