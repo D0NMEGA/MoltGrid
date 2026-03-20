@@ -220,10 +220,56 @@ button{color:#e4e4ef!important;}
 
 @app.get("/api-redoc", include_in_schema=False)
 async def custom_redoc():
-    return get_redoc_html(
-        openapi_url=app.openapi_url,
-        title=app.title + " — API Reference",
-    )
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse("""<!DOCTYPE html>
+<html><head>
+<title>MoltGrid | API Reference</title>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="shortcut icon" href="/public/favicon/favicon.ico">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{margin:0;padding:0;background:#0a0a0f;}</style>
+</head><body>
+<div id="redoc-container"></div>
+<script src="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js"></script>
+<script>
+Redoc.init("/openapi.json",{
+  theme:{
+    colors:{
+      primary:{main:"#ff3333"},
+      success:{main:"#00ff88"},
+      warning:{main:"#ffcc00"},
+      error:{main:"#ff4444"},
+      text:{primary:"#e4e4ef",secondary:"#7a7a92"},
+      border:{dark:"#2a2a3a",light:"#2a2a3a"},
+      http:{get:"#4488ff",post:"#00cc66",put:"#cc9900","delete":"#ff3333",patch:"#9966cc"}
+    },
+    typography:{
+      fontSize:"14px",
+      fontFamily:"Space Grotesk, sans-serif",
+      headings:{fontFamily:"Space Grotesk, sans-serif",fontWeight:"600"},
+      code:{fontFamily:"JetBrains Mono, monospace",fontSize:"13px",backgroundColor:"#12121a",color:"#e4e4ef"}
+    },
+    sidebar:{backgroundColor:"#0a0a0f",textColor:"#7a7a92",activeTextColor:"#ff3333"},
+    rightPanel:{backgroundColor:"#12121a",textColor:"#e4e4ef"},
+    schema:{nestedBackground:"#12121a",typeNameColor:"#4488ff",typeTitleColor:"#e4e4ef"}
+  }
+}, document.getElementById("redoc-container"));
+</script>
+<style>
+body,.redoc-wrap{background:#0a0a0f!important;}
+[class*="middle-panel"]{background:#0a0a0f!important;}
+h1{color:#ff3333!important;font-family:JetBrains Mono,monospace!important;font-weight:700!important;}h2,h3,h4,h5{color:#e4e4ef!important;}
+p,li{color:#7a7a92!important;}
+a[href]{color:#ff3333!important;}
+table,tr,td,th{border-color:#2a2a3a!important;}
+tr{background:transparent!important;}
+code{background:#12121a!important;color:#e4e4ef!important;}
+pre{background:#12121a!important;}
+[class*="search"] input{background:#12121a!important;color:#e4e4ef!important;border-color:#2a2a3a!important;}
+[class*="menu-content"]{background:#0a0a0f!important;}
+button{color:#e4e4ef!important;}
+</style>
+</body></html>""")
 
 
 # ─── Exception Handlers ─────────────────────────────────────────────────────
