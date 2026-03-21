@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import httpx
 from config import TURNSTILE_SECRET_KEY, _fernet, logger
 from db import get_db
+from async_db import async_db_fetchone, async_db_fetchall
 from cache import response_cache
 from state import _ws_connections, _network_ws_clients
 from helpers import (
@@ -146,32 +147,31 @@ def submit_contact(form: ContactForm):
 
 
 @router.get("/v1/sla", response_model=SLAResponse, tags=["System"])
-def sla():
+async def sla():
     """Public SLA / uptime information -- no auth required. Cached for 60 seconds."""
     cached = response_cache.get("sla")
     if cached is not None:
         return cached
-    with get_db() as db:
-        windows = {"24h": 1, "7d": 7, "30d": 30}
-        result = {}
-        for label, days in windows.items():
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-            total = db.execute("SELECT COUNT(*) as c FROM uptime_checks WHERE checked_at >= ?", (cutoff,)).fetchone()["c"]
-            up = db.execute("SELECT COUNT(*) as c FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,)).fetchone()["c"]
-            avg_ms_row = db.execute("SELECT AVG(response_ms) as avg FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,)).fetchone()
-            avg_ms = avg_ms_row["avg"] if avg_ms_row and avg_ms_row["avg"] is not None else 0.0
-            result[label] = {
-                "uptime_pct": round(up / total * 100, 3) if total > 0 else 100.0,
-                "total_checks": total,
-                "successful_checks": up,
-                "avg_response_ms": round(avg_ms, 2),
-            }
-        last_check = db.execute("SELECT * FROM uptime_checks ORDER BY checked_at DESC LIMIT 1").fetchone()
+    windows = {"24h": 1, "7d": 7, "30d": 30}
+    result = {}
+    for label, days in windows.items():
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        total = (await async_db_fetchone("SELECT COUNT(*) as c FROM uptime_checks WHERE checked_at >= ?", (cutoff,)))["c"]
+        up = (await async_db_fetchone("SELECT COUNT(*) as c FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,)))["c"]
+        avg_ms_row = await async_db_fetchone("SELECT AVG(response_ms) as avg FROM uptime_checks WHERE checked_at >= ? AND status='up'", (cutoff,))
+        avg_ms = avg_ms_row["avg"] if avg_ms_row and avg_ms_row["avg"] is not None else 0.0
+        result[label] = {
+            "uptime_pct": round(up / total * 100, 3) if total > 0 else 100.0,
+            "total_checks": total,
+            "successful_checks": up,
+            "avg_response_ms": round(avg_ms, 2),
+        }
+    last_check = await async_db_fetchone("SELECT * FROM uptime_checks ORDER BY checked_at DESC LIMIT 1")
     sla_result = {
         "sla_target": "99.9%",
         "current_status": "operational",
         "windows": result,
-        "last_check": dict(last_check) if last_check else None,
+        "last_check": last_check,
         "check_interval_seconds": 60,
         "encryption_enabled": _fernet is not None,
     }
@@ -180,20 +180,19 @@ def sla():
 
 
 @router.get("/v1/health", response_model=HealthResponse, tags=["System"])
-def health():
+async def health():
     """Public health check -- no auth required. Cached for 10 seconds."""
     cached = response_cache.get("health")
     if cached is not None:
         return cached
-    with get_db() as db:
-        agent_count = db.execute("SELECT COUNT(*) as c FROM agents").fetchone()["c"]
-        job_count = db.execute("SELECT COUNT(*) as c FROM queue").fetchone()["c"]
-        memory_keys = db.execute("SELECT COUNT(*) as c FROM memory").fetchone()["c"]
-        messages = db.execute("SELECT COUNT(*) as c FROM relay").fetchone()["c"]
-        webhooks = db.execute("SELECT COUNT(*) as c FROM webhooks WHERE active=1").fetchone()["c"]
-        schedules = db.execute("SELECT COUNT(*) as c FROM scheduled_tasks WHERE enabled=1").fetchone()["c"]
-        shared_keys = db.execute("SELECT COUNT(*) as c FROM shared_memory").fetchone()["c"]
-        public_agents = db.execute("SELECT COUNT(*) as c FROM agents WHERE public=1").fetchone()["c"]
+    agent_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM agents"))["c"]
+    job_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM queue"))["c"]
+    memory_keys = (await async_db_fetchone("SELECT COUNT(*) as c FROM memory"))["c"]
+    messages = (await async_db_fetchone("SELECT COUNT(*) as c FROM relay"))["c"]
+    webhooks = (await async_db_fetchone("SELECT COUNT(*) as c FROM webhooks WHERE active=1"))["c"]
+    schedules = (await async_db_fetchone("SELECT COUNT(*) as c FROM scheduled_tasks WHERE enabled=1"))["c"]
+    shared_keys = (await async_db_fetchone("SELECT COUNT(*) as c FROM shared_memory"))["c"]
+    public_agents = (await async_db_fetchone("SELECT COUNT(*) as c FROM agents WHERE public=1"))["c"]
 
     result = {
         "status": "operational",
@@ -216,7 +215,7 @@ def health():
 
 
 @router.get("/v1/stats", tags=["System"])
-def stats(request: Request):
+async def stats(request: Request):
     """Usage stats. With X-API-Key: returns agent-specific stats. Without: returns platform stats."""
     from helpers import hash_key
     # Try to resolve agent from API key (optional auth)
@@ -227,23 +226,22 @@ def stats(request: Request):
             break
 
     if x_api_key:
-        # Agent-specific stats
-        with get_db() as db:
-            agent = db.execute("SELECT * FROM agents WHERE api_key_hash=?", (hash_key(x_api_key),)).fetchone()
-            if not agent:
-                raise HTTPException(401, "Invalid API key")
-            aid = agent["agent_id"]
-            mem_count = db.execute("SELECT COUNT(*) as c FROM memory WHERE agent_id=?", (aid,)).fetchone()["c"]
-            job_count = db.execute("SELECT COUNT(*) as c FROM queue WHERE agent_id=?", (aid,)).fetchone()["c"]
-            msg_sent = db.execute("SELECT COUNT(*) as c FROM relay WHERE from_agent=?", (aid,)).fetchone()["c"]
-            msg_recv = db.execute("SELECT COUNT(*) as c FROM relay WHERE to_agent=?", (aid,)).fetchone()["c"]
-            wh_count = db.execute("SELECT COUNT(*) as c FROM webhooks WHERE agent_id=? AND active=1", (aid,)).fetchone()["c"]
-            sched_count = db.execute("SELECT COUNT(*) as c FROM scheduled_tasks WHERE agent_id=? AND enabled=1", (aid,)).fetchone()["c"]
-            shared_count = db.execute("SELECT COUNT(*) as c FROM shared_memory WHERE owner_agent=?", (aid,)).fetchone()["c"]
-            collabs_given = db.execute("SELECT COUNT(*) as c FROM collaborations WHERE agent_id=?", (aid,)).fetchone()["c"]
-            collabs_recv = db.execute("SELECT COUNT(*) as c FROM collaborations WHERE partner_agent=?", (aid,)).fetchone()["c"]
-            market_created = db.execute("SELECT COUNT(*) as c FROM marketplace WHERE creator_agent=?", (aid,)).fetchone()["c"]
-            market_completed = db.execute("SELECT COUNT(*) as c FROM marketplace WHERE claimed_by=? AND status=?", (aid, "completed")).fetchone()["c"]
+        # Agent-specific stats (not cached, requires auth)
+        agent = await async_db_fetchone("SELECT * FROM agents WHERE api_key_hash=?", (hash_key(x_api_key),))
+        if not agent:
+            raise HTTPException(401, "Invalid API key")
+        aid = agent["agent_id"]
+        mem_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM memory WHERE agent_id=?", (aid,)))["c"]
+        job_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM queue WHERE agent_id=?", (aid,)))["c"]
+        msg_sent = (await async_db_fetchone("SELECT COUNT(*) as c FROM relay WHERE from_agent=?", (aid,)))["c"]
+        msg_recv = (await async_db_fetchone("SELECT COUNT(*) as c FROM relay WHERE to_agent=?", (aid,)))["c"]
+        wh_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM webhooks WHERE agent_id=? AND active=1", (aid,)))["c"]
+        sched_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM scheduled_tasks WHERE agent_id=? AND enabled=1", (aid,)))["c"]
+        shared_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM shared_memory WHERE owner_agent=?", (aid,)))["c"]
+        collabs_given = (await async_db_fetchone("SELECT COUNT(*) as c FROM collaborations WHERE agent_id=?", (aid,)))["c"]
+        collabs_recv = (await async_db_fetchone("SELECT COUNT(*) as c FROM collaborations WHERE partner_agent=?", (aid,)))["c"]
+        market_created = (await async_db_fetchone("SELECT COUNT(*) as c FROM marketplace WHERE creator_agent=?", (aid,)))["c"]
+        market_completed = (await async_db_fetchone("SELECT COUNT(*) as c FROM marketplace WHERE claimed_by=? AND status=?", (aid, "completed")))["c"]
         return {
             "agent_id": aid, "name": agent["name"], "created_at": agent["created_at"],
             "total_requests": agent["request_count"], "memory_keys": mem_count,
@@ -259,13 +257,12 @@ def stats(request: Request):
         cached = response_cache.get("stats_platform")
         if cached is not None:
             return cached
-        with get_db() as db:
-            agents = db.execute("SELECT COUNT(*) as c FROM agents").fetchone()["c"]
-            online = db.execute("SELECT COUNT(*) as c FROM agents WHERE heartbeat_status=?", ("online",)).fetchone()["c"]
-            memory_keys = db.execute("SELECT COUNT(*) as c FROM memory").fetchone()["c"]
-            total_jobs = db.execute("SELECT COUNT(*) as c FROM queue").fetchone()["c"]
-            messages = db.execute("SELECT COUNT(*) as c FROM relay").fetchone()["c"]
-            marketplace_tasks = db.execute("SELECT COUNT(*) as c FROM marketplace").fetchone()["c"]
+        agents = (await async_db_fetchone("SELECT COUNT(*) as c FROM agents"))["c"]
+        online = (await async_db_fetchone("SELECT COUNT(*) as c FROM agents WHERE heartbeat_status=?", ("online",)))["c"]
+        memory_keys = (await async_db_fetchone("SELECT COUNT(*) as c FROM memory"))["c"]
+        total_jobs = (await async_db_fetchone("SELECT COUNT(*) as c FROM queue"))["c"]
+        messages = (await async_db_fetchone("SELECT COUNT(*) as c FROM relay"))["c"]
+        marketplace_tasks = (await async_db_fetchone("SELECT COUNT(*) as c FROM marketplace"))["c"]
         platform_stats = {
             "platform": "MoltGrid", "version": "0.9.0",
             "registered_agents": agents, "online_agents": online,

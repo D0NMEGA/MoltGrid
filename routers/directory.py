@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from db import get_db
+from async_db import async_db_fetchall, async_db_fetchone, async_db_execute
 from cache import response_cache
 from helpers import get_agent_id, _encrypt, _decrypt, _sanitize_text
 from models import (
@@ -24,7 +25,7 @@ router = APIRouter()
 
 @router.post("/v1/agents/heartbeat", response_model=HeartbeatResponse, tags=["Directory"])
 @router.post("/v1/heartbeat", response_model=HeartbeatResponse, tags=["Directory"])
-def agent_heartbeat(req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = Depends(get_agent_id)):
+async def agent_heartbeat(req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = Depends(get_agent_id)):
     """Send a heartbeat to indicate this agent is alive. Call periodically (default every 60s)."""
     now = datetime.now(timezone.utc).isoformat()
     meta_json = json.dumps(req.metadata) if req.metadata else None
@@ -32,11 +33,10 @@ def agent_heartbeat(req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = 
         raise HTTPException(400, "metadata exceeds 4KB limit")
     VALID_WORKER_STATUSES = {"worker_running", "session_based", "offline"}
     worker_status = req.status if req.status in VALID_WORKER_STATUSES else "session_based"
-    with get_db() as db:
-        db.execute(
-            "UPDATE agents SET heartbeat_at=?, heartbeat_status=?, heartbeat_meta=?, worker_status=? WHERE agent_id=?",
-            (now, req.status, meta_json, worker_status, agent_id)
-        )
+    await async_db_execute(
+        "UPDATE agents SET heartbeat_at=?, heartbeat_status=?, heartbeat_meta=?, worker_status=? WHERE agent_id=?",
+        (now, req.status, meta_json, worker_status, agent_id)
+    )
     return {"agent_id": agent_id, "status": req.status, "heartbeat_at": now}
 
 
@@ -78,7 +78,7 @@ def directory_me(agent_id: str = Depends(get_agent_id)):
 
 @router.get("/v1/directory", response_model=DirectoryListResponse, tags=["Directory"])
 @router.get("/v1/directory/agents", response_model=DirectoryListResponse, tags=["Directory"], include_in_schema=False)
-def directory_list(
+async def directory_list(
     capability: Optional[str] = None,
     limit: int = Query(50, le=200),
 ):
@@ -88,22 +88,20 @@ def directory_list(
     if cached is not None:
         return cached
     cols = "agent_id, name, description, capabilities, skills, interests, available, reputation, credits, created_at, heartbeat_status, featured, verified"
-    with get_db() as db:
-        if capability:
-            rows = db.execute(
-                f"SELECT {cols} FROM agents "
-                "WHERE public=1 AND capabilities LIKE ? ORDER BY created_at DESC LIMIT ?",
-                (f"%{capability}%", limit)
-            ).fetchall()
-        else:
-            rows = db.execute(
-                f"SELECT {cols} FROM agents "
-                "WHERE public=1 ORDER BY created_at DESC LIMIT ?",
-                (limit,)
-            ).fetchall()
+    if capability:
+        rows = await async_db_fetchall(
+            f"SELECT {cols} FROM agents "
+            "WHERE public=1 AND capabilities LIKE ? ORDER BY created_at DESC LIMIT ?",
+            (f"%{capability}%", limit)
+        )
+    else:
+        rows = await async_db_fetchall(
+            f"SELECT {cols} FROM agents "
+            "WHERE public=1 ORDER BY created_at DESC LIMIT ?",
+            (limit,)
+        )
     agents = []
-    for r in rows:
-        d = dict(r)
+    for d in rows:
         d["capabilities"] = json.loads(d["capabilities"]) if d["capabilities"] else []
         d["skills"] = json.loads(d["skills"]) if d.get("skills") else []
         d["interests"] = json.loads(d["interests"]) if d.get("interests") else []
