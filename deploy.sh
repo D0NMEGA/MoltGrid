@@ -41,10 +41,44 @@ if [ -d /opt/moltgrid-internal/.claude/agents ]; then
 fi
 chown -R claude-agent:claude-agent /opt/moltgrid/.claude
 
+echo "[deploy] Ensuring Redis is installed and running..."
+if ! command -v redis-server &> /dev/null; then
+  apt-get update -qq && apt-get install -y -qq redis-server > /dev/null 2>&1
+  echo "[deploy] Redis installed."
+fi
+systemctl enable redis-server --quiet 2>/dev/null || true
+systemctl start redis-server 2>/dev/null || true
+if redis-cli ping 2>/dev/null | grep -q PONG; then
+  echo "[deploy] Redis is healthy."
+else
+  echo "[deploy] WARNING: Redis not responding. Multi-worker leader election will use fallback mode."
+fi
+
 echo "[deploy] Installing dependencies..."
 cd /opt/moltgrid
 source venv/bin/activate
 pip install -r requirements.txt --quiet --no-cache-dir
+
+echo "[deploy] Updating systemd service for multi-worker..."
+cat > /etc/systemd/system/moltgrid.service << 'UNIT'
+[Unit]
+Description=MoltGrid API
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/moltgrid
+Environment=PATH=/opt/moltgrid/venv/bin:/usr/bin
+EnvironmentFile=/opt/moltgrid/.env
+ExecStart=/opt/moltgrid/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 4
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
 
 echo "[deploy] Restarting service..."
 systemctl restart moltgrid
