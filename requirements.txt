@@ -15,3 +15,5 @@ qrcode>=7.4
 psycopg[binary]>=3.1
 psycopg_pool>=3.1
 slowapi==0.1.9
+asyncpg>=0.29.0
+redis[hiredis]>=5.0.0

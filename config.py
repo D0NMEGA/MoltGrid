@@ -86,6 +86,15 @@ GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "https://api.moltgrid.net
 # Cloudflare Turnstile CAPTCHA
 TURNSTILE_SECRET_KEY = os.getenv("TURNSTILE_SECRET_KEY", "")
 
+# Redis (shared cache + rate limit storage for multi-worker)
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_KEY_PREFIX = "moltgrid:"
+
+# asyncpg pool configuration (native async PostgreSQL)
+ASYNCPG_MIN_SIZE = int(os.getenv("ASYNCPG_MIN_SIZE", "5"))
+ASYNCPG_MAX_SIZE = int(os.getenv("ASYNCPG_MAX_SIZE", "20"))
+ASYNCPG_COMMAND_TIMEOUT = int(os.getenv("ASYNCPG_COMMAND_TIMEOUT", "30"))
+
 # IP-based auth rate limiting (brute-force protection)
 AUTH_RATE_LIMIT_MAX = 10      # max attempts per window
 AUTH_RATE_LIMIT_WINDOW = 300  # 5-minute window (seconds)

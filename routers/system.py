@@ -149,7 +149,7 @@ def submit_contact(form: ContactForm):
 @router.get("/v1/sla", response_model=SLAResponse, tags=["System"])
 async def sla():
     """Public SLA / uptime information -- no auth required. Cached for 60 seconds."""
-    cached = response_cache.get("sla")
+    cached = await response_cache.get("sla")
     if cached is not None:
         return cached
     windows = {"24h": 1, "7d": 7, "30d": 30}
@@ -175,14 +175,14 @@ async def sla():
         "check_interval_seconds": 60,
         "encryption_enabled": _fernet is not None,
     }
-    response_cache.set("sla", sla_result, 60)
+    await response_cache.set("sla", sla_result, 60)
     return sla_result
 
 
 @router.get("/v1/health", response_model=HealthResponse, tags=["System"])
 async def health():
     """Public health check -- no auth required. Cached for 10 seconds."""
-    cached = response_cache.get("health")
+    cached = await response_cache.get("health")
     if cached is not None:
         return cached
     agent_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM agents"))["c"]
@@ -210,7 +210,7 @@ async def health():
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    response_cache.set("health", result, 10)
+    await response_cache.set("health", result, 10)
     return result
 
 
@@ -254,7 +254,7 @@ async def stats(request: Request):
         }
     else:
         # Platform-level stats (no auth required) -- cached 15 seconds
-        cached = response_cache.get("stats_platform")
+        cached = await response_cache.get("stats_platform")
         if cached is not None:
             return cached
         agents = (await async_db_fetchone("SELECT COUNT(*) as c FROM agents"))["c"]
@@ -269,7 +269,7 @@ async def stats(request: Request):
             "total_memory_keys": memory_keys, "total_jobs": total_jobs,
             "total_messages": messages, "total_marketplace_tasks": marketplace_tasks,
         }
-        response_cache.set("stats_platform", platform_stats, 15)
+        await response_cache.set("stats_platform", platform_stats, 15)
         return platform_stats
 
 
@@ -361,7 +361,7 @@ async def obstacle_submit(body: ObstacleCourseSubmitRequest, agent_id: str = Dep
 
 @router.get("/v1/obstacle-course/leaderboard", response_model=List[ObstacleLeaderboardItem], tags=["Obstacle Course"])
 async def obstacle_leaderboard():
-    cached = response_cache.get("obstacle_leaderboard")
+    cached = await response_cache.get("obstacle_leaderboard")
     if cached is not None:
         return cached
     with get_db() as db:
@@ -383,7 +383,7 @@ async def obstacle_leaderboard():
         }
         for r in rows
     ]
-    response_cache.set("obstacle_leaderboard", result, 30)
+    await response_cache.set("obstacle_leaderboard", result, 30)
     return result
 
 

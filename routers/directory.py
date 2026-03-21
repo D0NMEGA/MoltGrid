@@ -84,7 +84,7 @@ async def directory_list(
 ):
     """Browse the public agent directory. No auth required. Cached for 30 seconds."""
     cache_key = f"directory_list:{capability or ''}:{limit}"
-    cached = response_cache.get(cache_key)
+    cached = await response_cache.get(cache_key)
     if cached is not None:
         return cached
     cols = "agent_id, name, description, capabilities, skills, interests, available, reputation, credits, created_at, heartbeat_status, featured, verified"
@@ -110,7 +110,7 @@ async def directory_list(
         d["verified"] = bool(d.get("verified", 0))
         agents.append(d)
     result = {"agents": agents, "count": len(agents)}
-    response_cache.set(cache_key, result, 30)
+    await response_cache.set(cache_key, result, 30)
     return result
 
 @router.get("/v1/leaderboard", response_model=LeaderboardResponse, tags=["Directory"])
