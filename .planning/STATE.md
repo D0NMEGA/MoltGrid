@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-last_updated: "2026-03-21T09:07:00Z"
+last_updated: "2026-03-21T09:47:00Z"
 progress:
-  total_phases: 5
+  total_phases: 6
   completed_phases: 5
-  total_plans: 13
-  completed_plans: 13
+  total_plans: 14
+  completed_plans: 14
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** OpenClaw running on MoltGrid and posting on MoltBook IS the product — every feature should ask "how does this serve the MoltGrid -> OpenClaw -> MoltBook loop?"
-**Current focus:** Phase 40 complete -- Backend Scalability & Load Hardening
+**Current focus:** Phase 41 Plan 03 complete -- Multi-worker Uvicorn, leader election, /metrics
 
 ## Current Position
 
-Phase: 40 (Backend Scalability & Load Hardening) -- COMPLETE
-Plan: 3 of 3 in current phase (all plans complete)
-Status: Phase 40 complete -- connection pool, rate limiting, indexes, async endpoints, caching, load tests
-Last activity: 2026-03-21 -- Plan 40-02 complete: async DB wrappers, TTL caching, async endpoint conversion
+Phase: 41 (Production Scalability: PostgreSQL, Redis, Multi-Worker)
+Plan: 03 of 03 in current phase (plan 03 complete)
+Status: Multi-worker Uvicorn with Redis leader election, Prometheus /metrics endpoint
+Last activity: 2026-03-21 -- Plan 41-03 complete: leader election, /metrics, 4-worker deploy
 
 Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
-- Average duration: 25 min
-- Total execution time: 4.1 hours
+- Total plans completed: 11
+- Average duration: 23 min
+- Total execution time: 4.2 hours
 
 **By Phase:**
 
@@ -45,9 +45,10 @@ Progress: [██████████] 100%
 | 10-monolith-modularization | 2/2 | 39min | 20min |
 | 14-quickstarts-and-playground | 2/2 | 4min | 2min |
 | 40-backend-scalability-load-hardening | 3/3 | 12min | 4min |
+| 41-production-scalability | 1/1 | 7min | 7min |
 
 **Recent Trend:**
-- Last 5 plans: 8min, 31min, 1min, 3min, 3min
+- Last 5 plans: 31min, 1min, 3min, 3min, 7min
 - Trend: consistent
 
 *Updated after each plan completion*
@@ -97,6 +98,11 @@ Recent decisions affecting current work:
 - [40-03] Pass criteria locked: error_rate < 1.0% AND t_elapsed < 60s (strict less-than)
 - [40-03] HTTP 500+ counted as errors; 4xx are expected and not counted
 - [40-03] Scenarios without API key skip gracefully with success record
+- [41-03] Redis SET NX with 30s TTL for leader election across Uvicorn workers
+- [41-03] Lua script atomic release prevents race conditions on leader key deletion
+- [41-03] Graceful fallback: assume leadership when Redis unavailable (single-worker compat)
+- [41-03] 4 Uvicorn workers (up from 2), deploy.sh auto-installs redis-server
+- [41-03] Prometheus text format for /metrics (industry-standard monitoring)
 
 ### Pending Todos
 
@@ -104,10 +110,10 @@ None yet.
 
 ### Blockers/Concerns
 
-None -- Phase 40 complete.
+None -- Phase 41 Plan 03 complete.
 
 ## Session Continuity
 
 Last session: 2026-03-21
-Stopped at: Completed 40-02-PLAN.md -- Phase 40 complete. Async DB wrappers, TTL caching on 5 public endpoints, 6 async endpoints, all 337 tests pass.
+Stopped at: Completed 41-03-PLAN.md -- Multi-worker Uvicorn with leader election, Prometheus /metrics, 4-worker deploy, 351 tests pass.
 Resume file: None
