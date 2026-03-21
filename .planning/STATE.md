@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-last_updated: "2026-03-21T09:47:00Z"
+last_updated: "2026-03-21T09:56:00Z"
 progress:
   total_phases: 6
   completed_phases: 5
-  total_plans: 14
-  completed_plans: 14
+  total_plans: 15
+  completed_plans: 15
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** OpenClaw running on MoltGrid and posting on MoltBook IS the product — every feature should ask "how does this serve the MoltGrid -> OpenClaw -> MoltBook loop?"
-**Current focus:** Phase 41 Plan 03 complete -- Multi-worker Uvicorn, leader election, /metrics
+**Current focus:** Phase 41 Plan 04 complete -- Locust load test with realistic agent behavior
 
 ## Current Position
 
 Phase: 41 (Production Scalability: PostgreSQL, Redis, Multi-Worker)
-Plan: 03 of 03 in current phase (plan 03 complete)
-Status: Multi-worker Uvicorn with Redis leader election, Prometheus /metrics endpoint
-Last activity: 2026-03-21 -- Plan 41-03 complete: leader election, /metrics, 4-worker deploy
+Plan: 04 of 04 in current phase (plan 04 complete)
+Status: Locust load test script with realistic agent behavior and locked pass criteria
+Last activity: 2026-03-21 -- Plan 41-04 complete: Locust load test, 36 unit tests, evaluator module
 
 Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
-- Average duration: 23 min
-- Total execution time: 4.2 hours
+- Total plans completed: 12
+- Average duration: 22 min
+- Total execution time: 4.3 hours
 
 **By Phase:**
 
@@ -45,10 +45,10 @@ Progress: [██████████] 100%
 | 10-monolith-modularization | 2/2 | 39min | 20min |
 | 14-quickstarts-and-playground | 2/2 | 4min | 2min |
 | 40-backend-scalability-load-hardening | 3/3 | 12min | 4min |
-| 41-production-scalability | 1/1 | 7min | 7min |
+| 41-production-scalability | 2/2 | 12min | 6min |
 
 **Recent Trend:**
-- Last 5 plans: 31min, 1min, 3min, 3min, 7min
+- Last 5 plans: 1min, 3min, 3min, 7min, 5min
 - Trend: consistent
 
 *Updated after each plan completion*
@@ -103,6 +103,9 @@ Recent decisions affecting current work:
 - [41-03] Graceful fallback: assume leadership when Redis unavailable (single-worker compat)
 - [41-03] 4 Uvicorn workers (up from 2), deploy.sh auto-installs redis-server
 - [41-03] Prometheus text format for /metrics (industry-standard monitoring)
+- [41-04] Evaluator separated from locust file to avoid gevent monkey-patching pytest conflicts
+- [41-04] Task weights model real agent behavior: heartbeat 6, inbox 5, memory 3/2, jobs 1
+- [41-04] Strict less-than for all pass criteria (p99 < 500ms, error < 0.1%, 5xx = 0)
 
 ### Pending Todos
 
@@ -110,10 +113,10 @@ None yet.
 
 ### Blockers/Concerns
 
-None -- Phase 41 Plan 03 complete.
+None -- Phase 41 Plan 04 complete.
 
 ## Session Continuity
 
 Last session: 2026-03-21
-Stopped at: Completed 41-03-PLAN.md -- Multi-worker Uvicorn with leader election, Prometheus /metrics, 4-worker deploy, 351 tests pass.
+Stopped at: Completed 41-04-PLAN.md -- Locust load test script, evaluator module, 36 unit tests, 66 total load test tests passing.
 Resume file: None
