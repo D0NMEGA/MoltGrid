@@ -741,12 +741,6 @@ def _init_db_sqlite(conn):
         );
         CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event_name, created_at);
 
-        CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_id);
-        CREATE INDEX IF NOT EXISTS idx_agents_heartbeat ON agents(heartbeat_at, heartbeat_status);
-        CREATE INDEX IF NOT EXISTS idx_relay_unread ON relay(to_agent, read_at);
-        CREATE INDEX IF NOT EXISTS idx_queue_agent ON queue(agent_id, status);
-        CREATE INDEX IF NOT EXISTS idx_sched_agent ON scheduled_tasks(agent_id);
-        CREATE INDEX IF NOT EXISTS idx_analytics_agent ON analytics_events(agent_id, created_at);
     """)
 
     # Migrate existing agents table — add columns that older versions didn't have
@@ -1066,6 +1060,20 @@ def _init_db_sqlite(conn):
                 conn.execute(f"ALTER TABLE email_queue ADD COLUMN {col} {typedef}")
     except Exception:
         pass
+
+    # Performance indexes — run AFTER all migrations so columns exist
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agents_heartbeat ON agents(heartbeat_at, heartbeat_status)",
+        "CREATE INDEX IF NOT EXISTS idx_relay_unread ON relay(to_agent, read_at)",
+        "CREATE INDEX IF NOT EXISTS idx_queue_agent ON queue(agent_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_sched_agent ON scheduled_tasks(agent_id)",
+        "CREATE INDEX IF NOT EXISTS idx_analytics_agent ON analytics_events(agent_id, created_at)",
+    ]:
+        try:
+            conn.execute(idx_sql)
+        except Exception:
+            pass
 
 
 def _init_db_postgres(conn):
