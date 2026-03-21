@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 
 from db import init_db, init_pool, close_pool, init_sqlite_pool, close_sqlite_pool, init_asyncpg_pool, close_asyncpg_pool, get_db, DB_PATH, DB_BACKEND
 from cache import init_redis, close_redis
+from leader import acquire_leadership, release_leadership, is_leader
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 from rate_limit import limiter
@@ -46,14 +47,19 @@ async def lifespan(app):
     await init_asyncpg_pool()
     # Startup: initialize Redis cache
     await init_redis()
-    # Startup: launch background threads
-    threading.Thread(target=_scheduler_loop, daemon=True).start()
-    threading.Thread(target=_uptime_loop, daemon=True).start()
-    threading.Thread(target=_liveness_loop, daemon=True).start()
-    threading.Thread(target=_usage_reset_loop, daemon=True).start()
-    threading.Thread(target=_email_loop, daemon=True).start()
-    threading.Thread(target=_webhook_delivery_loop, daemon=True).start()
-    logger.info("Background threads started (scheduler, uptime monitor, liveness monitor, usage reset, email, webhook delivery)")
+    # Startup: leader election for multi-worker background thread coordination
+    is_leader_worker = acquire_leadership()
+    # Startup: launch background threads (leader worker only)
+    if is_leader_worker:
+        threading.Thread(target=_scheduler_loop, daemon=True).start()
+        threading.Thread(target=_uptime_loop, daemon=True).start()
+        threading.Thread(target=_liveness_loop, daemon=True).start()
+        threading.Thread(target=_usage_reset_loop, daemon=True).start()
+        threading.Thread(target=_email_loop, daemon=True).start()
+        threading.Thread(target=_webhook_delivery_loop, daemon=True).start()
+        logger.info("Leader worker: background threads started (scheduler, uptime, liveness, usage reset, email, webhook delivery)")
+    else:
+        logger.info("Follower worker: skipping background threads (leader handles them)")
     # Clear OpenAPI schema cache to prevent stale endpoint definitions
     app.openapi_schema = None
     logger.info("OpenAPI schema cache cleared")
@@ -70,6 +76,8 @@ async def lifespan(app):
     except Exception as e:
         logger.warning(f"Embedding model pre-warm failed (will lazy-load): {e}")
     yield
+    # Shutdown: release leadership
+    release_leadership()
     # Shutdown: close Redis cache
     await close_redis()
     # Shutdown: close database connection pools
