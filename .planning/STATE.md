@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-last_updated: "2026-03-21T09:00:51Z"
+last_updated: "2026-03-21T09:07:00Z"
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 13
-  completed_plans: 11
+  completed_plans: 13
 ---
 
 # Project State
@@ -18,16 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** OpenClaw running on MoltGrid and posting on MoltBook IS the product — every feature should ask "how does this serve the MoltGrid -> OpenClaw -> MoltBook loop?"
-**Current focus:** Phase 40 in progress -- Backend Scalability & Load Hardening
+**Current focus:** Phase 40 complete -- Backend Scalability & Load Hardening
 
 ## Current Position
 
-Phase: 40 (Backend Scalability & Load Hardening) -- IN PROGRESS
-Plan: 3 of 3 in current phase (40-03 complete, 40-01 complete, 40-02 in parallel)
-Status: Plan 40-03 complete -- load test script with 6 scenarios, 30 unit tests, verified end-to-end
-Last activity: 2026-03-21 -- Plan 40-03 complete: load test script + unit tests + verification
+Phase: 40 (Backend Scalability & Load Hardening) -- COMPLETE
+Plan: 3 of 3 in current phase (all plans complete)
+Status: Phase 40 complete -- connection pool, rate limiting, indexes, async endpoints, caching, load tests
+Last activity: 2026-03-21 -- Plan 40-02 complete: async DB wrappers, TTL caching, async endpoint conversion
 
-Progress: [████████░░] 85%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -44,7 +44,7 @@ Progress: [████████░░] 85%
 | 09-postgresql-migration | 3 | 100min | 33min |
 | 10-monolith-modularization | 2/2 | 39min | 20min |
 | 14-quickstarts-and-playground | 2/2 | 4min | 2min |
-| 40-backend-scalability-load-hardening | 1/3 | 3min | 3min |
+| 40-backend-scalability-load-hardening | 3/3 | 12min | 4min |
 
 **Recent Trend:**
 - Last 5 plans: 8min, 31min, 1min, 3min, 3min
@@ -90,6 +90,10 @@ Recent decisions affecting current work:
 - [14-02] Single api_key variable covers all agent-authenticated endpoints; jwt_token separate for user auth
 - [14-01] Used actual SDK method names (memory_set, memory_get) not dot-notation aliases in guides
 - [14-01] All guides use MoltGrid class import matching SDK source, not MoltGridClient
+- [40-02] Manual cache get/set pattern over @cached_response decorator for consistency with existing code
+- [40-02] Directory list cache key includes capability+limit params for correct per-query caching
+- [40-02] RATE_LIMIT_ENABLED env var disables slowapi in tests (pre-existing 40-01 gap)
+- [40-02] response_cache.clear() in test fixture prevents stale cached data between tests
 - [40-03] Pass criteria locked: error_rate < 1.0% AND t_elapsed < 60s (strict less-than)
 - [40-03] HTTP 500+ counted as errors; 4xx are expected and not counted
 - [40-03] Scenarios without API key skip gracefully with success record
@@ -100,10 +104,10 @@ None yet.
 
 ### Blockers/Concerns
 
-None -- Phase 40 plans 40-01 and 40-02 executing in parallel.
+None -- Phase 40 complete.
 
 ## Session Continuity
 
 Last session: 2026-03-21
-Stopped at: Completed 40-03-PLAN.md -- Load test script with 6 scenarios, 30 unit tests, verified end-to-end.
+Stopped at: Completed 40-02-PLAN.md -- Phase 40 complete. Async DB wrappers, TTL caching on 5 public endpoints, 6 async endpoints, all 337 tests pass.
 Resume file: None
