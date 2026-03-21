@@ -478,6 +478,32 @@ async def network_ws(websocket: WebSocket):
             _network_ws_clients.remove(websocket)
 
 
+@router.get("/metrics", include_in_schema=False)
+@limiter.limit("30/minute")
+async def prometheus_metrics(request: Request):
+    """Prometheus-compatible metrics endpoint. Cached for 15 seconds."""
+    cached = await response_cache.get("prometheus_metrics")
+    if cached is not None:
+        return Response(content=cached, media_type="text/plain; version=0.0.4; charset=utf-8")
+    from metrics import collect_metrics
+    body = await collect_metrics()
+    await response_cache.set("prometheus_metrics", body, 15)
+    return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
+@router.get("/v1/metrics", include_in_schema=False)
+@limiter.limit("30/minute")
+async def prometheus_metrics_v1(request: Request):
+    """Alias for /metrics under /v1 prefix."""
+    cached = await response_cache.get("prometheus_metrics")
+    if cached is not None:
+        return Response(content=cached, media_type="text/plain; version=0.0.4; charset=utf-8")
+    from metrics import collect_metrics
+    body = await collect_metrics()
+    await response_cache.set("prometheus_metrics", body, 15)
+    return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
 @router.get("/", response_model=RootResponse, tags=["System"])
 @limiter.limit("30/minute")
 def root(request: Request):
