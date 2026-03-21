@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 
 from croniter import croniter
-from fastapi import APIRouter, HTTPException, Depends, Query, Response
+from fastapi import APIRouter, HTTPException, Depends, Query, Response, Request
 
 from config import TIER_LIMITS, logger
 from db import get_db
@@ -49,6 +49,8 @@ def _fill_date_series(rows, days, keys, date_key="date"):
             result.append(entry)
     return result
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 # Webhook event types (shared constant)
@@ -56,7 +58,8 @@ WEBHOOK_EVENT_TYPES = {"message.received", "message.broadcast", "job.completed",
 
 
 @router.get("/v1/user/activity", tags=["User Dashboard"])
-def user_activity(
+@limiter.limit("120/minute")
+def user_activity(request: Request, 
     user_id: str = Depends(get_user_id),
     limit: int = Query(20, ge=1, le=100),
     days: int = Query(7, ge=1, le=90),
@@ -95,7 +98,8 @@ def user_activity(
 
 
 @router.get("/v1/user/overview", tags=["User Dashboard"])
-def user_overview(user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_overview(request: Request, user_id: str = Depends(get_user_id)):
     """Aggregated account overview: agents, totals, and 30-day charts."""
     import json as _json
     cutoff30 = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
@@ -163,7 +167,8 @@ def user_overview(user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/user/agents", tags=["User Dashboard"])
-def user_list_agents(user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_list_agents(request: Request, user_id: str = Depends(get_user_id)):
     """List all agents owned by this user, with computed stats for dashboard cards."""
     with get_db() as db:
         rows = db.execute(
@@ -212,7 +217,8 @@ def user_list_agents(user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/user/agents/{agent_id}/activity", tags=["User Dashboard"])
-def user_agent_activity(
+@limiter.limit("120/minute")
+def user_agent_activity(request: Request, 
     agent_id: str,
     user_id: str = Depends(get_user_id),
     type: str = Query("all", description="Filter: all, messages, jobs, memory, schedules, security"),
@@ -278,7 +284,8 @@ def user_agent_activity(
 
 
 @router.get("/v1/user/agents/{agent_id}/stats", tags=["User Dashboard"])
-def user_agent_stats(agent_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_agent_stats(request: Request, agent_id: str, user_id: str = Depends(get_user_id)):
     """Get aggregate stats for one owned agent."""
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -302,7 +309,8 @@ def user_agent_stats(agent_id: str, user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/user/agents/{agent_id}/charts", tags=["User Dashboard"])
-def user_agent_charts(agent_id: str, days: int = Query(7, ge=1, le=90), user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_agent_charts(request: Request, agent_id: str, days: int = Query(7, ge=1, le=90), user_id: str = Depends(get_user_id)):
     """Per-agent message and job charts for the given time window."""
     from datetime import datetime, timedelta, timezone
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -331,7 +339,8 @@ def user_agent_charts(agent_id: str, days: int = Query(7, ge=1, le=90), user_id:
     }
 
 @router.patch("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
-def user_rename_agent(agent_id: str, body: dict, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_rename_agent(request: Request, agent_id: str, body: dict, user_id: str = Depends(get_user_id)):
     """Rename an owned agent."""
     import re
     name = (body.get("name") or "").strip()
@@ -347,7 +356,8 @@ def user_rename_agent(agent_id: str, body: dict, user_id: str = Depends(get_user
 
 
 @router.post("/v1/user/agents/{agent_id}/rotate-key", tags=["User Dashboard"])
-def user_rotate_key(agent_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_rotate_key(request: Request, agent_id: str, user_id: str = Depends(get_user_id)):
     """Rotate API key for an owned agent."""
     from helpers import hash_key, generate_api_key
     new_key = generate_api_key()
@@ -363,7 +373,8 @@ def user_rotate_key(agent_id: str, user_id: str = Depends(get_user_id)):
 
 
 @router.delete("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
-def user_delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_delete_agent(request: Request, agent_id: str, user_id: str = Depends(get_user_id)):
     """Delete an owned agent and all its data."""
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -390,7 +401,8 @@ def user_delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/user/usage", tags=["User Dashboard"])
-def user_usage(user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_usage(request: Request, user_id: str = Depends(get_user_id)):
     """Aggregate usage stats for the current billing period."""
     now = datetime.now(timezone.utc)
     period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
@@ -420,7 +432,8 @@ def user_usage(user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/user/billing", tags=["User Dashboard"])
-def user_billing(user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_billing(request: Request, user_id: str = Depends(get_user_id)):
     """Subscription and billing info."""
     with get_db() as db:
         user = db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
@@ -439,7 +452,8 @@ def user_billing(user_id: str = Depends(get_user_id)):
 
 
 @router.post("/v1/user/agents/{agent_id}/transfer", tags=["User Dashboard"])
-def user_transfer_agent(agent_id: str, req: TransferRequest, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_transfer_agent(request: Request, agent_id: str, req: TransferRequest, user_id: str = Depends(get_user_id)):
     """Transfer agent ownership to another user by email."""
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -458,7 +472,8 @@ def user_transfer_agent(agent_id: str, req: TransferRequest, user_id: str = Depe
 
 
 @router.delete("/v1/user/account", tags=["User Dashboard"])
-def user_delete_account(user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_delete_account(request: Request, user_id: str = Depends(get_user_id)):
     """Soft-delete user account."""
     with get_db() as db:
         db.execute("UPDATE users SET subscription_tier = 'deleted', max_agents = 0, max_api_calls = 0 WHERE user_id = ?", (user_id,))
@@ -467,7 +482,8 @@ def user_delete_account(user_id: str = Depends(get_user_id)):
 
 
 @router.post("/v1/user/account/hard-delete", tags=["User Dashboard"])
-def user_hard_delete_account(user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_hard_delete_account(request: Request, user_id: str = Depends(get_user_id)):
     """GDPR right to erasure."""
     with get_db() as db:
         agent_rows = db.execute("SELECT agent_id FROM agents WHERE owner_id=?", (user_id,)).fetchall()
@@ -486,7 +502,8 @@ def user_hard_delete_account(user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/user/data-export", tags=["User Dashboard"])
-def user_data_export(user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_data_export(request: Request, user_id: str = Depends(get_user_id)):
     """GDPR right to data portability."""
     with get_db() as db:
         user = db.execute("SELECT user_id, email, display_name, subscription_tier, created_at FROM users WHERE user_id=?", (user_id,)).fetchone()
@@ -508,7 +525,8 @@ def user_data_export(user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/user/agents/{agent_id}/messages-list", tags=["User Dashboard"])
-def user_messages_list(agent_id: str, offset: int = 0, limit: int = 20, direction: str = "all", search: str = "", user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_messages_list(request: Request, agent_id: str, offset: int = 0, limit: int = 20, direction: str = "all", search: str = "", user_id: str = Depends(get_user_id)):
     limit = max(1, min(limit, 100)); offset = max(0, offset)
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -531,7 +549,8 @@ def user_messages_list(agent_id: str, offset: int = 0, limit: int = 20, directio
 
 
 @router.get("/v1/user/agents/{agent_id}/messages/{message_id}", tags=["User Dashboard"])
-def user_message_detail(agent_id: str, message_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_message_detail(request: Request, agent_id: str, message_id: str, user_id: str = Depends(get_user_id)):
     """Get full detail for a single relay message."""
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -547,7 +566,8 @@ def user_message_detail(agent_id: str, message_id: str, user_id: str = Depends(g
 
 
 @router.get("/v1/user/agents/{agent_id}/memory-list", tags=["User Dashboard"])
-def user_memory_list(agent_id: str, offset: int = 0, limit: int = 30, namespace: str = "", search: str = "", visibility: str = "", user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_memory_list(request: Request, agent_id: str, offset: int = 0, limit: int = 30, namespace: str = "", search: str = "", visibility: str = "", user_id: str = Depends(get_user_id)):
     limit = max(1, min(limit, 100)); offset = max(0, offset)
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -562,7 +582,8 @@ def user_memory_list(agent_id: str, offset: int = 0, limit: int = 30, namespace:
 
 
 @router.get("/v1/user/agents/{agent_id}/memory-entry", tags=["User Dashboard"])
-def user_memory_get(agent_id: str, namespace: str = "default", key: str = "", user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_memory_get(request: Request, agent_id: str, namespace: str = "default", key: str = "", user_id: str = Depends(get_user_id)):
     """Fetch a single memory entry including its value and visibility metadata."""
     if not key: raise HTTPException(400, "key is required")
     now = datetime.now(timezone.utc).isoformat()
@@ -575,7 +596,8 @@ def user_memory_get(agent_id: str, namespace: str = "default", key: str = "", us
 
 
 @router.patch("/v1/user/agents/{agent_id}/memory-entry/visibility", tags=["User Dashboard"])
-def user_memory_set_visibility(agent_id: str, req: MemoryVisibilityRequest, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_memory_set_visibility(request: Request, agent_id: str, req: MemoryVisibilityRequest, user_id: str = Depends(get_user_id)):
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
     with get_db() as db:
@@ -588,7 +610,8 @@ def user_memory_set_visibility(agent_id: str, req: MemoryVisibilityRequest, user
 
 
 @router.post("/v1/user/agents/{agent_id}/memory-bulk-visibility", tags=["User Dashboard"])
-def user_memory_bulk_visibility(agent_id: str, req: MemoryBulkVisibilityRequest, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_memory_bulk_visibility(request: Request, agent_id: str, req: MemoryBulkVisibilityRequest, user_id: str = Depends(get_user_id)):
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
     updated = 0; log_entries = []
@@ -607,7 +630,8 @@ def user_memory_bulk_visibility(agent_id: str, req: MemoryBulkVisibilityRequest,
 
 
 @router.get("/v1/user/agents/{agent_id}/memory-access-log", tags=["User Dashboard"])
-def user_memory_access_log(agent_id: str, namespace: str = "", key: str = "", offset: int = 0, limit: int = 50, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_memory_access_log(request: Request, agent_id: str, namespace: str = "", key: str = "", offset: int = 0, limit: int = 50, user_id: str = Depends(get_user_id)):
     limit = max(1, min(limit, 100)); offset = max(0, offset)
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -620,7 +644,8 @@ def user_memory_access_log(agent_id: str, namespace: str = "", key: str = "", of
 
 
 @router.delete("/v1/user/agents/{agent_id}/memory-entry", tags=["User Dashboard"])
-def user_memory_delete(agent_id: str, namespace: str = "default", key: str = "", user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_memory_delete(request: Request, agent_id: str, namespace: str = "default", key: str = "", user_id: str = Depends(get_user_id)):
     if not key: raise HTTPException(400, "key is required")
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -631,7 +656,8 @@ def user_memory_delete(agent_id: str, namespace: str = "default", key: str = "",
 
 
 @router.get("/v1/user/agents/{agent_id}/integrations", tags=["User Dashboard"])
-def user_integration_list(agent_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_integration_list(request: Request, agent_id: str, user_id: str = Depends(get_user_id)):
     """List platform integrations for an owned agent (dashboard)."""
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -647,7 +673,8 @@ def user_integration_list(agent_id: str, user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/user/integrations/status", response_model=IntegrationStatusResponse, tags=["User Dashboard"])
-def user_integrations_status(agent_id: Optional[str] = None, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_integrations_status(request: Request, agent_id: Optional[str] = None, user_id: str = Depends(get_user_id)):
     """Return integration status with event counts."""
     with get_db() as db:
         if agent_id:
@@ -663,7 +690,8 @@ def user_integrations_status(agent_id: Optional[str] = None, user_id: str = Depe
 
 
 @router.get("/v1/user/agents/{agent_id}/jobs-list", tags=["User Dashboard"])
-def user_jobs_list(agent_id: str, offset: int = 0, limit: int = 20, status: str = "all", user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_jobs_list(request: Request, agent_id: str, offset: int = 0, limit: int = 20, status: str = "all", user_id: str = Depends(get_user_id)):
     limit = max(1, min(limit, 100)); offset = max(0, offset)
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -675,7 +703,8 @@ def user_jobs_list(agent_id: str, offset: int = 0, limit: int = 20, status: str 
 
 
 @router.get("/v1/user/agents/{agent_id}/schedules", tags=["User Dashboard"])
-def user_schedules_list(agent_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_schedules_list(request: Request, agent_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
         rows = db.execute("SELECT task_id, cron_expr, queue_name, priority, enabled, last_run_at, next_run_at, run_count, created_at FROM scheduled_tasks WHERE agent_id=? ORDER BY created_at DESC", (agent_id,)).fetchall()
@@ -683,7 +712,8 @@ def user_schedules_list(agent_id: str, user_id: str = Depends(get_user_id)):
 
 
 @router.post("/v1/user/agents/{agent_id}/schedules", tags=["User Dashboard"])
-def user_schedule_create(agent_id: str, req: UserScheduleRequest, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_schedule_create(request: Request, agent_id: str, req: UserScheduleRequest, user_id: str = Depends(get_user_id)):
     try:
         cron = croniter(req.cron_expr, datetime.now(timezone.utc)); next_run = cron.get_next(datetime).isoformat()
     except (ValueError, KeyError) as e:
@@ -697,7 +727,8 @@ def user_schedule_create(agent_id: str, req: UserScheduleRequest, user_id: str =
 
 
 @router.patch("/v1/user/agents/{agent_id}/schedules/{task_id}", tags=["User Dashboard"])
-def user_schedule_update(agent_id: str, task_id: str, req: UserScheduleUpdateRequest, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_schedule_update(request: Request, agent_id: str, task_id: str, req: UserScheduleUpdateRequest, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
         row = db.execute("SELECT * FROM scheduled_tasks WHERE task_id=? AND agent_id=?", (task_id, agent_id)).fetchone()
@@ -718,7 +749,8 @@ def user_schedule_update(agent_id: str, task_id: str, req: UserScheduleUpdateReq
 
 
 @router.delete("/v1/user/agents/{agent_id}/schedules/{task_id}", tags=["User Dashboard"])
-def user_schedule_delete(agent_id: str, task_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_schedule_delete(request: Request, agent_id: str, task_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
         deleted = db.execute("DELETE FROM scheduled_tasks WHERE task_id=? AND agent_id=?", (task_id, agent_id)).rowcount
@@ -728,7 +760,8 @@ def user_schedule_delete(agent_id: str, task_id: str, user_id: str = Depends(get
 
 
 @router.get("/v1/user/agents/{agent_id}/webhooks", tags=["User Dashboard"])
-def user_webhooks_list(agent_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_webhooks_list(request: Request, agent_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
         rows = db.execute("SELECT webhook_id, url, event_types, active, created_at FROM webhooks WHERE agent_id=? ORDER BY created_at DESC", (agent_id,)).fetchall()
@@ -736,7 +769,8 @@ def user_webhooks_list(agent_id: str, user_id: str = Depends(get_user_id)):
 
 
 @router.post("/v1/user/agents/{agent_id}/webhooks", tags=["User Dashboard"])
-def user_webhook_create(agent_id: str, req: WebhookRegisterRequest, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_webhook_create(request: Request, agent_id: str, req: WebhookRegisterRequest, user_id: str = Depends(get_user_id)):
     if not _is_safe_url(req.url): raise HTTPException(400, "Webhook URL points to a private/internal address")
     for et in req.event_types:
         if et not in WEBHOOK_EVENT_TYPES: raise HTTPException(400, f"Invalid event type: {et}")
@@ -749,7 +783,8 @@ def user_webhook_create(agent_id: str, req: WebhookRegisterRequest, user_id: str
 
 
 @router.delete("/v1/user/agents/{agent_id}/webhooks/{webhook_id}", tags=["User Dashboard"])
-def user_webhook_delete(agent_id: str, webhook_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_webhook_delete(request: Request, agent_id: str, webhook_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
         deleted = db.execute("DELETE FROM webhooks WHERE webhook_id=? AND agent_id=?", (webhook_id, agent_id)).rowcount
@@ -759,7 +794,8 @@ def user_webhook_delete(agent_id: str, webhook_id: str, user_id: str = Depends(g
 
 
 @router.get("/v1/user/audit-log/export", tags=["User Dashboard"])
-def user_audit_log_export(action: Optional[str] = None, from_date: Optional[str] = None, to_date: Optional[str] = None, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_audit_log_export(request: Request, action: Optional[str] = None, from_date: Optional[str] = None, to_date: Optional[str] = None, user_id: str = Depends(get_user_id)):
     """Export audit log entries as CSV."""
     base = "SELECT log_id, action, agent_id, details, ip_address, created_at FROM audit_logs WHERE user_id = ?"
     params: list = [user_id]
@@ -777,7 +813,8 @@ def user_audit_log_export(action: Optional[str] = None, from_date: Optional[str]
 
 
 @router.get("/v1/user/audit-log", tags=["User Dashboard"])
-def user_audit_log(action: Optional[str] = None, from_date: Optional[str] = None, to_date: Optional[str] = None, limit: int = 50, offset: int = 0, user_id: str = Depends(get_user_id)):
+@limiter.limit("120/minute")
+def user_audit_log(request: Request, action: Optional[str] = None, from_date: Optional[str] = None, to_date: Optional[str] = None, limit: int = 50, offset: int = 0, user_id: str = Depends(get_user_id)):
     """Retrieve audit log entries for the authenticated user."""
     base = "SELECT log_id, action, agent_id, details, ip_address, created_at FROM audit_logs WHERE user_id = ?"
     count_base = "SELECT COUNT(*) as cnt FROM audit_logs WHERE user_id = ?"

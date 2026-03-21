@@ -8,7 +8,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from config import MAX_MEMORY_VALUE_SIZE
 from db import get_db
@@ -21,13 +21,16 @@ from models import (
     SharedMemoryDeleteResponse, SharedMemoryNamespacesResponse,
 )
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 def _cosine_similarity(vec1, vec2):
     return float(np.dot(vec1, vec2))
 
 @router.post("/v1/vector/upsert", response_model=VectorUpsertResponse, tags=["Vector Memory"])
-def vector_upsert(req: VectorUpsertRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def vector_upsert(request: Request, req: VectorUpsertRequest, agent_id: str = Depends(get_agent_id)):
     """Store text with its embedding vector. Updates if key exists (UPSERT).
 
     Uses 'all-MiniLM-L6-v2' model (384 dimensions). Cosine similarity search.
@@ -58,7 +61,8 @@ def vector_upsert(req: VectorUpsertRequest, agent_id: str = Depends(get_agent_id
     }
 
 @router.post("/v1/vector/search", response_model=VectorSearchResponse, tags=["Vector Memory"])
-def vector_search(req: VectorSearchRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def vector_search(request: Request, req: VectorSearchRequest, agent_id: str = Depends(get_agent_id)):
     """Semantic search with optional composite scoring.
 
     Scoring modes:
@@ -120,7 +124,8 @@ def vector_search(req: VectorSearchRequest, agent_id: str = Depends(get_agent_id
     return {"results": results, "count": len(results), "scoring": req.scoring}
 
 @router.get("/v1/vector/{key}", response_model=VectorGetResponse, tags=["Vector Memory"])
-def vector_get(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def vector_get(request: Request, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     """Get a specific vector entry by key."""
     with get_db() as db:
         row = db.execute(
@@ -141,7 +146,8 @@ def vector_get(key: str, namespace: str = "default", agent_id: str = Depends(get
     }
 
 @router.delete("/v1/vector/{key}", response_model=VectorDeleteResponse, tags=["Vector Memory"])
-def vector_delete(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def vector_delete(request: Request, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     """Delete a vector entry."""
     with get_db() as db:
         result = db.execute(
@@ -154,7 +160,8 @@ def vector_delete(key: str, namespace: str = "default", agent_id: str = Depends(
     return {"status": "deleted", "key": key, "namespace": namespace}
 
 @router.get("/v1/vector", response_model=VectorListResponse, tags=["Vector Memory"])
-def vector_list(namespace: str = "default", limit: int = Query(100, le=1000), agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def vector_list(request: Request, namespace: str = "default", limit: int = Query(100, le=1000), agent_id: str = Depends(get_agent_id)):
     """List all vector keys in a namespace (without embeddings for efficiency)."""
     with get_db() as db:
         rows = db.execute(
@@ -181,7 +188,8 @@ class SharedMemorySetRequest(BaseModel):
     ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000)
 
 @router.post("/v1/shared-memory", response_model=SharedMemorySetResponse, tags=["Shared Memory"])
-def shared_memory_set(req: SharedMemorySetRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def shared_memory_set(request: Request, req: SharedMemorySetRequest, agent_id: str = Depends(get_agent_id)):
     """Publish a key-value pair to a shared namespace that other agents can read."""
     now = datetime.now(timezone.utc)
     expires = None
@@ -201,7 +209,8 @@ def shared_memory_set(req: SharedMemorySetRequest, agent_id: str = Depends(get_a
     return {"status": "published", "namespace": req.namespace, "key": req.key}
 
 @router.get("/v1/shared-memory/{namespace}", response_model=SharedMemoryListResponse, tags=["Shared Memory"])
-def shared_memory_list(
+@limiter.limit("60/minute")
+def shared_memory_list(request: Request, 
     namespace: str,
     prefix: str = "",
     limit: int = Query(50, le=200),
@@ -219,7 +228,8 @@ def shared_memory_list(
     return {"namespace": namespace, "entries": [dict(r) for r in rows], "count": len(rows)}
 
 @router.get("/v1/shared-memory/{namespace}/{key}", tags=["Shared Memory"])
-def shared_memory_get(namespace: str, key: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def shared_memory_get(request: Request, namespace: str, key: str, agent_id: str = Depends(get_agent_id)):
     """Read a value from a shared namespace (any agent can read)."""
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
@@ -235,7 +245,8 @@ def shared_memory_get(namespace: str, key: str, agent_id: str = Depends(get_agen
     return d
 
 @router.delete("/v1/shared-memory/{namespace}/{key}", response_model=SharedMemoryDeleteResponse, tags=["Shared Memory"])
-def shared_memory_delete(namespace: str, key: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def shared_memory_delete(request: Request, namespace: str, key: str, agent_id: str = Depends(get_agent_id)):
     """Delete a key from a shared namespace (only the owner can delete)."""
     with get_db() as db:
         r = db.execute(
@@ -247,7 +258,8 @@ def shared_memory_delete(namespace: str, key: str, agent_id: str = Depends(get_a
     return {"status": "deleted", "namespace": namespace, "key": key}
 
 @router.get("/v1/shared-memory", response_model=SharedMemoryNamespacesResponse, tags=["Shared Memory"])
-def shared_memory_namespaces(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def shared_memory_namespaces(request: Request, agent_id: str = Depends(get_agent_id)):
     """List all shared namespaces with entry counts."""
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:

@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 
 from db import get_db
 from helpers import get_user_id
@@ -16,10 +16,13 @@ from models import (
     OrgRoleChangeResponse, OrgSwitchResponse,
 )
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 @router.post("/v1/orgs", response_model=OrgCreateResponse, tags=["Orgs"])
-def create_org(req: OrgCreateRequest, user_id: str = Depends(get_user_id)):
+@limiter.limit("60/minute")
+def create_org(request: Request, req: OrgCreateRequest, user_id: str = Depends(get_user_id)):
     org_id = f"org_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
     slug = req.slug
@@ -42,7 +45,8 @@ def create_org(req: OrgCreateRequest, user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/orgs", response_model=OrgListResponse, tags=["Orgs"])
-def list_orgs(user_id: str = Depends(get_user_id)):
+@limiter.limit("60/minute")
+def list_orgs(request: Request, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         rows = db.execute(
             """SELECT o.org_id, o.name, o.slug, o.owner_user_id, o.created_at, m.role
@@ -55,7 +59,8 @@ def list_orgs(user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/orgs/{org_id}", response_model=OrgDetailResponse, tags=["Orgs"])
-def get_org(org_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("60/minute")
+def get_org(request: Request, org_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         org = db.execute(
             "SELECT org_id, name, slug, owner_user_id, created_at FROM organizations WHERE org_id = ?",
@@ -80,7 +85,8 @@ def get_org(org_id: str, user_id: str = Depends(get_user_id)):
 
 
 @router.post("/v1/orgs/{org_id}/members", response_model=OrgInviteResponse, tags=["Orgs"])
-def invite_member(org_id: str, req: OrgInviteRequest, user_id: str = Depends(get_user_id)):
+@limiter.limit("60/minute")
+def invite_member(request: Request, org_id: str, req: OrgInviteRequest, user_id: str = Depends(get_user_id)):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         org = db.execute("SELECT org_id FROM organizations WHERE org_id = ?", (org_id,)).fetchone()
@@ -112,7 +118,8 @@ def invite_member(org_id: str, req: OrgInviteRequest, user_id: str = Depends(get
 
 
 @router.get("/v1/orgs/{org_id}/members", response_model=OrgMembersResponse, tags=["Orgs"])
-def list_org_members(org_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("60/minute")
+def list_org_members(request: Request, org_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         org = db.execute("SELECT org_id FROM organizations WHERE org_id = ?", (org_id,)).fetchone()
         if not org:
@@ -131,7 +138,8 @@ def list_org_members(org_id: str, user_id: str = Depends(get_user_id)):
 
 
 @router.delete("/v1/orgs/{org_id}/members/{target_user_id}", response_model=OrgRemoveResponse, tags=["Orgs"])
-def remove_member(org_id: str, target_user_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("60/minute")
+def remove_member(request: Request, org_id: str, target_user_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         org = db.execute(
             "SELECT owner_user_id FROM organizations WHERE org_id = ?",
@@ -155,7 +163,8 @@ def remove_member(org_id: str, target_user_id: str, user_id: str = Depends(get_u
 
 
 @router.patch("/v1/orgs/{org_id}/members/{target_user_id}", response_model=OrgRoleChangeResponse, tags=["Orgs"])
-def change_member_role(
+@limiter.limit("60/minute")
+def change_member_role(request: Request, 
     org_id: str,
     target_user_id: str,
     req: OrgRoleUpdateRequest,
@@ -184,7 +193,8 @@ def change_member_role(
 
 
 @router.post("/v1/orgs/{org_id}/switch", response_model=OrgSwitchResponse, tags=["Orgs"])
-def switch_org_context(org_id: str, user_id: str = Depends(get_user_id)):
+@limiter.limit("60/minute")
+def switch_org_context(request: Request, org_id: str, user_id: str = Depends(get_user_id)):
     """Switch the user's active org context."""
     with get_db() as db:
         org = db.execute(

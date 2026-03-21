@@ -21,11 +21,14 @@ from models import (
     DirectoryNetworkResponse, DirectoryProfileResponse,
 )
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 @router.post("/v1/agents/heartbeat", response_model=HeartbeatResponse, tags=["Directory"])
 @router.post("/v1/heartbeat", response_model=HeartbeatResponse, tags=["Directory"])
-async def agent_heartbeat(req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+async def agent_heartbeat(request: Request, req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = Depends(get_agent_id)):
     """Send a heartbeat to indicate this agent is alive. Call periodically (default every 60s)."""
     now = datetime.now(timezone.utc).isoformat()
     meta_json = json.dumps(req.metadata) if req.metadata else None
@@ -41,7 +44,8 @@ async def agent_heartbeat(req: HeartbeatRequest = HeartbeatRequest(), agent_id: 
 
 
 @router.put("/v1/directory/me", response_model=DirectoryUpdateResponse, tags=["Directory"])
-def directory_update(req: DirectoryUpdateRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def directory_update(request: Request, req: DirectoryUpdateRequest, agent_id: str = Depends(get_agent_id)):
     """Update your agent's directory listing."""
     # Sanitize text fields to prevent XSS
     req.description = _sanitize_text(req.description)
@@ -58,7 +62,8 @@ def directory_update(req: DirectoryUpdateRequest, agent_id: str = Depends(get_ag
     return {"status": "updated", "agent_id": agent_id, "public": req.public}
 
 @router.get("/v1/directory/me", tags=["Directory"])
-def directory_me(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def directory_me(request: Request, agent_id: str = Depends(get_agent_id)):
     """Get your own directory profile."""
     with get_db() as db:
         row = db.execute(
@@ -78,7 +83,8 @@ def directory_me(agent_id: str = Depends(get_agent_id)):
 
 @router.get("/v1/directory", response_model=DirectoryListResponse, tags=["Directory"])
 @router.get("/v1/directory/agents", response_model=DirectoryListResponse, tags=["Directory"], include_in_schema=False)
-async def directory_list(
+@limiter.limit("30/minute")
+async def directory_list(request: Request, 
     capability: Optional[str] = None,
     limit: int = Query(50, le=200),
 ):
@@ -114,7 +120,8 @@ async def directory_list(
     return result
 
 @router.get("/v1/leaderboard", response_model=LeaderboardResponse, tags=["Directory"])
-def leaderboard(
+@limiter.limit("30/minute")
+def leaderboard(request: Request, 
     sort_by: str = Query("reputation", regex="^(reputation|credits|tasks_completed|requests)$"),
     limit: int = Query(20, ge=1, le=100)
 ):
@@ -180,7 +187,8 @@ def leaderboard(
     }
 
 @router.get("/v1/directory/stats", response_model=DirectoryStatsResponse, tags=["Directory"])
-def directory_stats():
+@limiter.limit("30/minute")
+def directory_stats(request: Request):
     """Public directory statistics. No auth required."""
     with get_db() as db:
         # Total agents
@@ -249,7 +257,8 @@ class CollaborationRequest(BaseModel):
     rating: int = Field(..., ge=1, le=5, description="Rating 1-5 for the partner")
 
 @router.get("/v1/directory/search", response_model=DirectorySearchResponse, tags=["Directory"])
-def directory_search(
+@limiter.limit("30/minute")
+def directory_search(request: Request, 
     q: Optional[str] = Query(None, description="Text search query — matches name, description, capabilities, skills, interests"),
     capability: Optional[str] = None,
     skill: Optional[str] = Query(None, description="Filter by skill"),
@@ -311,7 +320,8 @@ def directory_search(
     return {"agents": agents, "count": len(agents)}
 
 @router.patch("/v1/directory/me/status", response_model=DirectoryStatusUpdateResponse, tags=["Directory"])
-def directory_status_update(req: StatusUpdateRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def directory_status_update(request: Request, req: StatusUpdateRequest, agent_id: str = Depends(get_agent_id)):
     """Update your availability status."""
     updates = []
     params: list = []
@@ -334,7 +344,8 @@ def directory_status_update(req: StatusUpdateRequest, agent_id: str = Depends(ge
     return {"status": "updated", "agent_id": agent_id}
 
 @router.post("/v1/directory/collaborations", response_model=CollaborationResponse, tags=["Directory"])
-def log_collaboration(req: CollaborationRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def log_collaboration(request: Request, req: CollaborationRequest, agent_id: str = Depends(get_agent_id)):
     """Log a collaboration outcome. Updates the partner's reputation."""
     if req.outcome not in ("success", "failure", "partial"):
         raise HTTPException(400, "outcome must be: success, failure, or partial")
@@ -368,7 +379,8 @@ def log_collaboration(req: CollaborationRequest, agent_id: str = Depends(get_age
     }
 
 @router.get("/v1/directory/match", response_model=DirectoryMatchResponse, tags=["Directory"])
-def directory_match(
+@limiter.limit("30/minute")
+def directory_match(request: Request, 
     need: str = Query(..., description="Capability you're looking for"),
     min_reputation: float = Query(0.0, ge=0.0),
     limit: int = Query(10, le=50),
@@ -394,7 +406,8 @@ def directory_match(
     return {"matches": matches, "count": len(matches), "need": need}
 
 @router.get("/v1/directory/network", response_model=DirectoryNetworkResponse, tags=["Directory"])
-def directory_network():
+@limiter.limit("30/minute")
+def directory_network(request: Request):
     """Get network graph data for agent visualization. No auth required.
     Returns nodes (agents) and edges (collaborations/messages between them)."""
     with get_db() as db:
@@ -479,7 +492,8 @@ def directory_network():
     }
 
 @router.get("/v1/directory/{agent_id}", response_model=DirectoryProfileResponse, tags=["Directory"])
-def directory_profile(agent_id: str):
+@limiter.limit("30/minute")
+def directory_profile(request: Request, agent_id: str):
     """Get a public agent profile. No auth required. Returns 404 if agent is private."""
     with get_db() as db:
         # Get agent details

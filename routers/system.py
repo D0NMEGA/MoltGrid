@@ -33,6 +33,8 @@ from models import (
     RootResponse, EventAckResponse,
 )
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 def _get_queue_email():
@@ -86,7 +88,8 @@ class ContactForm(BaseModel):
     turnstile_token: Optional[str] = None
 
 @router.post("/v1/contact", response_model=ContactSubmitResponse, tags=["System"])
-def submit_contact(form: ContactForm):
+@limiter.limit("30/minute")
+def submit_contact(request: Request, form: ContactForm):
     """Public contact form submission — no auth required."""
     if not form.email or not form.message:
         raise HTTPException(400, "Email and message are required")
@@ -147,7 +150,8 @@ def submit_contact(form: ContactForm):
 
 
 @router.get("/v1/sla", response_model=SLAResponse, tags=["System"])
-async def sla():
+@limiter.limit("30/minute")
+async def sla(request: Request):
     """Public SLA / uptime information -- no auth required. Cached for 60 seconds."""
     cached = await response_cache.get("sla")
     if cached is not None:
@@ -180,7 +184,8 @@ async def sla():
 
 
 @router.get("/v1/health", response_model=HealthResponse, tags=["System"])
-async def health():
+@limiter.limit("30/minute")
+async def health(request: Request):
     """Public health check -- no auth required. Cached for 10 seconds."""
     cached = await response_cache.get("health")
     if cached is not None:
@@ -215,6 +220,7 @@ async def health():
 
 
 @router.get("/v1/stats", tags=["System"])
+@limiter.limit("30/minute")
 async def stats(request: Request):
     """Usage stats. With X-API-Key: returns agent-specific stats. Without: returns platform stats."""
     from helpers import hash_key
@@ -278,7 +284,8 @@ class TextProcessRequest(BaseModel):
     operation: str = Field(..., description="One of: word_count, char_count, extract_urls, extract_emails, tokenize_sentences, deduplicate_lines, hash_sha256, base64_encode, base64_decode")
 
 @router.post("/v1/text/process", response_model=TextProcessResponse, tags=["Text Utilities"])
-def text_process(req: TextProcessRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def text_process(request: Request, req: TextProcessRequest, agent_id: str = Depends(get_agent_id)):
     """Server-side text processing. Requires authentication."""
     import re
     import base64
@@ -313,7 +320,8 @@ def redirect_dashboard(path: str = ""):
 
 
 @router.get("/obstacle-course.md", tags=["System"])
-async def serve_obstacle_course_md():
+@limiter.limit("30/minute")
+async def serve_obstacle_course_md(request: Request):
     path = os.path.join(_backend_dir, "obstacle-course.md")
     with open(path) as f:
         content = f.read()
@@ -321,7 +329,8 @@ async def serve_obstacle_course_md():
 
 
 @router.get("/v1/obstacle-course.md", tags=["System"])
-async def serve_obstacle_course_md_v1():
+@limiter.limit("30/minute")
+async def serve_obstacle_course_md_v1(request: Request):
     path = os.path.join(_backend_dir, "obstacle-course.md")
     with open(path) as f:
         content = f.read()
@@ -329,7 +338,8 @@ async def serve_obstacle_course_md_v1():
 
 
 @router.post("/v1/obstacle-course/submit", response_model=ObstacleSubmitResponse, tags=["Obstacle Course"])
-async def obstacle_submit(body: ObstacleCourseSubmitRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+async def obstacle_submit(request: Request, body: ObstacleCourseSubmitRequest, agent_id: str = Depends(get_agent_id)):
     stages = sorted(set(s for s in body.stages_completed if 1 <= s <= 10))
     base_score = len(stages) * 10
     sequential = len(stages) > 0 and all(i + 1 in stages for i in range(len(stages))) and stages[0] == 1
@@ -360,7 +370,8 @@ async def obstacle_submit(body: ObstacleCourseSubmitRequest, agent_id: str = Dep
 
 
 @router.get("/v1/obstacle-course/leaderboard", response_model=List[ObstacleLeaderboardItem], tags=["Obstacle Course"])
-async def obstacle_leaderboard():
+@limiter.limit("30/minute")
+async def obstacle_leaderboard(request: Request):
     cached = await response_cache.get("obstacle_leaderboard")
     if cached is not None:
         return cached
@@ -388,7 +399,8 @@ async def obstacle_leaderboard():
 
 
 @router.get("/v1/obstacle-course/my-result", response_model=ObstacleMyResultResponse, tags=["Obstacle Course"])
-async def obstacle_my_result(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+async def obstacle_my_result(request: Request, agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         row = db.execute(
             "SELECT submission_id, stages_completed, score, submitted_at, feedback FROM obstacle_course_submissions "
@@ -407,7 +419,8 @@ async def obstacle_my_result(agent_id: str = Depends(get_agent_id)):
 
 
 @router.get("/heartbeat.md", tags=["System"])
-async def serve_heartbeat_md():
+@limiter.limit("30/minute")
+async def serve_heartbeat_md(request: Request):
     hb_path = os.path.join(_backend_dir, "heartbeat.md")
     with open(hb_path) as f:
         content = f.read()
@@ -415,7 +428,8 @@ async def serve_heartbeat_md():
 
 
 @router.get("/v1/heartbeat.md", tags=["System"])
-async def serve_heartbeat_md_v1():
+@limiter.limit("30/minute")
+async def serve_heartbeat_md_v1(request: Request):
     hb_path = os.path.join(_backend_dir, "heartbeat.md")
     with open(hb_path) as f:
         content = f.read()
@@ -423,7 +437,8 @@ async def serve_heartbeat_md_v1():
 
 
 @router.get("/skill.md", tags=["System"])
-async def serve_skill_md():
+@limiter.limit("30/minute")
+async def serve_skill_md(request: Request):
     skill_path = os.path.join(_backend_dir, "skill.md")
     with open(skill_path) as f:
         content = f.read()
@@ -431,7 +446,8 @@ async def serve_skill_md():
 
 
 @router.get("/v1/skill.md", tags=["System"])
-async def serve_skill_md_v1():
+@limiter.limit("30/minute")
+async def serve_skill_md_v1(request: Request):
     skill_path = os.path.join(_backend_dir, "skill.md")
     with open(skill_path) as f:
         content = f.read()
@@ -463,7 +479,8 @@ async def network_ws(websocket: WebSocket):
 
 
 @router.get("/", response_model=RootResponse, tags=["System"])
-def root():
+@limiter.limit("30/minute")
+def root(request: Request):
     return {
         "service": "MoltGrid",
         "version": "0.9.0",

@@ -5,17 +5,20 @@ import uuid
 from datetime import datetime, timezone
 
 from croniter import croniter
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from config import MAX_QUEUE_PAYLOAD_SIZE
 from db import get_db
 from helpers import get_agent_id, _encrypt, _decrypt
 from models import ScheduledTaskRequest, ScheduledTaskResponse, ScheduleListResponse
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 @router.post("/v1/schedules", response_model=ScheduledTaskResponse, tags=["Schedules"])
-def schedule_create(req: ScheduledTaskRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def schedule_create(request: Request, req: ScheduledTaskRequest, agent_id: str = Depends(get_agent_id)):
     """Create a cron-style recurring job schedule."""
     try:
         cron = croniter(req.cron_expr, datetime.now(timezone.utc))
@@ -39,7 +42,8 @@ def schedule_create(req: ScheduledTaskRequest, agent_id: str = Depends(get_agent
     )
 
 @router.get("/v1/schedules", response_model=ScheduleListResponse, tags=["Schedules"])
-def schedule_list(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def schedule_list(request: Request, agent_id: str = Depends(get_agent_id)):
     """List your scheduled tasks."""
     with get_db() as db:
         rows = db.execute(
@@ -53,7 +57,8 @@ def schedule_list(agent_id: str = Depends(get_agent_id)):
     }
 
 @router.get("/v1/schedules/{task_id}", tags=["Schedules"])
-def schedule_get(task_id: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def schedule_get(request: Request, task_id: str, agent_id: str = Depends(get_agent_id)):
     """Get details of a scheduled task."""
     with get_db() as db:
         row = db.execute(
@@ -67,7 +72,8 @@ def schedule_get(task_id: str, agent_id: str = Depends(get_agent_id)):
     return d
 
 @router.patch("/v1/schedules/{task_id}", tags=["Schedules"])
-def schedule_toggle(task_id: str, enabled: bool = True, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def schedule_toggle(request: Request, task_id: str, enabled: bool = True, agent_id: str = Depends(get_agent_id)):
     """Enable or disable a scheduled task."""
     with get_db() as db:
         # If re-enabling, recalculate next_run
@@ -91,7 +97,8 @@ def schedule_toggle(task_id: str, enabled: bool = True, agent_id: str = Depends(
     return {"task_id": task_id, "enabled": enabled}
 
 @router.delete("/v1/schedules/{task_id}", tags=["Schedules"])
-def schedule_delete(task_id: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def schedule_delete(request: Request, task_id: str, agent_id: str = Depends(get_agent_id)):
     """Delete a scheduled task."""
     with get_db() as db:
         r = db.execute(

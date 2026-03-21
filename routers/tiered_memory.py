@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 
 from db import get_db
 from helpers import get_agent_id, _embed_text, _log_memory_access, _encrypt, _decrypt
@@ -16,6 +16,8 @@ from models import (
     TieredSummarizeResponse,
 )
 
+from rate_limit import limiter
+
 router = APIRouter(tags=["tiered-memory"])
 
 
@@ -25,7 +27,8 @@ def _cosine_similarity(vec1, vec2):
 
 
 @router.post("/v1/tiered/store_event", response_model=TieredStoreEventResponse)
-def tiered_store_event(req: TieredStoreEventRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def tiered_store_event(request: Request, req: TieredStoreEventRequest, agent_id: str = Depends(get_agent_id)):
     """Append an event to the session buffer (Tier 1). Optionally persist to mid-term notes (Tier 2)."""
     if req.persist and not req.note_key:
         raise HTTPException(422, "note_key is required when persist=True")
@@ -90,7 +93,8 @@ def tiered_store_event(req: TieredStoreEventRequest, agent_id: str = Depends(get
 
 
 @router.post("/v1/tiered/recall", response_model=TieredRecallResponse)
-def tiered_recall(req: TieredRecallRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def tiered_recall(request: Request, req: TieredRecallRequest, agent_id: str = Depends(get_agent_id)):
     """Search across mid-term memory (Tier 2) and long-term vector store (Tier 3)."""
     results = []
 
@@ -155,7 +159,8 @@ def tiered_recall(req: TieredRecallRequest, agent_id: str = Depends(get_agent_id
 
 
 @router.post("/v1/tiered/summarize/{session_id}", response_model=TieredSummarizeResponse)
-def tiered_summarize(session_id: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def tiered_summarize(request: Request, session_id: str, agent_id: str = Depends(get_agent_id)):
     """Summarize a session and promote the summary to the long-term vector store (Tier 3)."""
     now = datetime.now(timezone.utc).isoformat()
 

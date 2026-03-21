@@ -13,13 +13,16 @@ from db import get_db
 from helpers import get_agent_id, _is_safe_url, _run_webhook_delivery_tick, _check_auth_rate_limit, _encrypt, _decrypt
 from models import WebhookRegisterRequest, WebhookResponse, WebhookListResponse, WebhookDeleteResponse, WebhookTestResponse
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 WEBHOOK_EVENT_TYPES = {"message.received", "message.broadcast", "job.completed", "job.failed", "marketplace.task.claimed", "marketplace.task.delivered", "marketplace.task.completed"}
 WEBHOOK_TIMEOUT = 5.0
 
 @router.post("/v1/webhooks", response_model=WebhookResponse, tags=["Webhooks"])
-def webhook_register(req: WebhookRegisterRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def webhook_register(request: Request, req: WebhookRegisterRequest, agent_id: str = Depends(get_agent_id)):
     """Register a webhook callback URL for event notifications."""
     if not _is_safe_url(req.url):
         raise HTTPException(400, "Webhook URL points to a private/internal address")
@@ -41,7 +44,8 @@ def webhook_register(req: WebhookRegisterRequest, agent_id: str = Depends(get_ag
     )
 
 @router.get("/v1/webhooks", tags=["Webhooks"], response_model=WebhookListResponse)
-def webhook_list(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def webhook_list(request: Request, agent_id: str = Depends(get_agent_id)):
     """List your registered webhooks."""
     with get_db() as db:
         rows = db.execute(
@@ -57,7 +61,8 @@ def webhook_list(agent_id: str = Depends(get_agent_id)):
     }
 
 @router.delete("/v1/webhooks/{webhook_id}", tags=["Webhooks"], response_model=WebhookDeleteResponse)
-def webhook_delete(webhook_id: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def webhook_delete(request: Request, webhook_id: str, agent_id: str = Depends(get_agent_id)):
     """Delete a webhook."""
     with get_db() as db:
         r = db.execute(
@@ -69,6 +74,7 @@ def webhook_delete(webhook_id: str, agent_id: str = Depends(get_agent_id)):
 
 
 @router.post("/v1/webhooks/{webhook_id}/test", tags=["Webhooks"], response_model=WebhookTestResponse)
+@limiter.limit("60/minute")
 def webhook_test(webhook_id: str, request: Request, agent_id: str = Depends(get_agent_id)):
     """Fire a test ping to the webhook URL to verify it is reachable."""
     now = datetime.now(timezone.utc).isoformat()
@@ -109,6 +115,7 @@ def webhook_test(webhook_id: str, request: Request, agent_id: str = Depends(get_
 
 
 @router.post("/v1/agents/{agent_id}/webhooks/openclaw", tags=["Webhooks"])
+@limiter.limit("60/minute")
 async def receive_openclaw_event(agent_id: str, request: Request):
     """Receive an OpenClaw event and enqueue it for the agent."""
     _check_auth_rate_limit(request)

@@ -4,10 +4,11 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from config import MAX_MEMORY_VALUE_SIZE
 from db import get_db
+from rate_limit import limiter
 from helpers import (
     get_agent_id, _encrypt, _decrypt,
     _log_memory_access, _check_memory_visibility, _track_event,
@@ -35,7 +36,8 @@ router = APIRouter()
 
 
 @router.get("/v1/agents/{target_agent_id}/memory/{key}", tags=["Memory"], response_model=MemoryCrossAgentReadResponse)
-def memory_get_cross_agent(target_agent_id: str, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def memory_get_cross_agent(request: Request, target_agent_id: str, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         row = db.execute("SELECT * FROM memory WHERE agent_id=? AND namespace=? AND key=? AND (expires_at IS NULL OR expires_at > ?)", (target_agent_id, namespace, key, now)).fetchone()
@@ -52,7 +54,8 @@ def memory_get_cross_agent(target_agent_id: str, key: str, namespace: str = "def
 
 
 @router.patch("/v1/memory/{key}/visibility", tags=["Memory"], response_model=MemoryVisibilityResponse)
-def memory_set_visibility(key: str, req: MemoryVisibilityRequest, namespace: str = Query(None), agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def memory_set_visibility(request: Request, key: str, req: MemoryVisibilityRequest, namespace: str = Query(None), agent_id: str = Depends(get_agent_id)):
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
     with get_db() as db:
@@ -65,7 +68,8 @@ def memory_set_visibility(key: str, req: MemoryVisibilityRequest, namespace: str
 
 
 @router.post("/v1/memory", tags=["Memory"], response_model=MemorySetResponse)
-def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def memory_set(request: Request, req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
     _validate_key(req.key)
     if "\x00" in req.value:
         raise HTTPException(422, "Null bytes not allowed in values")
@@ -91,7 +95,8 @@ def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
     return {"status": "stored", "key": req.key, "namespace": req.namespace, "visibility": vis}
 
 @router.get("/v1/memory/{key}", response_model=MemoryGetResponse, tags=["Memory"])
-def memory_get(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def memory_get(request: Request, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         row = db.execute("SELECT * FROM memory WHERE agent_id=? AND namespace=? AND key=? AND (expires_at IS NULL OR expires_at > ?)", (agent_id, namespace, key, now)).fetchone()
@@ -103,7 +108,8 @@ def memory_get(key: str, namespace: str = "default", agent_id: str = Depends(get
     return MemoryGetResponse(**d)
 
 @router.delete("/v1/memory/{key}", tags=["Memory"], response_model=MemoryDeleteResponse)
-def memory_delete(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def memory_delete(request: Request, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         r = db.execute("DELETE FROM memory WHERE agent_id=? AND namespace=? AND key=?", (agent_id, namespace, key))
         if r.rowcount == 0:
@@ -112,7 +118,8 @@ def memory_delete(key: str, namespace: str = "default", agent_id: str = Depends(
     return {"status": "deleted", "key": key}
 
 @router.get("/v1/memory", response_model=MemoryListResponse, tags=["Memory"])
-def memory_list(namespace: str = "default", prefix: str = "", limit: int = Query(50, le=200), agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def memory_list(request: Request, namespace: str = "default", prefix: str = "", limit: int = Query(50, le=200), agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         rows = db.execute("SELECT key, LENGTH(value) as size_bytes, updated_at, expires_at FROM memory WHERE agent_id=? AND namespace=? AND key LIKE ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY updated_at DESC LIMIT ?", (agent_id, namespace, f"{prefix}%", now, limit)).fetchall()

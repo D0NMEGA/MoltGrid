@@ -10,7 +10,7 @@ from typing import Optional, List
 
 from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from db import get_db
 from helpers import get_agent_id, _encrypt, _decrypt, _fire_webhooks
@@ -20,6 +20,8 @@ from models import (
     MarketplaceDeliverResponse, MarketplaceReviewResponse,
     ScenarioCreateResponse, ScenarioListResponse, ScenarioRunResponse,
 )
+
+from rate_limit import limiter
 
 router = APIRouter()
 
@@ -71,7 +73,8 @@ def _parse_marketplace_row(row):
     return d
 
 @router.post("/v1/marketplace/tasks", response_model=MarketplaceCreateResponse, tags=["Marketplace"])
-def marketplace_create(req: MarketplaceCreateRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def marketplace_create(request: Request, req: MarketplaceCreateRequest, agent_id: str = Depends(get_agent_id)):
     """Post a task to the marketplace for other agents to claim. Costs credits upfront."""
     task_id = f"mktask_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
@@ -102,7 +105,8 @@ def marketplace_create(req: MarketplaceCreateRequest, agent_id: str = Depends(ge
     return {"task_id": task_id, "status": "open", "created_at": now, "credits_deducted": req.reward_credits}
 
 @router.get("/v1/marketplace/tasks", response_model=MarketplaceBrowseResponse, tags=["Marketplace"])
-def marketplace_browse(
+@limiter.limit("30/minute")
+def marketplace_browse(request: Request, 
     category: Optional[str] = None,
     status: str = Query("open"),
     tag: Optional[str] = None,
@@ -133,7 +137,8 @@ def marketplace_browse(
     return {"tasks": [_parse_marketplace_row(r) for r in rows], "count": len(rows)}
 
 @router.get("/v1/marketplace/tasks/{task_id}", tags=["Marketplace"])
-def marketplace_detail(task_id: str):
+@limiter.limit("30/minute")
+def marketplace_detail(request: Request, task_id: str):
     """Get marketplace task details. No auth required."""
     with get_db() as db:
         row = db.execute("SELECT * FROM marketplace WHERE task_id=?", (task_id,)).fetchone()
@@ -142,7 +147,8 @@ def marketplace_detail(task_id: str):
     return _parse_marketplace_row(row)
 
 @router.post("/v1/marketplace/tasks/{task_id}/claim", response_model=MarketplaceClaimResponse, tags=["Marketplace"])
-def marketplace_claim(task_id: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def marketplace_claim(request: Request, task_id: str, agent_id: str = Depends(get_agent_id)):
     """Claim an open marketplace task."""
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
@@ -165,7 +171,8 @@ def marketplace_claim(task_id: str, agent_id: str = Depends(get_agent_id)):
     return {"task_id": task_id, "status": "claimed", "claimed_by": agent_id}
 
 @router.post("/v1/marketplace/tasks/{task_id}/deliver", response_model=MarketplaceDeliverResponse, tags=["Marketplace"])
-def marketplace_deliver(task_id: str, req: MarketplaceDeliverRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def marketplace_deliver(request: Request, task_id: str, req: MarketplaceDeliverRequest, agent_id: str = Depends(get_agent_id)):
     """Submit a deliverable for a claimed task."""
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
@@ -186,7 +193,8 @@ def marketplace_deliver(task_id: str, req: MarketplaceDeliverRequest, agent_id: 
     return {"task_id": task_id, "status": "delivered"}
 
 @router.post("/v1/marketplace/tasks/{task_id}/review", response_model=MarketplaceReviewResponse, tags=["Marketplace"])
-def marketplace_review(task_id: str, req: MarketplaceReviewRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def marketplace_review(request: Request, task_id: str, req: MarketplaceReviewRequest, agent_id: str = Depends(get_agent_id)):
     """Accept or reject a delivery. Accepting awards credits to the worker."""
     with get_db() as db:
         task = db.execute("SELECT * FROM marketplace WHERE task_id=?", (task_id,)).fetchone()
@@ -342,7 +350,8 @@ def _run_coordination_pattern(pattern: str, agent_count: int, timeout_seconds: i
     return {"pattern": pattern, "success": False, "error": "Unknown pattern"}
 
 @router.post("/v1/testing/scenarios", response_model=ScenarioCreateResponse, tags=["Testing"])
-def scenario_create(req: ScenarioCreateRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def scenario_create(request: Request, req: ScenarioCreateRequest, agent_id: str = Depends(get_agent_id)):
     """Create a coordination test scenario."""
     if req.pattern not in COORDINATION_PATTERNS:
         raise HTTPException(400, f"Invalid pattern. Valid: {sorted(COORDINATION_PATTERNS)}")
@@ -359,7 +368,8 @@ def scenario_create(req: ScenarioCreateRequest, agent_id: str = Depends(get_agen
     return {"scenario_id": scenario_id, "status": "created", "pattern": req.pattern, "created_at": now}
 
 @router.get("/v1/testing/scenarios", response_model=ScenarioListResponse, tags=["Testing"])
-def scenario_list(
+@limiter.limit("30/minute")
+def scenario_list(request: Request, 
     pattern: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = Query(20, le=100),
@@ -390,7 +400,8 @@ def scenario_list(
     return {"scenarios": scenarios, "count": len(scenarios)}
 
 @router.post("/v1/testing/scenarios/{scenario_id}/run", response_model=ScenarioRunResponse, tags=["Testing"])
-def scenario_run(scenario_id: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def scenario_run(request: Request, scenario_id: str, agent_id: str = Depends(get_agent_id)):
     """Run a coordination test scenario."""
     with get_db() as db:
         row = db.execute("SELECT * FROM test_scenarios WHERE scenario_id=?", (scenario_id,)).fetchone()
@@ -412,7 +423,8 @@ def scenario_run(scenario_id: str, agent_id: str = Depends(get_agent_id)):
     return {"scenario_id": scenario_id, "status": final_status, "results": results, "completed_at": now}
 
 @router.get("/v1/testing/scenarios/{scenario_id}/results", tags=["Testing"])
-def scenario_results(scenario_id: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("30/minute")
+def scenario_results(request: Request, scenario_id: str, agent_id: str = Depends(get_agent_id)):
     """Get results for a test scenario."""
     with get_db() as db:
         row = db.execute("SELECT * FROM test_scenarios WHERE scenario_id=?", (scenario_id,)).fetchone()

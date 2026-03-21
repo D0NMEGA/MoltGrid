@@ -92,7 +92,23 @@ app = FastAPI(
 
 # ─── Rate Limiting (slowapi) ────────────────────────────────────────────────
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+async def _custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Return JSON 429 with Retry-After header instead of plain text."""
+    retry_after = exc.detail.split("per")[0].strip() if exc.detail else "60"
+    # Extract seconds from the limit string (e.g., "Rate limit exceeded: 60 per 1 minute")
+    try:
+        retry_seconds = int(retry_after.split()[-1])
+    except (ValueError, IndexError):
+        retry_seconds = 60
+    response = JSONResponse(
+        status_code=429,
+        content={"error": "Rate limit exceeded", "detail": str(exc.detail), "retry_after": retry_seconds},
+    )
+    response.headers["Retry-After"] = str(retry_seconds)
+    return response
+
+app.add_exception_handler(RateLimitExceeded, _custom_rate_limit_handler)
 
 @app.middleware("http")
 async def add_middleware(request: Request, call_next):

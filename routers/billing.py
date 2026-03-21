@@ -19,6 +19,8 @@ from models import (
     BillingStatusResponse, TemplateListResponse, TemplateDetailResponse,
 )
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 def _get_queue_email():
@@ -51,7 +53,8 @@ def _tier_from_price(price_id: str) -> str:
 
 
 @router.get("/v1/pricing", tags=["Billing"], response_model=PricingResponse)
-def get_pricing():
+@limiter.limit("60/minute")
+def get_pricing(request: Request):
     return {
         "tiers": {
             "free": {"name": "free", "price": 0, "max_agents": 1, "max_api_calls": 10000,
@@ -68,7 +71,8 @@ def get_pricing():
     }
 
 @router.post("/v1/billing/checkout", tags=["Billing"], response_model=CheckoutResponse)
-def billing_checkout(req: CheckoutRequest, user_id: str = Depends(get_user_id)):
+@limiter.limit("60/minute")
+def billing_checkout(request: Request, req: CheckoutRequest, user_id: str = Depends(get_user_id)):
     if req.tier not in STRIPE_TIER_PRICES:
         raise HTTPException(400, f"Invalid tier '{req.tier}'. Must be: hobby, team, or scale")
     price_id = STRIPE_TIER_PRICES[req.tier]
@@ -93,7 +97,8 @@ def billing_checkout(req: CheckoutRequest, user_id: str = Depends(get_user_id)):
     return {"checkout_url": session.url}
 
 @router.post("/v1/billing/portal", tags=["Billing"], response_model=PortalResponse)
-def billing_portal(user_id: str = Depends(get_user_id)):
+@limiter.limit("60/minute")
+def billing_portal(request: Request, user_id: str = Depends(get_user_id)):
     if not STRIPE_SECRET_KEY:
         raise HTTPException(503, "Stripe is not configured on this server")
     with get_db() as db:
@@ -107,6 +112,7 @@ def billing_portal(user_id: str = Depends(get_user_id)):
     return {"portal_url": session.url}
 
 @router.post("/v1/stripe/webhook", tags=["Billing"])
+@limiter.limit("60/minute")
 async def stripe_webhook(request: Request):
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
@@ -221,7 +227,8 @@ async def stripe_webhook(request: Request):
     return {"received": True}
 
 @router.get("/v1/billing/status", tags=["Billing"], response_model=BillingStatusResponse)
-def billing_status(user_id: str = Depends(get_user_id)):
+@limiter.limit("60/minute")
+def billing_status(request: Request, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         user = db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
         if not user:
@@ -245,13 +252,15 @@ def billing_status(user_id: str = Depends(get_user_id)):
     return result
 
 @router.get("/v1/templates", tags=["Templates"], response_model=TemplateListResponse)
-def list_templates():
+@limiter.limit("60/minute")
+def list_templates(request: Request):
     with get_db() as db:
         rows = db.execute("SELECT template_id, name, description, category, starter_code FROM templates ORDER BY name").fetchall()
     return {"templates": [{"template_id": r["template_id"], "name": r["name"], "description": r["description"], "category": r["category"], "starter_code": r["starter_code"]} for r in rows]}
 
 @router.get("/v1/templates/{template_id}", tags=["Templates"], response_model=TemplateDetailResponse)
-def get_template(template_id: str):
+@limiter.limit("60/minute")
+def get_template(request: Request, template_id: str):
     with get_db() as db:
         row = db.execute("SELECT template_id, name, description, category, starter_code FROM templates WHERE template_id = ?", (template_id,)).fetchone()
     if not row:

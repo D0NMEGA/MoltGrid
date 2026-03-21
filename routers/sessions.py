@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 
 from db import get_db
 from helpers import get_agent_id
@@ -14,6 +14,8 @@ from models import (
     SessionCreateResponse, SessionListResponse, SessionAppendResponse,
     SessionSummarizeResponse, SessionDeleteResponse,
 )
+
+from rate_limit import limiter
 
 router = APIRouter()
 
@@ -52,7 +54,8 @@ def _auto_summarize(messages: list) -> list:
 
 
 @router.post("/v1/sessions", response_model=SessionCreateResponse, tags=["Sessions"])
-def session_create(req: SessionCreateRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def session_create(request: Request, req: SessionCreateRequest, agent_id: str = Depends(get_agent_id)):
     """Create a new conversation session."""
     now = datetime.now(timezone.utc).isoformat()
     session_id = f"sess_{uuid.uuid4().hex[:16]}"
@@ -68,7 +71,8 @@ def session_create(req: SessionCreateRequest, agent_id: str = Depends(get_agent_
 
 
 @router.get("/v1/sessions", response_model=SessionListResponse, tags=["Sessions"])
-def session_list(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def session_list(request: Request, agent_id: str = Depends(get_agent_id)):
     """List all sessions for this agent."""
     with get_db() as db:
         rows = db.execute(
@@ -79,7 +83,8 @@ def session_list(agent_id: str = Depends(get_agent_id)):
 
 
 @router.get("/v1/sessions/{session_id}", tags=["Sessions"])
-def session_get(session_id: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def session_get(request: Request, session_id: str, agent_id: str = Depends(get_agent_id)):
     """Get a session with its full message history."""
     with get_db() as db:
         row = db.execute(
@@ -99,7 +104,8 @@ def session_get(session_id: str, agent_id: str = Depends(get_agent_id)):
 
 
 @router.post("/v1/sessions/{session_id}/messages", response_model=SessionAppendResponse, tags=["Sessions"])
-def session_append(session_id: str, req: SessionAppendRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def session_append(request: Request, session_id: str, req: SessionAppendRequest, agent_id: str = Depends(get_agent_id)):
     """Append a message to a session. Auto-summarizes if near token limit."""
     now = datetime.now(timezone.utc).isoformat()
 
@@ -140,7 +146,8 @@ def session_append(session_id: str, req: SessionAppendRequest, agent_id: str = D
 
 
 @router.post("/v1/sessions/{session_id}/summarize", response_model=SessionSummarizeResponse, tags=["Sessions"])
-def session_summarize(session_id: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def session_summarize(request: Request, session_id: str, agent_id: str = Depends(get_agent_id)):
     """Force-summarize a session: collapse history to summary + recent 10 messages."""
     now = datetime.now(timezone.utc).isoformat()
 
@@ -171,7 +178,8 @@ def session_summarize(session_id: str, agent_id: str = Depends(get_agent_id)):
 
 
 @router.delete("/v1/sessions/{session_id}", response_model=SessionDeleteResponse, tags=["Sessions"])
-def session_delete(session_id: str, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def session_delete(request: Request, session_id: str, agent_id: str = Depends(get_agent_id)):
     """Delete a session."""
     with get_db() as db:
         r = db.execute(

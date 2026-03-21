@@ -11,7 +11,7 @@ from typing import Optional, List
 
 from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, HTTPException, Depends, Header, Response
+from fastapi import APIRouter, HTTPException, Depends, Header, Response, Request
 
 from config import MOLTBOOK_SERVICE_KEY
 from db import get_db
@@ -23,10 +23,13 @@ from models import (
     MoltBookEventResponse, MoltBookRegisterResponse, MoltBookFeedResponse,
 )
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 @router.post("/v1/agents/{agent_id}/integrations", response_model=IntegrationCreateResponse, tags=["Integrations"])
-def integration_create(agent_id: str, req: IntegrationCreateRequest, caller_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def integration_create(request: Request, agent_id: str, req: IntegrationCreateRequest, caller_id: str = Depends(get_agent_id)):
     """Link an external platform to this agent. Agent must own itself (caller == agent_id)."""
     if caller_id != agent_id:
         raise HTTPException(403, "You can only manage integrations for your own agent")
@@ -46,7 +49,8 @@ def integration_create(agent_id: str, req: IntegrationCreateRequest, caller_id: 
             "status": req.status, "created_at": now}
 
 @router.get("/v1/agents/{agent_id}/integrations", response_model=IntegrationListResponse, tags=["Integrations"])
-def integration_list(agent_id: str, caller_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def integration_list(request: Request, agent_id: str, caller_id: str = Depends(get_agent_id)):
     """List all platform integrations linked to an agent. Caller must be the agent."""
     if caller_id != agent_id:
         raise HTTPException(403, "You can only view integrations for your own agent")
@@ -74,7 +78,8 @@ class MoltBookEventRequest(BaseModel):
     metadata: Optional[dict] = Field(None, description="Additional event metadata")
 
 @router.post("/v1/moltbook/events", response_model=MoltBookEventResponse, tags=["Integrations"])
-def moltbook_ingest_event(req: MoltBookEventRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def moltbook_ingest_event(request: Request, req: MoltBookEventRequest, agent_id: str = Depends(get_agent_id)):
     """Ingest a MoltBook social action (post, reply, upvote) as an analytics_event with source='moltbook'."""
     event_id = f"evt_{uuid.uuid4().hex[:16]}"
     now = datetime.now(timezone.utc).isoformat()
@@ -102,7 +107,8 @@ class MoltBookRegisterRequest(BaseModel):
 
 # TODO: Add IP-based rate limiting in Phase 8
 @router.post("/v1/moltbook/register", response_model=MoltBookRegisterResponse, tags=["Integrations"])
-def moltbook_register(req: MoltBookRegisterRequest, x_service_key: str = Header(None)):
+@limiter.limit("60/minute")
+def moltbook_register(request: Request, req: MoltBookRegisterRequest, x_service_key: str = Header(None)):
     """Auto-provision a MoltGrid agent for a new MoltBook user. Requires X-Service-Key header."""
     import main as _m
     _svc_key = _m.MOLTBOOK_SERVICE_KEY
@@ -136,7 +142,8 @@ def moltbook_register(req: MoltBookRegisterRequest, x_service_key: str = Header(
 
 
 @router.get("/v1/moltbook/feed", response_model=MoltBookFeedResponse, tags=["Integrations"])
-def moltbook_feed():
+@limiter.limit("60/minute")
+def moltbook_feed(request: Request):
     """Return last 20 moltbook-sourced analytics events as a social feed. Public endpoint."""
     with get_db() as db:
         rows = db.execute(
@@ -267,14 +274,16 @@ def _check_onboarding_progress(db, agent_id: str) -> dict:
     }
 
 @router.post("/v1/onboarding/start", response_model=OnboardingResponse, tags=["Onboarding"])
-def onboarding_start(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def onboarding_start(request: Request, agent_id: str = Depends(get_agent_id)):
     """Start the interactive onboarding tutorial. Returns a step-by-step checklist to guide you through all MoltGrid features."""
     with get_db() as db:
         result = _check_onboarding_progress(db, agent_id)
     return OnboardingResponse(**result)
 
 @router.get("/v1/onboarding/status", response_model=OnboardingResponse, tags=["Onboarding"])
-def onboarding_status(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def onboarding_status(request: Request, agent_id: str = Depends(get_agent_id)):
     """Check your onboarding progress without modifying anything."""
     with get_db() as db:
         result = _check_onboarding_progress(db, agent_id)
@@ -284,7 +293,8 @@ def onboarding_status(agent_id: str = Depends(get_agent_id)):
 GUIDE_PLATFORMS = {"quickstart", "python-sdk", "typescript-sdk", "webhooks", "mcp", "langgraph", "crewai", "openai"}
 
 @router.get("/v1/guides/{platform}", tags=["Documentation"])
-def get_guide(platform: str):
+@limiter.limit("60/minute")
+def get_guide(request: Request, platform: str):
     """Serve getting-started guide markdown for the specified platform."""
     if platform not in GUIDE_PLATFORMS:
         raise HTTPException(404, f"Guide not found. Available: {sorted(GUIDE_PLATFORMS)}")

@@ -21,6 +21,8 @@ from db import get_db
 from helpers import hash_key, _encrypt, _decrypt, _sanitize_text, _fire_webhooks, _queue_agent_event
 from config import logger
 
+from rate_limit import limiter
+
 router = APIRouter(tags=["Chat Gateway"])
 
 CHAT_RATE_LIMIT = 30  # requests per minute for chat gateway
@@ -63,7 +65,8 @@ def _chat_auth(key: str, request: Request) -> str:
 # -- Info endpoint -------------------------------------------------------------
 
 @router.get("/v1/chat", response_class=PlainTextResponse)
-def chat_gateway_info():
+@limiter.limit("60/minute")
+def chat_gateway_info(request: Request):
     """Chat Gateway info page. Explains what this is and how to use it."""
     return """MoltGrid Chat Gateway
 =====================
@@ -92,7 +95,8 @@ Docs: https://api.moltgrid.net/api-docs
 # -- Heartbeat -----------------------------------------------------------------
 
 @router.get("/v1/chat/heartbeat")
-def chat_heartbeat(
+@limiter.limit("60/minute")
+def chat_heartbeat(request: Request, 
     key: str = Query(..., description="API key"),
     status: str = Query("online", description="Agent status"),
 ):
@@ -111,7 +115,8 @@ def chat_heartbeat(
 # -- Who Am I ------------------------------------------------------------------
 
 @router.get("/v1/chat/whoami")
-def chat_whoami(key: str = Query(..., description="API key")):
+@limiter.limit("60/minute")
+def chat_whoami(request: Request, key: str = Query(..., description="API key")):
     """Get your agent profile."""
     request_stub = type("R", (), {"state": type("S", (), {})(), "headers": {}})()
     agent_id = _chat_auth(key, request_stub)
@@ -135,7 +140,8 @@ def chat_whoami(key: str = Query(..., description="API key")):
 # -- Memory Set ----------------------------------------------------------------
 
 @router.get("/v1/chat/memory/set")
-def chat_memory_set(
+@limiter.limit("60/minute")
+def chat_memory_set(request: Request, 
     key: str = Query(..., description="API key"),
     k: str = Query(..., description="Memory key", max_length=128),
     v: str = Query(..., description="Memory value", max_length=4000),
@@ -159,7 +165,8 @@ def chat_memory_set(
 # -- Memory Get ----------------------------------------------------------------
 
 @router.get("/v1/chat/memory/get")
-def chat_memory_get(
+@limiter.limit("60/minute")
+def chat_memory_get(request: Request, 
     key: str = Query(..., description="API key"),
     k: str = Query(..., description="Memory key"),
     ns: str = Query("default", description="Namespace"),
@@ -181,7 +188,8 @@ def chat_memory_get(
 # -- Relay Send ----------------------------------------------------------------
 
 @router.get("/v1/chat/relay/send")
-def chat_relay_send(
+@limiter.limit("60/minute")
+def chat_relay_send(request: Request, 
     key: str = Query(..., description="API key"),
     to: str = Query(..., description="Recipient agent_id"),
     msg: str = Query(..., description="Message content", max_length=4000),
@@ -214,7 +222,8 @@ def chat_relay_send(
 # -- Relay Inbox ---------------------------------------------------------------
 
 @router.get("/v1/chat/relay/inbox")
-def chat_relay_inbox(
+@limiter.limit("60/minute")
+def chat_relay_inbox(request: Request, 
     key: str = Query(..., description="API key"),
     channel: str = Query("direct", description="Channel"),
     limit: int = Query(20, le=50, description="Max messages"),
@@ -239,7 +248,8 @@ def chat_relay_inbox(
 # -- Directory Update ----------------------------------------------------------
 
 @router.get("/v1/chat/directory/update")
-def chat_directory_update(
+@limiter.limit("60/minute")
+def chat_directory_update(request: Request, 
     key: str = Query(..., description="API key"),
     desc: str = Query(None, description="Agent description", max_length=500),
     skills: str = Query(None, description="Comma-separated skills"),
@@ -277,7 +287,8 @@ def chat_directory_update(
 # -- Directory Search (public, no auth) ----------------------------------------
 
 @router.get("/v1/chat/directory/search")
-def chat_directory_search(
+@limiter.limit("60/minute")
+def chat_directory_search(request: Request, 
     q: str = Query("", description="Search query"),
     skill: str = Query(None, description="Filter by skill"),
     limit: int = Query(20, le=50),

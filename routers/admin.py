@@ -22,6 +22,8 @@ from helpers import (
 from pydantic import BaseModel
 from models import AdminLoginRequest, AdminEmailRequest
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 def _parse_marketplace_row(row):
@@ -71,6 +73,7 @@ def _verify_admin_session(admin_token: str = Cookie(None)) -> bool:
     return True
 
 @router.post("/admin/api/login", tags=["Admin"])
+@limiter.limit("60/minute")
 def admin_login(req: AdminLoginRequest, request: Request, response: Response):
     """Authenticate admin and set session cookie."""
     _check_auth_rate_limit(request)
@@ -97,7 +100,8 @@ def admin_login(req: AdminLoginRequest, request: Request, response: Response):
     return {"status": "authenticated"}
 
 @router.post("/admin/api/logout", tags=["Admin"])
-def admin_logout(response: Response, admin_token: str = Cookie(None)):
+@limiter.limit("60/minute")
+def admin_logout(request: Request, response: Response, admin_token: str = Cookie(None)):
     """Log out admin session."""
     if admin_token:
         with get_db() as db:
@@ -106,7 +110,8 @@ def admin_logout(response: Response, admin_token: str = Cookie(None)):
     return {"status": "logged_out"}
 
 @router.get("/admin/api/dashboard", tags=["Admin"])
-def admin_dashboard(_: bool = Depends(_verify_admin_session)):
+@limiter.limit("60/minute")
+def admin_dashboard(request: Request, _: bool = Depends(_verify_admin_session)):
     """Admin dashboard data: full system overview."""
     with get_db() as db:
         agents = db.execute(
@@ -160,7 +165,8 @@ def admin_dashboard(_: bool = Depends(_verify_admin_session)):
     }
 
 @router.get("/admin/api/messages", tags=["Admin"])
-def admin_messages(
+@limiter.limit("60/minute")
+def admin_messages(request: Request, 
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     agent_id: Optional[str] = None,
@@ -187,7 +193,8 @@ def admin_messages(
     return {"messages": messages, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/webhook-deliveries", tags=["Admin"])
-def admin_webhook_deliveries(
+@limiter.limit("60/minute")
+def admin_webhook_deliveries(request: Request, 
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     status: Optional[str] = None,
@@ -222,7 +229,8 @@ def admin_webhook_deliveries(
     return {"deliveries": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/analytics", tags=["Admin"])
-def admin_analytics(_: bool = Depends(_verify_admin_session)):
+@limiter.limit("60/minute")
+def admin_analytics(request: Request, _: bool = Depends(_verify_admin_session)):
     """Analytics dashboard: funnel metrics, signups, conversions, churn, MRR."""
     now = datetime.now(timezone.utc)
     t_24h = (now - timedelta(hours=24)).isoformat()
@@ -276,7 +284,8 @@ def admin_analytics(_: bool = Depends(_verify_admin_session)):
     }
 
 @router.get("/admin/api/memory", tags=["Admin"])
-def admin_memory(
+@limiter.limit("60/minute")
+def admin_memory(request: Request, 
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     agent_id: Optional[str] = None,
@@ -301,7 +310,8 @@ def admin_memory(
     return {"entries": entries, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/queue", tags=["Admin"])
-def admin_queue(
+@limiter.limit("60/minute")
+def admin_queue(request: Request, 
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     status: Optional[str] = None,
@@ -332,14 +342,16 @@ def admin_queue(
     return {"jobs": jobs, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/webhooks", tags=["Admin"])
-def admin_webhooks(_: bool = Depends(_verify_admin_session)):
+@limiter.limit("60/minute")
+def admin_webhooks(request: Request, _: bool = Depends(_verify_admin_session)):
     """Browse all registered webhooks."""
     with get_db() as db:
         rows = db.execute("SELECT * FROM webhooks ORDER BY created_at DESC").fetchall()
     return {"webhooks": [{**dict(r), "event_types": json.loads(r["event_types"])} for r in rows], "total": len(rows)}
 
 @router.get("/admin/api/schedules", tags=["Admin"])
-def admin_schedules(_: bool = Depends(_verify_admin_session)):
+@limiter.limit("60/minute")
+def admin_schedules(request: Request, _: bool = Depends(_verify_admin_session)):
     """Browse all scheduled tasks."""
     with get_db() as db:
         rows = db.execute("SELECT * FROM scheduled_tasks ORDER BY created_at DESC").fetchall()
@@ -349,7 +361,8 @@ def admin_schedules(_: bool = Depends(_verify_admin_session)):
     return {"schedules": schedules, "total": len(schedules)}
 
 @router.get("/admin/api/shared-memory", tags=["Admin"])
-def admin_shared_memory(
+@limiter.limit("60/minute")
+def admin_shared_memory(request: Request, 
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     namespace: Optional[str] = None,
@@ -374,7 +387,8 @@ def admin_shared_memory(
     return {"entries": entries, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/sla", tags=["Admin"])
-def admin_sla(_: bool = Depends(_verify_admin_session)):
+@limiter.limit("60/minute")
+def admin_sla(request: Request, _: bool = Depends(_verify_admin_session)):
     """Detailed SLA and uptime data for admin dashboard."""
     with get_db() as db:
         windows = {"24h": 1, "7d": 7, "30d": 30}
@@ -400,7 +414,8 @@ def admin_sla(_: bool = Depends(_verify_admin_session)):
     }
 
 @router.get("/admin/api/agents/{agent_id}", tags=["Admin"])
-def admin_agent_detail(agent_id: str, _: bool = Depends(_verify_admin_session)):
+@limiter.limit("60/minute")
+def admin_agent_detail(request: Request, agent_id: str, _: bool = Depends(_verify_admin_session)):
     """Get full detail for a single agent including all their data."""
     with get_db() as db:
         agent = db.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
@@ -467,7 +482,8 @@ def admin_agent_detail(agent_id: str, _: bool = Depends(_verify_admin_session)):
     }
 
 @router.delete("/admin/api/agents/{agent_id}", tags=["Admin"])
-def admin_delete_agent(agent_id: str, _: bool = Depends(_verify_admin_session)):
+@limiter.limit("60/minute")
+def admin_delete_agent(request: Request, agent_id: str, _: bool = Depends(_verify_admin_session)):
     """Delete an agent and all associated data."""
     with get_db() as db:
         row = db.execute("SELECT agent_id FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
@@ -488,7 +504,8 @@ def admin_delete_agent(agent_id: str, _: bool = Depends(_verify_admin_session)):
     return {"status": "deleted", "agent_id": agent_id}
 
 @router.get("/admin/api/collaborations", tags=["Admin"])
-def admin_collaborations(
+@limiter.limit("60/minute")
+def admin_collaborations(request: Request, 
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     agent_id: Optional[str] = None,
@@ -512,7 +529,8 @@ def admin_collaborations(
     return {"collaborations": collabs, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/marketplace", tags=["Admin"])
-def admin_marketplace(
+@limiter.limit("60/minute")
+def admin_marketplace(request: Request, 
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     status: Optional[str] = None,
@@ -529,7 +547,8 @@ def admin_marketplace(
     return {"tasks": [_parse_marketplace_row(r) for r in rows], "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/scenarios", tags=["Admin"])
-def admin_scenarios(
+@limiter.limit("60/minute")
+def admin_scenarios(request: Request, 
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     _: bool = Depends(_verify_admin_session),
@@ -549,7 +568,8 @@ def admin_scenarios(
     return {"scenarios": scenarios, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/contact", tags=["Admin"])
-def admin_contact(
+@limiter.limit("60/minute")
+def admin_contact(request: Request, 
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     _: bool = Depends(_verify_admin_session),
@@ -561,7 +581,8 @@ def admin_contact(
     return {"submissions": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
 
 @router.post("/admin/api/email", tags=["Admin"])
-def admin_email(req: AdminEmailRequest, _: bool = Depends(_verify_admin_session)):
+@limiter.limit("60/minute")
+def admin_email(request: Request, req: AdminEmailRequest, _: bool = Depends(_verify_admin_session)):
     """Preview or send a branded email from the admin panel."""
     from helpers import _branded_email, _queue_email, _email_from
 
@@ -574,7 +595,8 @@ def admin_email(req: AdminEmailRequest, _: bool = Depends(_verify_admin_session)
     return {"status": "preview", "preview": rendered, "from": _email_from(req.from_category)}
 
 @router.get("/admin/api/emails", tags=["Admin"])
-def admin_email_history(_: bool = Depends(_verify_admin_session)):
+@limiter.limit("60/minute")
+def admin_email_history(request: Request, _: bool = Depends(_verify_admin_session)):
     """List recent emails from the queue."""
     with get_db() as db:
         emails = db.execute(

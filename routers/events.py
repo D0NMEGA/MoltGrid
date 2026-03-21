@@ -6,16 +6,19 @@ import hashlib
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect, Response
+from fastapi import APIRouter, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect, Response, Request
 
 from db import get_db
 from helpers import get_agent_id
 from models import EventAckRequest, EventAckResponse, EventStreamItem
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 @router.get("/v1/events/stream", response_model=EventStreamItem, tags=["Events"])
-async def events_stream(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+async def events_stream(request: Request, agent_id: str = Depends(get_agent_id)):
     """Long-poll: waits up to 30s for first unacked event. Returns event or 204."""
     import asyncio
     deadline = time.time() + 30
@@ -38,7 +41,8 @@ async def events_stream(agent_id: str = Depends(get_agent_id)):
 
 
 @router.get("/v1/events", tags=["Events"])
-async def events_poll(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+async def events_poll(request: Request, agent_id: str = Depends(get_agent_id)):
     """Return up to 20 unacknowledged events for agent."""
     with get_db() as db:
         rows = db.execute(
@@ -50,7 +54,8 @@ async def events_poll(agent_id: str = Depends(get_agent_id)):
 
 
 @router.post("/v1/events/ack", response_model=EventAckResponse, tags=["Events"])
-async def events_ack(body: EventAckRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+async def events_ack(request: Request, body: EventAckRequest, agent_id: str = Depends(get_agent_id)):
     """Mark event_ids as acknowledged."""
     if not body.event_ids:
         return {"acknowledged": 0}

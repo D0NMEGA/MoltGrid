@@ -5,7 +5,7 @@ import uuid
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from db import get_db
 from state import _ws_connections
@@ -16,10 +16,13 @@ from models import (
     PubSubSubscriptionsResponse, PubSubPublishResponse, PubSubChannelsResponse,
 )
 
+from rate_limit import limiter
+
 router = APIRouter()
 
 @router.post("/v1/pubsub/subscribe", tags=["Pub/Sub"], response_model=PubSubSubscribeResponse)
-def pubsub_subscribe(req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def pubsub_subscribe(request: Request, req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
     """Subscribe to a broadcast channel."""
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
@@ -36,7 +39,8 @@ def pubsub_subscribe(req: PubSubSubscribeRequest, agent_id: str = Depends(get_ag
     return {"channel": req.channel, "status": "subscribed", "subscribed_at": now}
 
 @router.post("/v1/pubsub/unsubscribe", tags=["Pub/Sub"], response_model=PubSubUnsubscribeResponse)
-def pubsub_unsubscribe(req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def pubsub_unsubscribe(request: Request, req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
     """Unsubscribe from a broadcast channel."""
     with get_db() as db:
         r = db.execute(
@@ -48,7 +52,8 @@ def pubsub_unsubscribe(req: PubSubSubscribeRequest, agent_id: str = Depends(get_
     return {"channel": req.channel, "status": "unsubscribed"}
 
 @router.get("/v1/pubsub/subscriptions", tags=["Pub/Sub"], response_model=PubSubSubscriptionsResponse)
-def pubsub_list_subscriptions(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def pubsub_list_subscriptions(request: Request, agent_id: str = Depends(get_agent_id)):
     """List all channels this agent is subscribed to."""
     with get_db() as db:
         rows = db.execute(
@@ -58,7 +63,8 @@ def pubsub_list_subscriptions(agent_id: str = Depends(get_agent_id)):
     return {"subscriptions": [dict(r) for r in rows], "count": len(rows)}
 
 @router.post("/v1/pubsub/publish", tags=["Pub/Sub"], response_model=PubSubPublishResponse)
-async def pubsub_publish(req: PubSubPublishRequest, agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+async def pubsub_publish(request: Request, req: PubSubPublishRequest, agent_id: str = Depends(get_agent_id)):
     """Publish a message to all subscribers of a channel."""
     now = datetime.now(timezone.utc).isoformat()
     message_id = f"ps_{uuid.uuid4().hex[:12]}"
@@ -114,7 +120,8 @@ async def pubsub_publish(req: PubSubPublishRequest, agent_id: str = Depends(get_
     }
 
 @router.get("/v1/pubsub/channels", tags=["Pub/Sub"], response_model=PubSubChannelsResponse)
-def pubsub_list_channels(agent_id: str = Depends(get_agent_id)):
+@limiter.limit("60/minute")
+def pubsub_list_channels(request: Request, agent_id: str = Depends(get_agent_id)):
     """List all active pub/sub channels with subscriber counts."""
     with get_db() as db:
         rows = db.execute(
