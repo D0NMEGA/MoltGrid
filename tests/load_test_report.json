@@ -1,0 +1,82 @@
+{
+  "summary": {
+    "total_requests": 420,
+    "total_errors": 0,
+    "error_rate_pct": 0.0,
+    "elapsed_seconds": 5.02,
+    "throughput_rps": 83.73
+  },
+  "thresholds": {
+    "max_error_rate_pct": 1.0,
+    "max_elapsed_seconds": 60
+  },
+  "verdict": "PASS",
+  "scenarios": {
+    "auth_signup_login": {
+      "total_requests": 72,
+      "errors": 0,
+      "error_rate_pct": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 16.0,
+      "p99_ms": 16.0,
+      "status_codes": {
+        "200": 72
+      }
+    },
+    "memory_crud": {
+      "total_requests": 68,
+      "errors": 0,
+      "error_rate_pct": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0,
+      "status_codes": {
+        "200": 68
+      }
+    },
+    "health_check": {
+      "total_requests": 106,
+      "errors": 0,
+      "error_rate_pct": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 11.25,
+      "p99_ms": 16.0,
+      "status_codes": {
+        "200": 106
+      }
+    },
+    "pricing_check": {
+      "total_requests": 71,
+      "errors": 0,
+      "error_rate_pct": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 15.5,
+      "p99_ms": 16.0,
+      "status_codes": {
+        "200": 71
+      }
+    },
+    "directory_list": {
+      "total_requests": 71,
+      "errors": 0,
+      "error_rate_pct": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 15.5,
+      "p99_ms": 20.5,
+      "status_codes": {
+        "200": 71
+      }
+    },
+    "relay_send_inbox": {
+      "total_requests": 32,
+      "errors": 0,
+      "error_rate_pct": 0.0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0,
+      "status_codes": {
+        "200": 32
+      }
+    }
+  }
+}
