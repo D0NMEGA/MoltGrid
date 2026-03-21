@@ -17,7 +17,10 @@ from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse
 
-from db import init_db, init_pool, close_pool, get_db, DB_PATH, DB_BACKEND
+from db import init_db, init_pool, close_pool, init_sqlite_pool, close_sqlite_pool, get_db, DB_PATH, DB_BACKEND
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from rate_limit import limiter
 from config import *  # noqa: F401,F403 -- re-exports JWT_SECRET, JWT_ALGORITHM, etc.
 from state import _ws_connections
 from helpers import (
@@ -36,8 +39,9 @@ from helpers import (
 
 @asynccontextmanager
 async def lifespan(app):
-    # Startup: initialize database connection pool (postgres/dual backends)
+    # Startup: initialize database connection pools
     init_pool()
+    init_sqlite_pool()
     # Startup: launch background threads
     threading.Thread(target=_scheduler_loop, daemon=True).start()
     threading.Thread(target=_uptime_loop, daemon=True).start()
@@ -62,8 +66,9 @@ async def lifespan(app):
     except Exception as e:
         logger.warning(f"Embedding model pre-warm failed (will lazy-load): {e}")
     yield
-    # Shutdown: close database connection pool
+    # Shutdown: close database connection pools
     close_pool()
+    close_sqlite_pool()
 
 
 # ─── App ─────────────────────────────────────────────────────────────────────
@@ -77,6 +82,10 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
 )
+
+# ─── Rate Limiting (slowapi) ────────────────────────────────────────────────
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.middleware("http")
 async def add_middleware(request: Request, call_next):
