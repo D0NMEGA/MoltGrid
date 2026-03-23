@@ -8,6 +8,9 @@ import threading
 # WebSocket connections: agent_id -> set of WebSocket objects
 _ws_connections: dict[str, set] = {}
 
+# SSE connections: agent_id -> set of asyncio.Queue objects (one per subscriber)
+_sse_connections: dict[str, set] = {}
+
 # Network WebSocket clients (lobby/broadcast)
 _network_ws_clients: list = []
 
