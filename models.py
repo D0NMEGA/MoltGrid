@@ -696,7 +696,7 @@ class DeadLetterMessageItem(BaseModel):
     fail_reason: str
     created_at: str
 
-class DeadLetterListResponse(BaseModel):
+class DeadLetterMessageListResponse(BaseModel):
     messages: List[DeadLetterMessageItem]
     count: int
 
