@@ -2,13 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: in-progress
-last_updated: "2026-03-23T00:00:00Z"
+status: completed
+stopped_at: Completed 42-02-PLAN.md -- relay dead-letter, 3 new message endpoints, 107 tests passing.
+last_updated: "2026-03-23T20:48:25.082Z"
+last_activity: "2026-03-23 -- Plan 42-02 complete: relay dead-letter, status lifecycle, hop trace, 3 new endpoints"
 progress:
-  total_phases: 7
-  completed_phases: 6
-  total_plans: 17
-  completed_plans: 17
+  total_phases: 11
+  completed_phases: 4
+  total_plans: 8
+  completed_plans: 10
+  percent: 100
 ---
 
 # Project State

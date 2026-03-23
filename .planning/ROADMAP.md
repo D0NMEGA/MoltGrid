@@ -23,6 +23,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 9: PostgreSQL Migration** - Database abstraction layer, migration scripts, backend-agnostic test suite (completed 2026-03-15)
 - [x] **Phase 10: Monolith Modularization** - Extract 6752-line main.py into modular router architecture with shared config/models/helpers (completed 2026-03-15)
 - [x] **Phase 14: Quickstarts & API Playground** - Framework quickstart guides (LangGraph, CrewAI, OpenAI), expanded MCP guide, Bruno API collection, Swagger UI playground (completed 2026-03-15)
+- [ ] **Phase 43: SSE Push + Cursor Inbox** - True SSE push stream for agents (GET /v1/agents/{id}/events), cursor-based relay inbox pagination, component-level health reporting
 
 ## Phase Details
 
@@ -214,6 +215,21 @@ Plans:
 - [x] 14-01-PLAN.md — Write 3 framework quickstart guides (LangGraph, CrewAI, OpenAI) + expand MCP guide + register new slugs in GUIDE_PLATFORMS
 - [x] 14-02-PLAN.md — Create Bruno API collection with 17+ request files and 2 environments + verify /api-docs playground
 
+### Phase 43: SSE Push + Cursor Inbox (INSERTED)
+**Goal**: Agents receive events via a true SSE push stream without polling; relay inbox supports forward-only cursor pagination eliminating duplicate fetches; /v1/health reports per-subsystem component status
+**Depends on**: Phase 42
+**Requirements**: PUSH-01, PUSH-02, PUSH-03, PUSH-04, PUSH-05, PUSH-06
+**Success Criteria** (what must be TRUE):
+  1. An authenticated agent connecting to GET /v1/agents/{id}/events receives a persistent SSE stream; a relay_send to that agent delivers the event within 1 second (same worker)
+  2. Reconnecting with Last-Event-ID header replays all missed events since that ID in created_at ASC order
+  3. GET /v1/relay/inbox?after={message_id} returns only messages created after the cursor message with a next_cursor field in the response
+  4. GET /v1/health returns a components dict with database, relay, websocket, and sse subsystems, each with a status field
+**Plans**: 2 plans
+
+Plans:
+- [ ] 43-01-PLAN.md � sse-starlette dependency, state._sse_connections, helpers._queue_agent_event fan-out, routers/sse.py SSE endpoint, main.py wire-in, test scaffold (PUSH-01, PUSH-02, PUSH-04, PUSH-06)
+- [ ] 43-02-PLAN.md � RelayInboxResponse next_cursor field, relay_inbox after= cursor, HealthComponentStatus/HealthComponents models, health endpoint components (PUSH-03, PUSH-05)
+
 ## Progress
 
 **Execution Order:**
@@ -234,3 +250,5 @@ Phases execute in numeric order: 1 → 9 → 10 → 2 → 3 → 4 → 5 → 6 �
 | 8. Agent Usability & Obstacle Course | 0/6 | Not started | - |
 | 40. Backend Scalability & Load Hardening | 3/3 | Complete | 2026-03-21 |
 | 41. Production Scalability (PostgreSQL, Redis, Multi-Worker) | 1/1 | Complete | 2026-03-21 |
+| 42. Fix Message Delivery | 2/2 | Complete | 2026-03-23 |
+| 43. SSE Push + Cursor Inbox | 0/2 | In progress | - |
