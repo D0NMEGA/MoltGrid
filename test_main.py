@@ -4816,3 +4816,169 @@ class TestTieredMemory:
         assert r2.status_code == 200
         key2 = r2.json()["vector_key"]
         assert key1 == key2
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 43: SSE Push + Cursor Inbox + Health Components
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSSEStream:
+    """Tests for SSE push stream: GET /v1/agents/{id}/events."""
+
+    def setup_method(self):
+        self.client = TestClient(app)
+        # Register two agents for cross-agent auth test
+        r1 = self.client.post("/v1/register", json={"name": "sse_agent_a"})
+        assert r1.status_code == 200
+        self.agent_a_id = r1.json()["agent_id"]
+        self.agent_a_key = r1.json()["api_key"]
+        r2 = self.client.post("/v1/register", json={"name": "sse_agent_b"})
+        assert r2.status_code == 200
+        self.agent_b_id = r2.json()["agent_id"]
+        self.agent_b_key = r2.json()["api_key"]
+
+    def test_sse_requires_auth(self):
+        """SSE stream returns 401 without X-API-Key."""
+        r = self.client.get(f"/v1/agents/{self.agent_a_id}/events")
+        assert r.status_code in (401, 403)
+
+    def test_sse_requires_own_agent(self):
+        """Agent B cannot subscribe to Agent A's SSE stream."""
+        r = self.client.get(
+            f"/v1/agents/{self.agent_a_id}/events",
+            headers={"X-API-Key": self.agent_b_key},
+        )
+        assert r.status_code == 403
+
+    def test_sse_content_type(self):
+        """SSE endpoint returns text/event-stream content type."""
+        # Use stream=True to avoid buffering; read only headers
+        with self.client.stream(
+            "GET",
+            f"/v1/agents/{self.agent_a_id}/events",
+            headers={"X-API-Key": self.agent_a_key},
+        ) as r:
+            assert r.status_code == 200
+            ct = r.headers.get("content-type", "")
+            assert "text/event-stream" in ct
+
+    def test_last_event_id_replay(self):
+        """After relay_send, reconnect with Last-Event-ID replays the event."""
+        import time
+        # Send a relay message to agent_a (populates agent_events via _queue_agent_event)
+        # Need a sender agent
+        r_sender = self.client.post("/v1/register", json={"name": "sse_sender"})
+        sender_key = r_sender.json()["api_key"]
+        self.client.post(
+            "/v1/relay/send",
+            json={"to_agent": self.agent_a_id, "channel": "direct", "payload": "hello sse"},
+            headers={"X-API-Key": sender_key},
+        )
+        time.sleep(0.1)  # Give _queue_agent_event time to commit
+
+        # Query agent_events directly to get event_id of oldest event
+        from db import get_db
+        with get_db() as db:
+            row = db.execute(
+                "SELECT event_id FROM agent_events WHERE agent_id=? ORDER BY created_at ASC LIMIT 1",
+                (self.agent_a_id,)
+            ).fetchone()
+        assert row is not None, "Expected agent_event to be present after relay_send"
+        last_event_id = row["event_id"]
+
+        # Send a second message to create a replay-able event
+        self.client.post(
+            "/v1/relay/send",
+            json={"to_agent": self.agent_a_id, "channel": "direct", "payload": "hello sse 2"},
+            headers={"X-API-Key": sender_key},
+        )
+        time.sleep(0.1)
+
+        collected = []
+        with self.client.stream(
+            "GET",
+            f"/v1/agents/{self.agent_a_id}/events",
+            headers={"X-API-Key": self.agent_a_key, "last-event-id": last_event_id},
+        ) as r:
+            assert r.status_code == 200
+            for line in r.iter_lines():
+                if line.startswith("data:"):
+                    collected.append(line)
+                if len(collected) >= 1:
+                    break  # Got replay event, stop reading
+
+        assert len(collected) >= 1, "Expected at least 1 replayed event after Last-Event-ID"
+
+
+class TestCursorInbox:
+    """Tests for cursor-based relay inbox: GET /v1/relay/inbox?after={cursor}."""
+
+    def setup_method(self):
+        self.client = TestClient(app)
+        r_a = self.client.post("/v1/register", json={"name": "cursor_recip"})
+        self.recip_id = r_a.json()["agent_id"]
+        self.recip_key = r_a.json()["api_key"]
+        r_b = self.client.post("/v1/register", json={"name": "cursor_sender"})
+        self.sender_key = r_b.json()["api_key"]
+        self.sender_id = r_b.json()["agent_id"]
+
+    def test_inbox_cursor_after(self):
+        """after= cursor returns only messages newer than the cursor message."""
+        import time
+        # Send 2 messages
+        r1 = self.client.post(
+            "/v1/relay/send",
+            json={"to_agent": self.recip_id, "channel": "direct", "payload": "first"},
+            headers={"X-API-Key": self.sender_key},
+        )
+        time.sleep(0.05)
+        r2 = self.client.post(
+            "/v1/relay/send",
+            json={"to_agent": self.recip_id, "channel": "direct", "payload": "second"},
+            headers={"X-API-Key": self.sender_key},
+        )
+        first_msg_id = r1.json()["message_id"]
+        second_msg_id = r2.json()["message_id"]
+
+        # Fetch with after=first_msg_id -- should return only the second message
+        r = self.client.get(
+            f"/v1/relay/inbox?after={first_msg_id}&unread_only=false",
+            headers={"X-API-Key": self.recip_key},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert "messages" in data
+        msg_ids = [m["message_id"] for m in data["messages"]]
+        assert second_msg_id in msg_ids
+        assert first_msg_id not in msg_ids
+        assert "next_cursor" in data
+
+    def test_inbox_cursor_empty(self):
+        """after= with a nonexistent cursor returns empty messages list."""
+        r = self.client.get(
+            "/v1/relay/inbox?after=msg_nonexistentcursor&unread_only=false",
+            headers={"X-API-Key": self.recip_key},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["messages"] == []
+        assert data["count"] == 0
+
+
+class TestHealthComponents:
+    """Tests for component-level health reporting: GET /v1/health."""
+
+    def setup_method(self):
+        self.client = TestClient(app)
+
+    def test_health_has_components(self):
+        """GET /v1/health includes components dict with all 4 subsystems."""
+        r = self.client.get("/v1/health")
+        assert r.status_code == 200
+        d = r.json()
+        assert "components" in d, "health response missing 'components' key"
+        c = d["components"]
+        for subsystem in ("database", "relay", "websocket", "sse"):
+            assert subsystem in c, f"components missing '{subsystem}' key"
+            assert "status" in c[subsystem], f"components.{subsystem} missing 'status'"
+            assert c[subsystem]["status"] in ("ok", "degraded", "error")
