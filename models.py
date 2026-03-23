@@ -227,6 +227,18 @@ class MemoryListResponse(BaseModel):
 # HEALTH / STATS MODELS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+class HealthComponentStatus(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    status: str  # "ok" | "degraded" | "error"
+    detail: Optional[str] = None
+
+class HealthComponents(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    database: HealthComponentStatus
+    relay: HealthComponentStatus
+    websocket: HealthComponentStatus
+    sse: HealthComponentStatus
+
 class HealthStatsResponse(BaseModel):
     model_config = ConfigDict(extra='ignore')
     registered_agents: int
@@ -244,6 +256,7 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     stats: HealthStatsResponse
+    components: Optional[HealthComponents] = None
     timestamp: str
 
 

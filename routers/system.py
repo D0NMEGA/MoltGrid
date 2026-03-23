@@ -21,12 +21,12 @@ from config import TURNSTILE_SECRET_KEY, _fernet, logger
 from db import get_db
 from async_db import async_db_fetchone, async_db_fetchall
 from cache import response_cache
-from state import _ws_connections, _network_ws_clients
+from state import _ws_connections, _network_ws_clients, _sse_connections
 from helpers import (
     get_agent_id, _decrypt, _queue_email, _branded_email,
 )
 from models import (
-    HealthStatsResponse, HealthResponse,
+    HealthStatsResponse, HealthResponse, HealthComponents, HealthComponentStatus,
     ContactForm, ObstacleCourseSubmitRequest, TextProcessRequest,
     ContactSubmitResponse, SLAResponse, AgentStatsResponse, TextProcessResponse,
     ObstacleSubmitResponse, ObstacleLeaderboardItem, ObstacleMyResultResponse,
@@ -199,6 +199,33 @@ async def health(request: Request):
     shared_keys = (await async_db_fetchone("SELECT COUNT(*) as c FROM shared_memory"))["c"]
     public_agents = (await async_db_fetchone("SELECT COUNT(*) as c FROM agents WHERE public=1"))["c"]
 
+    # Component health probing
+    # database: try a lightweight query
+    try:
+        await async_db_fetchone("SELECT 1 as ping")
+        db_component = {"status": "ok"}
+    except Exception as e:
+        db_component = {"status": "error", "detail": str(e)[:120]}
+
+    # relay: count undelivered messages older than 5 minutes as a degraded signal
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        stuck_row = await async_db_fetchone(
+            "SELECT COUNT(*) as c FROM relay WHERE status='accepted' AND created_at < ?", (cutoff,)
+        )
+        stuck = stuck_row["c"]
+        relay_component = {"status": "degraded", "detail": f"{stuck} messages stuck >5min"} if stuck > 10 else {"status": "ok"}
+    except Exception as e:
+        relay_component = {"status": "error", "detail": str(e)[:120]}
+
+    # websocket: count active WebSocket connections
+    ws_count = sum(len(s) for s in _ws_connections.values())
+    websocket_component = {"status": "ok", "detail": f"{ws_count} connections"}
+
+    # sse: count agents with active SSE subscribers
+    sse_count = len(_sse_connections)
+    sse_component = {"status": "ok", "detail": f"{sse_count} subscribed agents"}
+
     result = {
         "status": "operational",
         "version": "0.9.0",
@@ -211,7 +238,13 @@ async def health(request: Request):
             "messages_relayed": messages,
             "active_webhooks": webhooks,
             "active_schedules": schedules,
-            "websocket_connections": sum(len(s) for s in _ws_connections.values()),
+            "websocket_connections": ws_count,
+        },
+        "components": {
+            "database": db_component,
+            "relay": relay_component,
+            "websocket": websocket_component,
+            "sse": sse_component,
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
