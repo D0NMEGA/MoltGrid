@@ -620,6 +620,28 @@ def _init_db_sqlite(conn):
         );
         CREATE INDEX IF NOT EXISTS idx_relay_to ON relay(to_agent, read_at);
 
+        CREATE TABLE IF NOT EXISTS dead_letter_messages (
+            dl_id       TEXT PRIMARY KEY,
+            from_agent  TEXT NOT NULL,
+            to_agent    TEXT NOT NULL,
+            channel     TEXT NOT NULL DEFAULT 'direct',
+            payload     TEXT NOT NULL,
+            fail_reason TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            FOREIGN KEY (from_agent) REFERENCES agents(agent_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dlm_from ON dead_letter_messages(from_agent);
+
+        CREATE TABLE IF NOT EXISTS message_hops (
+            hop_id      TEXT PRIMARY KEY,
+            message_id  TEXT NOT NULL,
+            hop         TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            recorded_at TEXT NOT NULL,
+            FOREIGN KEY (message_id) REFERENCES relay(message_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_hops_msg ON message_hops(message_id, recorded_at);
+
         CREATE TABLE IF NOT EXISTS rate_limits (
             agent_id TEXT NOT NULL,
             window_start INTEGER NOT NULL,
@@ -861,6 +883,17 @@ def _init_db_sqlite(conn):
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
+
+    # Migrate relay table — add message delivery tracking columns (Phase 42)
+    relay_existing = _get_existing_columns(conn, "relay")
+    for col, typedef in [
+        ("status", "TEXT NOT NULL DEFAULT 'accepted'"),
+        ("status_updated_at", "TEXT"),
+        ("delivered_at", "TEXT"),
+        ("acted_at", "TEXT"),
+    ]:
+        if col not in relay_existing:
+            conn.execute(f"ALTER TABLE relay ADD COLUMN {col} {typedef}")
 
     # Migrate analytics_events — add source and moltbook_url columns
     ae_existing = _get_existing_columns(conn, "analytics_events")
@@ -1283,7 +1316,27 @@ def _init_db_postgres(conn):
             channel TEXT NOT NULL DEFAULT 'direct',
             payload TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            read_at TEXT
+            read_at TEXT,
+            status TEXT NOT NULL DEFAULT 'accepted',
+            status_updated_at TEXT,
+            delivered_at TEXT,
+            acted_at TEXT
+        )""",
+        """CREATE TABLE IF NOT EXISTS dead_letter_messages (
+            dl_id TEXT PRIMARY KEY,
+            from_agent TEXT NOT NULL,
+            to_agent TEXT NOT NULL,
+            channel TEXT NOT NULL DEFAULT 'direct',
+            payload TEXT NOT NULL,
+            fail_reason TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS message_hops (
+            hop_id TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL,
+            hop TEXT NOT NULL,
+            status TEXT NOT NULL,
+            recorded_at TEXT NOT NULL
         )""",
         """CREATE TABLE IF NOT EXISTS rate_limits (
             agent_id TEXT NOT NULL,
@@ -1582,6 +1635,8 @@ def _init_db_postgres(conn):
         "CREATE INDEX IF NOT EXISTS idx_queue_status ON queue(queue_name, status, priority DESC)",
         "CREATE INDEX IF NOT EXISTS idx_dlq_agent ON dead_letter(agent_id, queue_name)",
         "CREATE INDEX IF NOT EXISTS idx_relay_to ON relay(to_agent, read_at)",
+        "CREATE INDEX IF NOT EXISTS idx_dlm_from ON dead_letter_messages(from_agent)",
+        "CREATE INDEX IF NOT EXISTS idx_hops_msg ON message_hops(message_id, recorded_at)",
         "CREATE INDEX IF NOT EXISTS idx_webhooks_agent ON webhooks(agent_id, active)",
         "CREATE INDEX IF NOT EXISTS idx_sched_next ON scheduled_tasks(enabled, next_run_at)",
         "CREATE INDEX IF NOT EXISTS idx_shared_ns ON shared_memory(namespace)",

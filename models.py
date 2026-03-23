@@ -666,6 +666,41 @@ class RelayMarkReadResponse(BaseModel):
     status: str
 
 
+# --- Message Delivery Tracking Models (Phase 42) ---
+
+class MessageStatusResponse(BaseModel):
+    message_id: str
+    from_agent: str
+    to_agent: str
+    status: str
+    created_at: str
+    status_updated_at: Optional[str] = None
+    delivered_at: Optional[str] = None
+    read_at: Optional[str] = None
+    acted_at: Optional[str] = None
+
+class MessageHop(BaseModel):
+    hop_id: str
+    hop: str
+    status: str
+    recorded_at: str
+
+class MessageTraceResponse(BaseModel):
+    message_id: str
+    hops: List[MessageHop]
+
+class DeadLetterMessageItem(BaseModel):
+    dl_id: str
+    to_agent: str
+    channel: str
+    fail_reason: str
+    created_at: str
+
+class DeadLetterListResponse(BaseModel):
+    messages: List[DeadLetterMessageItem]
+    count: int
+
+
 # --- Webhook Response Models ---
 
 class WebhookListItem(BaseModel):
