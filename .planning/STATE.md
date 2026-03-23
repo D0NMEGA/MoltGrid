@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-last_updated: "2026-03-21T09:56:00Z"
+last_updated: "2026-03-23T00:00:00Z"
 progress:
-  total_phases: 6
-  completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
+  total_phases: 7
+  completed_phases: 6
+  total_plans: 17
+  completed_plans: 17
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** OpenClaw running on MoltGrid and posting on MoltBook IS the product — every feature should ask "how does this serve the MoltGrid -> OpenClaw -> MoltBook loop?"
-**Current focus:** Phase 41 Plan 04 complete -- Locust load test with realistic agent behavior
+**Current focus:** Phase 42 Plan 02 complete -- relay_send dead-letter refactor + status/trace/dead-letter endpoints
 
 ## Current Position
 
-Phase: 41 (Production Scalability: PostgreSQL, Redis, Multi-Worker)
-Plan: 04 of 04 in current phase (plan 04 complete)
-Status: Locust load test script with realistic agent behavior and locked pass criteria
-Last activity: 2026-03-21 -- Plan 41-04 complete: Locust load test, 36 unit tests, evaluator module
+Phase: 42 (Fix Message Delivery)
+Plan: 02 of 02 in current phase (plan 02 complete)
+Status: TDD GREEN phase complete; 6/6 relay tests passing, 107/107 total tests passing
+Last activity: 2026-03-23 -- Plan 42-02 complete: relay dead-letter, status lifecycle, hop trace, 3 new endpoints
 
 Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
-- Average duration: 22 min
-- Total execution time: 4.3 hours
+- Total plans completed: 14
+- Average duration: 20 min
+- Total execution time: 4.7 hours
 
 **By Phase:**
 
@@ -46,9 +46,10 @@ Progress: [██████████] 100%
 | 14-quickstarts-and-playground | 2/2 | 4min | 2min |
 | 40-backend-scalability-load-hardening | 3/3 | 12min | 4min |
 | 41-production-scalability | 2/2 | 12min | 6min |
+| 42-fix-message-delivery | 2/2 | 27min | 14min |
 
 **Recent Trend:**
-- Last 5 plans: 1min, 3min, 3min, 7min, 5min
+- Last 5 plans: 1min, 3min, 3min, 7min, 12min
 - Trend: consistent
 
 *Updated after each plan completion*
@@ -106,6 +107,11 @@ Recent decisions affecting current work:
 - [41-04] Evaluator separated from locust file to avoid gevent monkey-patching pytest conflicts
 - [41-04] Task weights model real agent behavior: heartbeat 6, inbox 5, memory 3/2, jobs 1
 - [41-04] Strict less-than for all pass criteria (p99 < 500ms, error < 0.1%, 5xx = 0)
+- [42-01] ALTER TABLE migration guards add relay status columns; dead_letter_messages and message_hops tables created
+- [42-02] relay_send returns 200 dead_lettered for unknown recipients (not 404) -- prevents recipient enumeration
+- [42-02] GET /v1/messages/dead-letter registered before /{message_id}/status to avoid FastAPI route ambiguity
+- [42-02] DeadLetterMessageListResponse renamed to avoid collision with queue DeadLetterListResponse in models.py
+- [42-02] relay_mark_read updates status column + status_updated_at alongside read_at for lifecycle consistency
 
 ### Pending Todos
 
@@ -113,10 +119,10 @@ None yet.
 
 ### Blockers/Concerns
 
-None -- Phase 41 Plan 04 complete.
+None -- Phase 42 Plan 02 complete.
 
 ## Session Continuity
 
-Last session: 2026-03-21
-Stopped at: Completed 41-04-PLAN.md -- Locust load test script, evaluator module, 36 unit tests, 66 total load test tests passing.
+Last session: 2026-03-23
+Stopped at: Completed 42-02-PLAN.md -- relay dead-letter, 3 new message endpoints, 107 tests passing.
 Resume file: None

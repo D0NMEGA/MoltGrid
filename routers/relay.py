@@ -251,15 +251,23 @@ async def relay_websocket(ws: WebSocket):
             with get_db() as db:
                 recip = db.execute("SELECT agent_id FROM agents WHERE agent_id=?", (to_agent,)).fetchone()
                 if not recip:
-                    await ws.send_json({"error": "Recipient agent not found"})
+                    dl_id = f"dlm_{uuid.uuid4().hex[:16]}"
+                    db.execute(
+                        "INSERT INTO dead_letter_messages "
+                        "(dl_id, from_agent, to_agent, channel, payload, fail_reason, created_at) "
+                        "VALUES (?,?,?,?,?,?,?)",
+                        (dl_id, agent_id, to_agent, channel, _encrypt(payload), "recipient_not_found", now)
+                    )
+                    await ws.send_json({"status": "dead_lettered", "message_id": dl_id})
                     continue
                 db.execute(
-                    "INSERT INTO relay (message_id, from_agent, to_agent, channel, payload, created_at) VALUES (?,?,?,?,?,?)",
-                    (message_id, agent_id, to_agent, channel, _encrypt(payload), now)
+                    "INSERT INTO relay (message_id, from_agent, to_agent, channel, payload, status, created_at) VALUES (?,?,?,?,?,?,?)",
+                    (message_id, agent_id, to_agent, channel, _encrypt(payload), "accepted", now)
                 )
+                _record_hop(db, message_id, "accepted", "websocket", now)
 
             # Confirm to sender
-            await ws.send_json({"status": "delivered", "message_id": message_id})
+            await ws.send_json({"status": "accepted", "message_id": message_id})
 
             # Push to recipient if connected
             if to_agent in _ws_connections:

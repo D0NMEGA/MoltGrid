@@ -351,7 +351,8 @@ class TestRelay:
     def test_send_to_nonexistent(self):
         _, _, h = register_agent()
         r = client.post("/v1/relay/send", json={"to_agent": "agent_fake", "payload": "hi"}, headers=h)
-        assert r.status_code == 404
+        assert r.status_code == 200
+        assert r.json()["status"] == "dead_lettered"
 
     def test_mark_read(self):
         id1, _, h1 = register_agent("s")
@@ -1070,7 +1071,7 @@ class TestWebSocket:
                 })
                 # Sender gets confirmation
                 confirm = ws_send.receive_json()
-                assert confirm["status"] == "delivered"
+                assert confirm["status"] == "accepted"
 
             # Receiver gets push
             push = ws_recv.receive_json()
@@ -1083,7 +1084,7 @@ class TestWebSocket:
         with client.websocket_connect(f"/v1/relay/ws?api_key={key}") as ws:
             ws.send_json({"to_agent": "agent_nonexist", "payload": "hi"})
             resp = ws.receive_json()
-            assert "error" in resp
+            assert resp["status"] == "dead_lettered"
 
     def test_ws_missing_fields(self):
         _, key, _ = register_agent("ws-test")
