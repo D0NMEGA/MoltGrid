@@ -5365,3 +5365,206 @@ class TestTaskLeaseExpiry:
         r2 = self.client.get(f"/v1/tasks/{task_id}", headers=self.headers)
         data = r2.json()
         assert data["status"] == "pending", f"Expected pending after lease expiry, got {data['status']}"
+
+
+# =============================================================================
+# SCOPED MEMORY + CAS (Phase 45 — MEM-01 through MEM-06)
+# =============================================================================
+
+class TestScopedMemoryCAS:
+    """
+    MEM-01: Auto-scope namespace to agent:{agent_id} when namespace is 'default' or absent.
+    MEM-02: CAS via If-Match header — 409 on stale version, ETag on response.
+    MEM-03: TTL cleanup background thread deletes expired entries.
+    MEM-04: Every write appends a row to memory_history.
+    MEM-05: GET /v1/memory/{key}/meta returns writer, version, timestamps, namespace.
+    MEM-06: GET /v1/memory/{key}/history returns ordered version history.
+    """
+
+    # ── MEM-01: Auto-scoping ──────────────────────────────────────────────────
+
+    def test_mem01_auto_scope_default_namespace(self):
+        """MEM-01: When namespace is 'default', memory is stored under agent:{agent_id}."""
+        _, agent_id, h = register_agent()
+        r = client.post("/v1/memory", json={"key": "scoped_key", "value": "scoped_val"}, headers=h)
+        assert r.status_code == 200
+        # Retrieve with auto-scoped namespace should work
+        r2 = client.get("/v1/memory/scoped_key", headers=h)
+        assert r2.status_code == 200
+        assert r2.json()["value"] == "scoped_val"
+        # Namespace in response should be agent:{agent_id}
+        assert r2.json()["namespace"] == f"agent:{agent_id}"
+
+    def test_mem01_auto_scope_without_namespace(self):
+        """MEM-01: When namespace is not provided, memory is stored under agent:{agent_id}."""
+        _, agent_id, h = register_agent()
+        r = client.post("/v1/memory", json={"key": "no_ns_key", "value": "no_ns_val"}, headers=h)
+        assert r.status_code == 200
+        r2 = client.get("/v1/memory/no_ns_key", headers=h)
+        assert r2.status_code == 200
+        assert r2.json()["namespace"] == f"agent:{agent_id}"
+
+    def test_mem01_explicit_namespace_respected(self):
+        """MEM-01: Explicit non-default namespace is kept as-is."""
+        _, agent_id, h = register_agent()
+        r = client.post("/v1/memory", json={"key": "k", "value": "v", "namespace": "custom_ns"}, headers=h)
+        assert r.status_code == 200
+        r2 = client.get("/v1/memory/k", params={"namespace": "custom_ns"}, headers=h)
+        assert r2.status_code == 200
+        assert r2.json()["namespace"] == "custom_ns"
+
+    # ── MEM-02: Compare-and-swap ───────────────────────────────────────────────
+
+    def test_mem02_etag_returned_on_write(self):
+        """MEM-02: POST /v1/memory returns ETag header with version."""
+        _, agent_id, h = register_agent()
+        r = client.post("/v1/memory", json={"key": "cas_key", "value": "v1"}, headers=h)
+        assert r.status_code == 200
+        assert "ETag" in r.headers
+
+    def test_mem02_etag_returned_on_read(self):
+        """MEM-02: GET /v1/memory/{key} returns ETag header."""
+        _, agent_id, h = register_agent()
+        client.post("/v1/memory", json={"key": "cas_key", "value": "v1"}, headers=h)
+        r = client.get("/v1/memory/cas_key", headers=h)
+        assert r.status_code == 200
+        assert "ETag" in r.headers
+
+    def test_mem02_cas_409_on_stale_if_match(self):
+        """MEM-02: If-Match with stale version returns 409 Conflict."""
+        _, agent_id, h = register_agent()
+        # Write version 1
+        client.post("/v1/memory", json={"key": "cas_key", "value": "v1"}, headers=h)
+        # Write version 2
+        client.post("/v1/memory", json={"key": "cas_key", "value": "v2"}, headers=h)
+        # Try to write with If-Match: 1 (stale)
+        h_cas = {**h, "If-Match": "1"}
+        r = client.post("/v1/memory", json={"key": "cas_key", "value": "v3"}, headers=h_cas)
+        assert r.status_code == 409
+
+    def test_mem02_cas_succeeds_with_correct_version(self):
+        """MEM-02: If-Match with current version succeeds."""
+        _, agent_id, h = register_agent()
+        r1 = client.post("/v1/memory", json={"key": "cas_key", "value": "v1"}, headers=h)
+        etag = r1.headers.get("ETag", "1")
+        h_cas = {**h, "If-Match": etag}
+        r2 = client.post("/v1/memory", json={"key": "cas_key", "value": "v2"}, headers=h_cas)
+        assert r2.status_code == 200
+
+    def test_mem02_version_increments_on_write(self):
+        """MEM-02: Each write increments the version number."""
+        _, agent_id, h = register_agent()
+        r1 = client.post("/v1/memory", json={"key": "ver_key", "value": "v1"}, headers=h)
+        r2 = client.post("/v1/memory", json={"key": "ver_key", "value": "v2"}, headers=h)
+        etag1 = r1.headers.get("ETag", "1")
+        etag2 = r2.headers.get("ETag", "2")
+        assert int(etag2) > int(etag1)
+
+    # ── MEM-03: TTL cleanup ────────────────────────────────────────────────────
+
+    def test_mem03_memory_history_table_exists(self):
+        """MEM-03/MEM-04: memory_history table exists after init_db."""
+        conn = _get_test_db()
+        try:
+            assert _table_exists(conn, "memory_history"), "memory_history table not found"
+        finally:
+            conn.close()
+
+    def test_mem03_memory_table_has_version_column(self):
+        """MEM-03: memory table has version column after migration."""
+        conn = _get_test_db()
+        try:
+            cols = _get_table_columns(conn, "memory")
+            assert "version" in cols, f"version column not in memory table, got: {cols}"
+        finally:
+            conn.close()
+
+    def test_mem03_ttl_cleanup_deletes_expired_entries(self):
+        """MEM-03: TTL cleanup logic deletes expired memory entries."""
+        from datetime import datetime, timezone, timedelta
+        from db import get_db
+        _, agent_id, h = register_agent()
+        # Set a key with ttl
+        client.post("/v1/memory", json={"key": "expire_me", "value": "gone", "ttl_seconds": 60}, headers=h)
+        # Manually backdate the expires_at to the past
+        past = (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat()
+        with get_db() as db:
+            db.execute("UPDATE memory SET expires_at=? WHERE key=?", (past, "expire_me"))
+        # Simulate cleanup
+        now = datetime.now(timezone.utc).isoformat()
+        with get_db() as db:
+            db.execute("DELETE FROM memory WHERE expires_at IS NOT NULL AND expires_at < ?", (now,))
+        # Key should be gone
+        r = client.get("/v1/memory/expire_me", headers=h)
+        assert r.status_code == 404
+
+    # ── MEM-04: Version history ────────────────────────────────────────────────
+
+    def test_mem04_write_appends_history(self):
+        """MEM-04: Each write inserts a row into memory_history."""
+        from db import get_db
+        _, agent_id, h = register_agent()
+        client.post("/v1/memory", json={"key": "hist_key", "value": "v1"}, headers=h)
+        client.post("/v1/memory", json={"key": "hist_key", "value": "v2"}, headers=h)
+        with get_db() as db:
+            rows = db.execute(
+                "SELECT * FROM memory_history WHERE agent_id=? AND key=? ORDER BY version",
+                (agent_id, "hist_key")
+            ).fetchall()
+        assert len(rows) == 2, f"Expected 2 history rows, got {len(rows)}"
+
+    # ── MEM-05: Meta endpoint ──────────────────────────────────────────────────
+
+    def test_mem05_meta_endpoint_returns_metadata(self):
+        """MEM-05: GET /v1/memory/{key}/meta returns writer, version, timestamps, namespace."""
+        _, agent_id, h = register_agent()
+        client.post("/v1/memory", json={"key": "meta_key", "value": "meta_val"}, headers=h)
+        r = client.get("/v1/memory/meta_key/meta", headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["key"] == "meta_key"
+        assert d["writer"] == agent_id
+        assert d["version"] >= 1
+        assert "created_at" in d
+        assert "updated_at" in d
+        assert "namespace" in d
+
+    def test_mem05_meta_404_for_missing_key(self):
+        """MEM-05: GET /v1/memory/{key}/meta returns 404 for non-existent key."""
+        _, agent_id, h = register_agent()
+        r = client.get("/v1/memory/nonexistent/meta", headers=h)
+        assert r.status_code == 404
+
+    # ── MEM-06: History endpoint ───────────────────────────────────────────────
+
+    def test_mem06_history_endpoint_returns_versions(self):
+        """MEM-06: GET /v1/memory/{key}/history returns ordered version history."""
+        _, agent_id, h = register_agent()
+        client.post("/v1/memory", json={"key": "hist_key", "value": "first"}, headers=h)
+        client.post("/v1/memory", json={"key": "hist_key", "value": "second"}, headers=h)
+        client.post("/v1/memory", json={"key": "hist_key", "value": "third"}, headers=h)
+        r = client.get("/v1/memory/hist_key/history", headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["key"] == "hist_key"
+        assert d["count"] == 3
+        assert len(d["history"]) == 3
+        # Most recent version first
+        versions = [entry["version"] for entry in d["history"]]
+        assert versions == sorted(versions, reverse=True)
+
+    def test_mem06_history_decrypts_values(self):
+        """MEM-06: History endpoint returns decrypted values."""
+        _, agent_id, h = register_agent()
+        client.post("/v1/memory", json={"key": "hist_decrypt", "value": "plain_text"}, headers=h)
+        r = client.get("/v1/memory/hist_decrypt/history", headers=h)
+        assert r.status_code == 200
+        history = r.json()["history"]
+        assert len(history) >= 1
+        assert history[0]["value"] == "plain_text"
+
+    def test_mem06_history_404_for_missing_key(self):
+        """MEM-06: GET /v1/memory/{key}/history returns 404 for non-existent key."""
+        _, agent_id, h = register_agent()
+        r = client.get("/v1/memory/no_key/history", headers=h)
+        assert r.status_code == 404

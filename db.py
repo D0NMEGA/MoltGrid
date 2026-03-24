@@ -976,15 +976,34 @@ def _init_db_sqlite(conn):
         if col not in q_existing:
             conn.execute(f"ALTER TABLE queue ADD COLUMN {col} {typedef}")
 
-    # Migrate memory table — add visibility / shared_agents
+    # Migrate memory table — add visibility / shared_agents / version
     m_existing = _get_existing_columns(conn, "memory")
     for col, typedef in [
         ('visibility', "TEXT DEFAULT 'private'"),
         ('shared_agents', 'TEXT'),
+        ('version', 'INTEGER DEFAULT 1'),
     ]:
         if col not in m_existing:
             conn.execute(f'ALTER TABLE memory ADD COLUMN {col} {typedef}')
     conn.execute("UPDATE memory SET visibility='private' WHERE visibility IS NULL")
+
+    # Version history table (MEM-04 / MEM-06)
+    conn.execute(
+        'CREATE TABLE IF NOT EXISTS memory_history ('
+        '    id          TEXT PRIMARY KEY,'
+        '    agent_id    TEXT NOT NULL,'
+        '    namespace   TEXT NOT NULL,'
+        '    key         TEXT NOT NULL,'
+        '    value       TEXT NOT NULL,'
+        '    version     INTEGER NOT NULL,'
+        '    changed_by  TEXT NOT NULL,'
+        '    changed_at  TEXT NOT NULL,'
+        '    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)'
+        ')'
+    )
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_memhist ON memory_history(agent_id, namespace, key, version)'
+    )
 
     # Create memory audit log table
     conn.execute(
@@ -1317,8 +1336,20 @@ def _init_db_postgres(conn):
             expires_at TEXT,
             visibility TEXT DEFAULT 'private',
             shared_agents TEXT,
+            version INTEGER DEFAULT 1,
             PRIMARY KEY (agent_id, namespace, key)
         )""",
+        """CREATE TABLE IF NOT EXISTS memory_history (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            changed_by TEXT NOT NULL,
+            changed_at TEXT NOT NULL
+        )""",
+        """CREATE INDEX IF NOT EXISTS idx_memhist ON memory_history(agent_id, namespace, key, version)""",
         """CREATE TABLE IF NOT EXISTS vector_memory (
             id TEXT PRIMARY KEY,
             agent_id TEXT NOT NULL,

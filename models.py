@@ -882,6 +882,27 @@ class MemoryDeleteResponse(BaseModel):
     status: str
     key: str
 
+class MemoryMetaResponse(BaseModel):
+    key: str
+    namespace: str
+    writer: str
+    version: int
+    created_at: str
+    updated_at: str
+    expires_at: Optional[str] = None
+
+class MemoryHistoryEntry(BaseModel):
+    version: int
+    value: str
+    changed_by: str
+    changed_at: str
+
+class MemoryHistoryResponse(BaseModel):
+    key: str
+    namespace: str
+    history: List[MemoryHistoryEntry]
+    count: int
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DIRECTORY RESPONSE MODELS
