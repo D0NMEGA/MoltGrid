@@ -145,6 +145,36 @@ def task_list(
     return TaskListResponse(tasks=tasks, count=len(tasks))
 
 
+@router.post("/v1/tasks/{task_id}/complete", response_model=TaskResponse, tags=["Tasks"])
+def task_complete(task_id: str, result: Optional[str] = None, agent_id: str = Depends(get_agent_id)):
+    """Mark a running task as completed. Convenience endpoint (TSK-01).
+
+    Only the agent that claimed the task (claimed_by) may call this.
+    Returns 404 if task is not found, not in running state, or not owned by caller.
+    _queue_agent_event and publish_event are called OUTSIDE the with get_db() block.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM agent_tasks WHERE task_id=? AND status='running' AND claimed_by=?",
+            (task_id, agent_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Task not found or not in running state")
+        history = json.loads(row["history"] if row["history"] else "[]")
+        history.append({"status": "completed", "actor": agent_id, "timestamp": now})
+        db.execute(
+            "UPDATE agent_tasks SET status='completed', result=?, completed_at=?, updated_at=?, history=? WHERE task_id=?",
+            (result or row["result"], now, now, json.dumps(history), task_id),
+        )
+        updated_row = db.execute(
+            "SELECT * FROM agent_tasks WHERE task_id=?", (task_id,)
+        ).fetchone()
+    _queue_agent_event(agent_id, "task_status_changed", {"task_id": task_id, "from": "running", "to": "completed"})
+    publish_event("task.status_changed", {"task_id": task_id, "status": "completed", "actor": agent_id}, source_agent=agent_id)
+    return _parse_task_row(updated_row)
+
+
 @router.get("/v1/tasks/{task_id}", response_model=TaskResponse)
 def task_get(task_id: str, agent_id: str = Depends(get_agent_id)):
     """Get a single task by ID."""

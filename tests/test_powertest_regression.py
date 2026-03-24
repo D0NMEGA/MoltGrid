@@ -567,8 +567,165 @@ def test_sec05_visibility_patch_e2e(agent_a, agent_b):
 # QUE-01: Queue claim works
 # (3 tests: basic claim, claim empty queue, claim specific queue)
 
+def test_que01_claim_returns_job(agent_a):
+    """QUE-01: Submit a job then claim it -- must return 200 with job_id + payload + priority."""
+    _, _, a_headers = agent_a
+
+    # Submit a job to the default queue
+    submit_resp = client.post("/v1/queue/submit", json={
+        "queue_name": "default",
+        "payload": {"task": "do-work-que01-basic"},
+        "priority": 5,
+    }, headers=a_headers)
+    assert submit_resp.status_code == 200, f"Submit failed: {submit_resp.text}"
+    job_id = submit_resp.json()["job_id"]
+
+    # Claim from the default queue
+    claim_resp = client.post("/v1/queue/claim", params={"queue_name": "default"}, headers=a_headers)
+    assert claim_resp.status_code == 200, (
+        f"QUE-01 FAIL: claim returned {claim_resp.status_code}: {claim_resp.text}"
+    )
+    body = claim_resp.json()
+    assert "job_id" in body, f"QUE-01 FAIL: no job_id in response: {body}"
+    assert body["job_id"] == job_id, f"QUE-01 FAIL: expected {job_id}, got {body['job_id']}"
+    assert "payload" in body, f"QUE-01 FAIL: no payload in response: {body}"
+    assert "priority" in body, f"QUE-01 FAIL: no priority in response: {body}"
+    assert body["priority"] == 5, f"QUE-01 FAIL: expected priority=5, got {body['priority']}"
+
+
+def test_que01_claim_empty_queue(agent_a):
+    """QUE-01: Claiming from an empty queue must return status=empty, never 500."""
+    _, _, a_headers = agent_a
+
+    # Use a unique queue name unlikely to have any jobs
+    empty_queue = f"empty-queue-{uuid.uuid4().hex[:8]}"
+    resp = client.post("/v1/queue/claim", params={"queue_name": empty_queue}, headers=a_headers)
+    assert resp.status_code == 200, (
+        f"QUE-01 FAIL: empty queue claim returned {resp.status_code} instead of 200: {resp.text}"
+    )
+    body = resp.json()
+    assert body.get("status") == "empty", (
+        f"QUE-01 FAIL: expected {{status: 'empty'}}, got {body}"
+    )
+
+
+def test_que01_claim_multiple_queues(agent_a):
+    """QUE-01: Submit to 'alpha' and 'beta' queues, claim from each, assert correct job per queue."""
+    _, _, a_headers = agent_a
+
+    # Submit to alpha queue
+    alpha_resp = client.post("/v1/queue/submit", json={
+        "queue_name": "alpha",
+        "payload": {"work": "alpha-task"},
+        "priority": 1,
+    }, headers=a_headers)
+    assert alpha_resp.status_code == 200
+    alpha_job_id = alpha_resp.json()["job_id"]
+
+    # Submit to beta queue
+    beta_resp = client.post("/v1/queue/submit", json={
+        "queue_name": "beta",
+        "payload": {"work": "beta-task"},
+        "priority": 1,
+    }, headers=a_headers)
+    assert beta_resp.status_code == 200
+    beta_job_id = beta_resp.json()["job_id"]
+
+    # Claim from alpha -- must return the alpha job
+    alpha_claim = client.post("/v1/queue/claim", params={"queue_name": "alpha"}, headers=a_headers)
+    assert alpha_claim.status_code == 200, f"QUE-01 FAIL: alpha claim: {alpha_claim.text}"
+    alpha_body = alpha_claim.json()
+    assert "job_id" in alpha_body, f"QUE-01 FAIL: no job_id in alpha claim: {alpha_body}"
+    assert alpha_body["job_id"] == alpha_job_id, (
+        f"QUE-01 FAIL: alpha claim returned wrong job {alpha_body['job_id']}, expected {alpha_job_id}"
+    )
+
+    # Claim from beta -- must return the beta job
+    beta_claim = client.post("/v1/queue/claim", params={"queue_name": "beta"}, headers=a_headers)
+    assert beta_claim.status_code == 200, f"QUE-01 FAIL: beta claim: {beta_claim.text}"
+    beta_body = beta_claim.json()
+    assert "job_id" in beta_body, f"QUE-01 FAIL: no job_id in beta claim: {beta_body}"
+    assert beta_body["job_id"] == beta_job_id, (
+        f"QUE-01 FAIL: beta claim returned wrong job {beta_body['job_id']}, expected {beta_job_id}"
+    )
+
+
 # TSK-01: POST /complete exists
-# (3 tests: basic complete, complete non-owned task 409, complete already-complete 409)
+# (3 tests: basic complete, complete non-running task 404, complete wrong agent 403/404)
+
+def test_tsk01_complete_running_task(agent_a):
+    """TSK-01: Create task, claim it, POST /complete, assert 200 with status=completed."""
+    _, _, a_headers = agent_a
+
+    # Create a task
+    create_resp = client.post("/v1/tasks", json={
+        "title": "TSK-01 completion test",
+        "description": "Test task for TSK-01",
+        "priority": 3,
+    }, headers=a_headers)
+    assert create_resp.status_code == 200, f"Create task failed: {create_resp.text}"
+    task_id = create_resp.json()["task_id"]
+
+    # Claim the task to move it to running
+    claim_resp = client.post(f"/v1/tasks/{task_id}/claim", headers=a_headers)
+    assert claim_resp.status_code == 200, f"Claim task failed: {claim_resp.text}"
+    assert claim_resp.json()["status"] == "running"
+
+    # POST /complete
+    complete_resp = client.post(f"/v1/tasks/{task_id}/complete", headers=a_headers)
+    assert complete_resp.status_code == 200, (
+        f"TSK-01 FAIL: POST /complete returned {complete_resp.status_code}: {complete_resp.text}"
+    )
+    body = complete_resp.json()
+    assert body["status"] == "completed", (
+        f"TSK-01 FAIL: expected status=completed, got {body.get('status')}"
+    )
+    assert body["task_id"] == task_id
+
+
+def test_tsk01_complete_not_running_returns_404(agent_a):
+    """TSK-01: POST /complete on a pending (not claimed) task must return 404."""
+    _, _, a_headers = agent_a
+
+    # Create a task but do NOT claim it (stays pending)
+    create_resp = client.post("/v1/tasks", json={
+        "title": "TSK-01 unclaimed test",
+        "description": "Should not be completable",
+        "priority": 1,
+    }, headers=a_headers)
+    assert create_resp.status_code == 200
+    task_id = create_resp.json()["task_id"]
+
+    # Attempt to complete without claiming first
+    complete_resp = client.post(f"/v1/tasks/{task_id}/complete", headers=a_headers)
+    assert complete_resp.status_code == 404, (
+        f"TSK-01 FAIL: expected 404 for pending task, got {complete_resp.status_code}: {complete_resp.text}"
+    )
+
+
+def test_tsk01_complete_wrong_agent_returns_403_or_404(agent_a, agent_b):
+    """TSK-01: Agent A claims a task, Agent B tries to POST /complete -- must return 403 or 404."""
+    a_id, _, a_headers = agent_a
+    b_id, _, b_headers = agent_b
+
+    # Create and claim with agent A
+    create_resp = client.post("/v1/tasks", json={
+        "title": "TSK-01 wrong agent test",
+        "description": "Agent A owns this",
+        "priority": 1,
+    }, headers=a_headers)
+    assert create_resp.status_code == 200
+    task_id = create_resp.json()["task_id"]
+
+    claim_resp = client.post(f"/v1/tasks/{task_id}/claim", headers=a_headers)
+    assert claim_resp.status_code == 200, f"Claim failed: {claim_resp.text}"
+
+    # Agent B attempts to complete it
+    complete_resp = client.post(f"/v1/tasks/{task_id}/complete", headers=b_headers)
+    assert complete_resp.status_code in (403, 404), (
+        f"TSK-01 FAIL: expected 403 or 404 for wrong agent, got {complete_resp.status_code}: {complete_resp.text}"
+    )
+
 
 # TSK-02: tasks_completed counter
 # (3 tests: counter increments, counter after multiple completions, counter per-agent)
