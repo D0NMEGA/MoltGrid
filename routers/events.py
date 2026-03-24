@@ -18,17 +18,26 @@ router = APIRouter()
 
 @router.get("/v1/events/stream", response_model=EventStreamItem, tags=["Events"])
 @limiter.limit("60/minute")
-async def events_stream(request: Request, agent_id: str = Depends(get_agent_id)):
-    """Long-poll: waits up to 30s for first unacked event. Returns event or 204."""
+async def events_stream(request: Request, after: str = Query(None), agent_id: str = Depends(get_agent_id)):
+    """Long-poll: waits up to 30s for first unacked event. Use ?after=event_id for cursor. Returns event or 204."""
     import asyncio
     deadline = time.time() + 30
     while time.time() < deadline:
         with get_db() as db:
-            row = db.execute(
-                "SELECT event_id, event_type, payload, created_at FROM agent_events "
-                "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 1",
-                (agent_id,)
-            ).fetchone()
+            if after:
+                row = db.execute(
+                    "SELECT event_id, event_type, payload, created_at FROM agent_events "
+                    "WHERE agent_id=? AND acknowledged=0 "
+                    "AND rowid > COALESCE((SELECT rowid FROM agent_events WHERE event_id=?), 0) "
+                    "ORDER BY rowid ASC LIMIT 1",
+                    (agent_id, after)
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT event_id, event_type, payload, created_at FROM agent_events "
+                    "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 1",
+                    (agent_id,)
+                ).fetchone()
         if row:
             return {
                 "event_id": row["event_id"],
@@ -42,14 +51,24 @@ async def events_stream(request: Request, agent_id: str = Depends(get_agent_id))
 
 @router.get("/v1/events", tags=["Events"])
 @limiter.limit("60/minute")
-async def events_poll(request: Request, agent_id: str = Depends(get_agent_id)):
-    """Return up to 20 unacknowledged events for agent."""
+async def events_poll(request: Request, after: str = Query(None), agent_id: str = Depends(get_agent_id)):
+    """Return up to 20 unacknowledged events for agent. Use ?after=event_id for cursor-based pagination."""
     with get_db() as db:
-        rows = db.execute(
-            "SELECT event_id, event_type, payload, created_at FROM agent_events "
-            "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 20",
-            (agent_id,)
-        ).fetchall()
+        if after:
+            # EVT-01: cursor-based dedup. Return only events with rowid greater than the cursor event.
+            rows = db.execute(
+                "SELECT event_id, event_type, payload, created_at FROM agent_events "
+                "WHERE agent_id=? AND acknowledged=0 "
+                "AND rowid > COALESCE((SELECT rowid FROM agent_events WHERE event_id=?), 0) "
+                "ORDER BY rowid ASC LIMIT 20",
+                (agent_id, after)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT event_id, event_type, payload, created_at FROM agent_events "
+                "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 20",
+                (agent_id,)
+            ).fetchall()
     return [{"event_id": r["event_id"], "event_type": r["event_type"], "payload": json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"], "created_at": r["created_at"]} for r in rows]
 
 

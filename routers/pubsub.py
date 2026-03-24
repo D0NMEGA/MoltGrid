@@ -1,5 +1,6 @@
 """Pub/Sub routes (5 routes)."""
 
+import fnmatch
 import json
 import re
 import uuid
@@ -104,13 +105,19 @@ async def pubsub_publish(request: Request, req: PubSubPublishRequest, agent_id: 
     now = datetime.now(timezone.utc).isoformat()
     message_id = f"ps_{uuid.uuid4().hex[:12]}"
 
+    # PUB-01: Use fnmatch for wildcard matching (mirrors helpers.py publish_event)
     with get_db() as db:
         rows = db.execute(
-            "SELECT agent_id FROM pubsub_subscriptions WHERE channel=?",
-            (req.channel,)
+            "SELECT agent_id, channel FROM pubsub_subscriptions"
         ).fetchall()
-    subscriber_ids = [r["agent_id"] for r in rows]
+    subscriber_ids = []
+    for r in rows:
+        pattern = r["channel"]
+        if fnmatch.fnmatch(req.channel, pattern):
+            subscriber_ids.append(r["agent_id"])
 
+    # PUB-02: Count ALL matching subscribers (including self) for notified count
+    all_matched_count = len(subscriber_ids)
     # Store a relay message for each subscriber (except the publisher)
     recipients = [sid for sid in subscriber_ids if sid != agent_id]
     with get_db() as db:
@@ -157,7 +164,7 @@ async def pubsub_publish(request: Request, req: PubSubPublishRequest, agent_id: 
 
     return {
         "message_id": message_id, "channel": req.channel,
-        "subscribers_notified": len(recipients), "created_at": now,
+        "subscribers_notified": all_matched_count, "created_at": now,
     }
 
 @router.get("/v1/pubsub/channels", tags=["Pub/Sub"], response_model=PubSubChannelsResponse)
