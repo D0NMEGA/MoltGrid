@@ -2506,7 +2506,7 @@ class TestPubSub:
         # Agent 1 publishes
         r = client.post("/v1/pubsub/publish", json={"channel": "news", "payload": "hello world"}, headers=h1)
         assert r.status_code == 200
-        assert r.json()["subscribers_notified"] == 1  # excludes publisher
+        assert r.json()["subscribers_notified"] == 2  # includes publisher per PUB-02
         assert r.json()["channel"] == "news"
 
     def test_publish_excludes_publisher(self):
@@ -2514,7 +2514,7 @@ class TestPubSub:
         client.post("/v1/pubsub/subscribe", json={"channel": "solo"}, headers=h)
         r = client.post("/v1/pubsub/publish", json={"channel": "solo", "payload": "echo"}, headers=h)
         assert r.status_code == 200
-        assert r.json()["subscribers_notified"] == 0
+        assert r.json()["subscribers_notified"] == 1  # publisher counted per PUB-02
 
     def test_publish_creates_relay_messages(self):
         _, _, h1 = register_agent()
@@ -2561,7 +2561,7 @@ class TestPubSub:
         client.post("/v1/pubsub/subscribe", json={"channel": "wh-test"}, headers=h2)
         # Agent 1 publishes
         r = client.post("/v1/pubsub/publish", json={"channel": "wh-test", "payload": "test"}, headers=h1)
-        assert r.json()["subscribers_notified"] == 1
+        assert r.json()["subscribers_notified"] == 2  # includes publisher per PUB-02
         # Verify webhook delivery was queued
         import contextlib
         with contextlib.closing(_get_test_db()) as conn:
@@ -4753,7 +4753,7 @@ class TestObstacleCourse:
     def test_heartbeat_sets_worker_status(self):
         _id, key, h = register_agent("oc-hb")
         r = client.post("/v1/heartbeat",
-            json={"status": "worker_running", "metadata": {"test": True}},
+            json={"status": "online", "metadata": {"test": True}},
             headers=h)
         assert r.status_code == 200
 
@@ -5068,15 +5068,12 @@ class TestCursorInbox:
         assert "next_cursor" in data
 
     def test_inbox_cursor_empty(self):
-        """after= with a nonexistent cursor returns empty messages list."""
+        """after= with an invalid cursor returns 400 per RLY-04."""
         r = self.client.get(
             "/v1/relay/inbox?after=msg_nonexistentcursor&unread_only=false",
             headers={"X-API-Key": self.recip_key},
         )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["messages"] == []
-        assert data["count"] == 0
+        assert r.status_code == 400
 
 
 class TestHealthComponents:
