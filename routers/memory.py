@@ -1,5 +1,6 @@
 """Memory routes (8 routes) -- CAS, auto-scoping, history, meta, TTL."""
 
+import hmac
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -42,16 +43,39 @@ router = APIRouter()
 @limiter.limit("60/minute")
 def memory_get_cross_agent(request: Request, target_agent_id: str, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
-    resolved_ns = _resolve_namespace(namespace, target_agent_id)
-    with get_db() as db:
-        row = db.execute("SELECT * FROM memory WHERE agent_id=? AND namespace=? AND key=? AND (expires_at IS NULL OR expires_at > ?)", (target_agent_id, resolved_ns, key, now)).fetchone()
-        if not row:
+    # SEC-01: Always derive target namespace from target_agent_id auth identity, never from user input
+    target_ns = f"agent:{target_agent_id}"
+
+    # SEC-03: Self-read path -- caller reading their own data via cross-agent endpoint
+    if hmac.compare_digest(agent_id, target_agent_id):
+        with get_db() as db:
+            row = db.execute(
+                "SELECT * FROM memory WHERE agent_id=? AND namespace=? AND key=? AND (expires_at IS NULL OR expires_at > ?)",
+                (target_agent_id, target_ns, key, now)
+            ).fetchone()
+            d = dict(row) if row else None
+        _log_memory_access("self_read", target_agent_id, target_ns, key, actor_agent_id=agent_id, authorized=1 if d else 0)
+        if not d:
             raise HTTPException(404, "Key not found")
-        allowed = _check_memory_visibility(db, target_agent_id, resolved_ns, key, agent_id)
+        d["value"] = _decrypt(d["value"])
+        d.pop("shared_agents", None)
+        return {"key": d["key"], "value": d["value"], "namespace": d["namespace"], "visibility": d.get("visibility") or "private", "updated_at": d["updated_at"], "expires_at": d.get("expires_at")}
+
+    # Cross-agent path: check visibility, return 404 for both not-found and unauthorized (SEC-02)
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM memory WHERE agent_id=? AND namespace=? AND key=? AND (expires_at IS NULL OR expires_at > ?)",
+            (target_agent_id, target_ns, key, now)
+        ).fetchone()
+        if not row:
+            _log_memory_access("cross_agent_read", target_agent_id, target_ns, key, actor_agent_id=agent_id, authorized=0)
+            raise HTTPException(404, "Key not found")
+        allowed = _check_memory_visibility(db, target_agent_id, target_ns, key, agent_id)
         d = dict(row) if allowed else None
-    _log_memory_access("cross_agent_read", target_agent_id, resolved_ns, key, actor_agent_id=agent_id, authorized=1 if allowed else 0)
+    _log_memory_access("cross_agent_read", target_agent_id, target_ns, key, actor_agent_id=agent_id, authorized=1 if allowed else 0)
     if not allowed:
-        raise HTTPException(403, "Access denied: memory entry is private or not shared with you")
+        # SEC-02: Return 404 (not 403) to avoid leaking key existence to unauthorized callers
+        raise HTTPException(404, "Key not found")
     d["value"] = _decrypt(d["value"])
     d.pop("shared_agents", None)
     return {"key": d["key"], "value": d["value"], "namespace": d["namespace"], "visibility": d.get("visibility") or "private", "updated_at": d["updated_at"], "expires_at": d.get("expires_at")}
@@ -62,7 +86,8 @@ def memory_get_cross_agent(request: Request, target_agent_id: str, key: str, nam
 def memory_set_visibility(request: Request, key: str, req: MemoryVisibilityRequest, namespace: str = Query(None), agent_id: str = Depends(get_agent_id)):
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
-    resolved_ns = _resolve_namespace(req.namespace, agent_id)
+    # SEC-05: Always scope to caller's auth-derived namespace (req.namespace no longer exists after SEC-01 fix)
+    resolved_ns = _resolve_namespace("", agent_id)
     with get_db() as db:
         old = db.execute("SELECT visibility FROM memory WHERE agent_id=? AND namespace=? AND key=?", (agent_id, resolved_ns, key)).fetchone()
         if not old:
@@ -132,7 +157,8 @@ def memory_set(request: Request, req: MemorySetRequest, if_match: Optional[str] 
     _validate_key(req.key)
     if "\x00" in req.value:
         raise HTTPException(422, "Null bytes not allowed in values")
-    resolved_ns = _resolve_namespace(req.namespace, agent_id)
+    # SEC-01: namespace is auth-derived, not user-supplied (req.namespace removed from model)
+    resolved_ns = _resolve_namespace("", agent_id)
     now = datetime.now(timezone.utc)
     expires = None
     if req.ttl_seconds:

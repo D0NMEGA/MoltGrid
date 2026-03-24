@@ -561,10 +561,8 @@ def _memory_ttl_cleanup_loop():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _resolve_namespace(namespace: str, agent_id: str) -> str:
-    """MEM-01: Auto-scope 'default' or empty namespace to agent:{agent_id}."""
-    if not namespace or namespace == "default":
-        return f"agent:{agent_id}"
-    return namespace
+    """SEC-01: Always return auth-scoped namespace. namespace param is ignored for security (BOLA fix)."""
+    return f"agent:{agent_id}"
 
 
 def _check_memory_visibility(db, target_agent_id: str, namespace: str, key: str, requester_agent_id: str) -> bool:

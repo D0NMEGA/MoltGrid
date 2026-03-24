@@ -71,7 +71,7 @@ class NotificationPreferencesRequest(BaseModel):
     weekly_digest: Optional[bool] = None
 
 class MemoryVisibilityRequest(BaseModel):
-    namespace: str = Field("default", max_length=64)
+    model_config = ConfigDict(extra='ignore')
     key: Optional[str] = Field(None, max_length=256)
     visibility: str = Field(..., description="private | public | shared")
     shared_agents: List[str] = Field(default_factory=list)
@@ -194,9 +194,9 @@ class HeartbeatRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class MemorySetRequest(BaseModel):
+    model_config = ConfigDict(extra='ignore')
     key: str = Field(..., min_length=1, max_length=256)
     value: str = Field(..., min_length=1, max_length=MAX_MEMORY_VALUE_SIZE)
-    namespace: str = Field("default", max_length=64)
     ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000, description="Auto-expire after N seconds (60s-30d)")
     visibility: str = Field("private", description="private | public | shared")
     shared_agents: List[str] = Field(default_factory=list)
