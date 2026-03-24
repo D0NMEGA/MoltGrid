@@ -35,8 +35,10 @@ async def agent_heartbeat(request: Request, req: HeartbeatRequest = HeartbeatReq
     meta_json = json.dumps(req.metadata) if req.metadata else None
     if meta_json and len(meta_json) > 4096:
         raise HTTPException(400, "metadata exceeds 4KB limit")
-    VALID_WORKER_STATUSES = {"worker_running", "session_based", "offline"}
-    worker_status = req.status if req.status in VALID_WORKER_STATUSES else "session_based"
+    VALID_STATUSES = {"online", "busy", "idle", "offline"}
+    if req.status not in VALID_STATUSES:
+        raise HTTPException(422, detail=f"Invalid status '{req.status}'. Valid values: online, busy, idle, offline")
+    worker_status = req.status
     await async_db_execute(
         "UPDATE agents SET heartbeat_at=?, heartbeat_status=?, heartbeat_meta=?, worker_status=? WHERE agent_id=?",
         (now, req.status, meta_json, worker_status, agent_id)

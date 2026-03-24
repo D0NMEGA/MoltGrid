@@ -185,7 +185,9 @@ class OnboardingResponse(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class HeartbeatRequest(BaseModel):
-    status: str = Field("online", description="Agent status: online, busy, idle")
+    status: Literal["online", "busy", "idle", "offline"] = Field(
+        "online", description="Agent status: online, busy, idle, offline"
+    )
     metadata: Optional[dict] = Field(None, description="Optional metadata blob (max 4KB)")
 
 
