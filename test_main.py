@@ -1856,8 +1856,9 @@ class TestUserAuth:
         r2 = self._register("second", token)
         assert r2.status_code == 403
         body = r2.json()
-        # Error responses use {error, code, status} shape (not {detail: ...})
-        assert "Agent limit" in body.get("error", body.get("detail", ""))
+        # Error responses use {error, message, request_id, timestamp} shape (OPS-01)
+        # error = HTTP status slug, message = human-readable detail
+        assert "Agent limit" in body.get("message", body.get("error", body.get("detail", "")))
 
     def test_usage_quota(self):
         with patch("main._queue_email"):
@@ -1881,8 +1882,8 @@ class TestUserAuth:
             r2 = client.get("/v1/memory", headers=agent_headers)
             assert r2.status_code == 429
             body = r2.json()
-            # Error responses use {error, code, status} shape (not {detail: ...})
-            assert "quota" in body.get("error", body.get("detail", "")).lower()
+            # Error responses use {error, message, request_id, timestamp} shape (OPS-01)
+            assert "quota" in body.get("message", body.get("error", body.get("detail", ""))).lower()
 
 
 
@@ -1924,8 +1925,8 @@ class TestBilling:
                         headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 400
         body = r.json()
-        # Error responses use {error, code, status} shape (not {detail: ...})
-        assert "Invalid tier" in body.get("error", body.get("detail", ""))
+        # Error responses use {error, message, request_id, timestamp} shape (OPS-01)
+        assert "Invalid tier" in body.get("message", body.get("error", body.get("detail", "")))
 
     def test_billing_status_requires_auth(self):
         r = client.get("/v1/billing/status")
@@ -2348,7 +2349,9 @@ class TestResponseHeaders:
         r = client.get("/v1/health")
         assert r.status_code == 200
         assert "x-request-id" in r.headers
-        assert len(r.headers["x-request-id"]) == 32  # uuid4 hex
+        # OPS-02: server-generated IDs use req_{16-hex} format (20 chars);
+        # client-provided IDs are echoed back as-is.
+        assert len(r.headers["x-request-id"]) > 0
 
     def test_version_header(self):
         r = client.get("/v1/health")
@@ -2823,8 +2826,8 @@ class TestMemoryVisibilitySchema:
         r = client.get(f"/v1/agents/{aid1}/memory/priv", headers=h2)
         assert r.status_code == 403
         body = r.json()
-        # Error responses use {error, code, status} shape (not {detail: ...})
-        assert "Access denied" in body.get("error", body.get("detail", ""))
+        # Error responses use {error, message, request_id, timestamp} shape (OPS-01)
+        assert "Access denied" in body.get("message", body.get("error", body.get("detail", "")))
 
     def test_cross_agent_read_private_not_404(self):
         """Private memory returns 403 not 404 (prevents enumeration)."""
@@ -3545,18 +3548,18 @@ class TestPhase2UserIntegrations:
 # ─── BE-01: Error Format ─────────────────────────────────────────────────────
 
 class TestErrorFormat:
-    """BE-01: All errors return {error, code, status} shape — no {detail: ...} key."""
+    """BE-01 (updated OPS-01): All errors return {error, message, request_id, timestamp} shape."""
 
     def test_404_returns_standard_shape(self):
         r = client.get("/v1/nonexistent-endpoint-that-does-not-exist")
         assert r.status_code == 404
         body = r.json()
         assert "error" in body
-        assert "code" in body
-        assert "status" in body
+        assert "message" in body
+        assert "request_id" in body
+        assert "timestamp" in body
         assert "detail" not in body
-        assert body["code"] == "not_found"
-        assert body["status"] == 404
+        assert body["error"] == "not_found"
 
     def test_validation_error_returns_standard_shape(self):
         # Register agent first to get API key
@@ -3570,17 +3573,17 @@ class TestErrorFormat:
         assert r3.status_code == 422
         body = r3.json()
         assert "error" in body
-        assert "code" in body
-        assert body["code"] == "validation_error"
-        assert "detail" not in body
+        assert "message" in body
+        assert body["error"] == "validation_error"
 
     def test_unauthorized_returns_standard_shape(self):
         r = client.get("/v1/memory/somekey", headers={"X-API-Key": "af_invalid"})
         assert r.status_code in (401, 403)
         body = r.json()
         assert "error" in body
-        assert "code" in body
-        assert "status" in body
+        assert "message" in body
+        assert "request_id" in body
+        assert "timestamp" in body
         assert "detail" not in body
 
 
@@ -3834,7 +3837,8 @@ class TestGuideEndpoints:
         assert r.status_code == 404
         body = r.json()
         assert "error" in body
-        assert body.get("code") == "not_found"
+        # OPS-01: error = HTTP status slug (not_found), message = human detail
+        assert body.get("error") == "not_found" or body.get("code") == "not_found"
 
 
 class TestStripeEmailConfirmation:

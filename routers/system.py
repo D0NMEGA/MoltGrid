@@ -183,13 +183,39 @@ async def sla(request: Request):
     return sla_result
 
 
-@router.get("/v1/health", response_model=HealthResponse, tags=["System"])
+@router.get("/v1/health", tags=["System"])
 @limiter.limit("30/minute")
 async def health(request: Request):
-    """Public health check -- no auth required. Cached for 10 seconds."""
+    """Public health check -- no auth required. Cached for 10 seconds.
+
+    OPS-04: Returns 503 with retry_after_seconds=30 when DB is unreachable.
+    """
     cached = await response_cache.get("health")
     if cached is not None:
         return cached
+
+    # OPS-04: DB liveness check -- if DB is down, return 503 immediately
+    try:
+        await async_db_fetchone("SELECT 1 as ping")
+    except Exception as db_err:
+        logger.error(f"Health check: DB unreachable: {db_err}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unavailable",
+                "version": "0.9.0",
+                "components": {
+                    "database": {"status": "down", "detail": "Database unreachable"},
+                    "relay": {"status": "unknown"},
+                    "websocket": {"status": "unknown"},
+                    "sse": {"status": "unknown"},
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "retry_after_seconds": 30,
+            },
+            headers={"Retry-After": "30"},
+        )
+
     agent_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM agents"))["c"]
     job_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM queue"))["c"]
     memory_keys = (await async_db_fetchone("SELECT COUNT(*) as c FROM memory"))["c"]
@@ -200,12 +226,7 @@ async def health(request: Request):
     public_agents = (await async_db_fetchone("SELECT COUNT(*) as c FROM agents WHERE public=1"))["c"]
 
     # Component health probing
-    # database: try a lightweight query
-    try:
-        await async_db_fetchone("SELECT 1 as ping")
-        db_component = {"status": "ok"}
-    except Exception as e:
-        db_component = {"status": "error", "detail": str(e)[:120]}
+    db_component = {"status": "ok"}
 
     # relay: count undelivered messages older than 5 minutes as a degraded signal
     try:

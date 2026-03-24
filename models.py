@@ -255,9 +255,23 @@ class HealthResponse(BaseModel):
     model_config = ConfigDict(extra='ignore')
     status: str
     version: str
-    stats: HealthStatsResponse
+    stats: Optional[HealthStatsResponse] = None
     components: Optional[HealthComponents] = None
     timestamp: str
+    retry_after_seconds: Optional[int] = None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ERROR RESPONSE MODEL (OPS-01, OPS-05)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ErrorResponse(BaseModel):
+    """Structured error response returned for all 4xx and 5xx status codes."""
+    error: str
+    message: str
+    request_id: Optional[str] = None
+    timestamp: str
+    retry_after_seconds: Optional[int] = None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -9,6 +9,7 @@ import threading
 import logging
 import httpx  # noqa: F401 -- re-exported for test_main.py mocking
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -318,23 +319,61 @@ button{color:#e4e4ef!important;}
 
 
 # ─── Exception Handlers ─────────────────────────────────────────────────────
+# OPS-01 + OPS-05: All error responses use structured ErrorResponse schema.
+# Fields: error, message, request_id, timestamp, retry_after_seconds.
+
+def _retry_after_for_status(status_code: int):
+    """Return retry_after_seconds hint based on HTTP status code."""
+    if status_code == 429:
+        return 60
+    if status_code == 503:
+        return 30
+    if status_code == 502:
+        return 5
+    return None
+
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = getattr(request.state, "request_id", None)
+    retry_after = _retry_after_for_status(exc.status_code)
+    headers = {"X-Request-ID": request_id or ""}
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": str(exc.detail), "code": _http_code_to_slug(exc.status_code), "status": exc.status_code},
+        content={
+            "error": _http_code_to_slug(exc.status_code),
+            "message": str(exc.detail),
+            "request_id": request_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "retry_after_seconds": retry_after,
+        },
+        headers=headers,
     )
 
 @app.exception_handler(StarletteHTTPException)
 async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    request_id = getattr(request.state, "request_id", None)
+    retry_after = _retry_after_for_status(exc.status_code)
+    headers = {"X-Request-ID": request_id or ""}
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": str(exc.detail), "code": _http_code_to_slug(exc.status_code), "status": exc.status_code},
+        content={
+            "error": _http_code_to_slug(exc.status_code),
+            "message": str(exc.detail),
+            "request_id": request_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "retry_after_seconds": retry_after,
+        },
+        headers=headers,
     )
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    request_id = getattr(request.state, "request_id", None)
     details = []
     for err in exc.errors():
         field = ".".join(str(loc) for loc in err.get("loc", []) if loc != "body")
@@ -345,7 +384,32 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         })
     return JSONResponse(
         status_code=422,
-        content={"error": "Validation failed", "code": "validation_error", "status": 422, "details": details},
+        content={
+            "error": "validation_error",
+            "message": "Validation failed",
+            "request_id": request_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "retry_after_seconds": None,
+            "details": details,
+        },
+        headers={"X-Request-ID": request_id or ""},
+    )
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Catch-all handler for unhandled 500-level exceptions."""
+    request_id = getattr(request.state, "request_id", None)
+    logger.exception(f"Unhandled exception [request_id={request_id}]: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_server_error",
+            "message": "An unexpected error occurred",
+            "request_id": request_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "retry_after_seconds": None,
+        },
+        headers={"X-Request-ID": request_id or "", "Retry-After": "5"},
     )
 
 
@@ -370,12 +434,29 @@ app.add_middleware(
 
 @app.middleware("http")
 async def add_response_headers(request: Request, call_next):
-    """Add X-Request-ID, X-MoltGrid-Version, and rate limit headers to every response."""
-    request_id = uuid.uuid4().hex
+    """Add X-Request-ID, X-MoltGrid-Version, and rate limit headers to every response.
+
+    OPS-02: Respect client-provided X-Request-ID; generate one if absent.
+    OPS-03: Parse W3C traceparent header and store trace_id in request.state.
+    """
+    # OPS-02: Use client-provided X-Request-ID or generate one
+    request_id = request.headers.get("X-Request-ID") or f"req_{uuid.uuid4().hex[:16]}"
     request.state.request_id = request_id
     request.state.rate_limit_remaining = None
     request.state.rate_limit_reset = None
     request.state.rate_limit_max = None
+
+    # OPS-03: Parse W3C traceparent header (00-{trace_id}-{parent_id}-{flags})
+    traceparent = request.headers.get("traceparent")
+    if traceparent:
+        parts = traceparent.split("-")
+        if len(parts) == 4:
+            request.state.trace_id = parts[1]
+            logger.info(f"traceparent trace_id={parts[1]} parent_id={parts[2]} flags={parts[3]} request_id={request_id}")
+        else:
+            request.state.trace_id = None
+    else:
+        request.state.trace_id = None
 
     response = await call_next(request)
 
