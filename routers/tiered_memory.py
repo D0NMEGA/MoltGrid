@@ -67,15 +67,17 @@ def tiered_store_event(request: Request, req: TieredStoreEventRequest, agent_id:
         )
 
         # Optionally persist to mid-term memory (Tier 2)
+        # SEC-01: Use auth-scoped namespace to match the GET /v1/memory/{key} auto-scoping
         persisted = False
         if req.persist and req.note_key:
             enc_value = _encrypt(content)
+            scoped_ns = f"agent:{agent_id}"
             db.execute("""
                 INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at, visibility)
-                VALUES (?, 'notes', ?, ?, ?, ?, 'private')
+                VALUES (?, ?, ?, ?, ?, ?, 'private')
                 ON CONFLICT(agent_id, namespace, key)
                 DO UPDATE SET value=?, updated_at=?
-            """, (agent_id, req.note_key, enc_value, now, now,
+            """, (agent_id, scoped_ns, req.note_key, enc_value, now, now,
                   enc_value, now))
             persisted = True
 

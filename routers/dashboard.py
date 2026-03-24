@@ -601,7 +601,7 @@ def user_memory_get(request: Request, agent_id: str, namespace: str = "default",
 def user_memory_set_visibility(request: Request, agent_id: str, req: MemoryVisibilityRequest, user_id: str = Depends(get_user_id)):
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
-    resolved_ns = _resolve_namespace(req.namespace, agent_id)
+    resolved_ns = _resolve_namespace("", agent_id)
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
         old = db.execute("SELECT visibility FROM memory WHERE agent_id=? AND namespace=? AND key=?", (agent_id, resolved_ns, req.key)).fetchone()

@@ -221,11 +221,14 @@ class TestMemory:
         assert r.json()["value"] == "v1"
 
     def test_namespaces(self):
+        # SEC-01: namespace is always auto-scoped to agent:{id}, user-supplied namespace is ignored.
+        # Both writes go to the same namespace with the same key, so second write wins.
         _, _, h = register_agent()
         client.post("/v1/memory", json={"key": "k", "value": "ns1", "namespace": "a"}, headers=h)
         client.post("/v1/memory", json={"key": "k", "value": "ns2", "namespace": "b"}, headers=h)
-        assert client.get("/v1/memory/k", params={"namespace": "a"}, headers=h).json()["value"] == "ns1"
-        assert client.get("/v1/memory/k", params={"namespace": "b"}, headers=h).json()["value"] == "ns2"
+        r = client.get("/v1/memory/k", headers=h)
+        assert r.status_code == 200
+        assert r.json()["value"] == "ns2"
 
     def test_ttl_expiry(self):
         _, _, h = register_agent()
@@ -2819,23 +2822,20 @@ class TestMemoryVisibilitySchema:
         assert data["visibility"] == "public"
 
     def test_cross_agent_read_private_returns_403(self):
-        """GET /v1/agents/{target}/memory/{key} returns 403 for private memory."""
+        """GET /v1/agents/{target}/memory/{key} returns 404 for private memory (SEC-02: prevents enumeration)."""
         aid1, _, h1 = register_agent("owner-cross-priv")
         aid2, _, h2 = register_agent("requester-cross-priv")
         client.post("/v1/memory", json={"key": "priv", "value": "secret"}, headers=h1)
         r = client.get(f"/v1/agents/{aid1}/memory/priv", headers=h2)
-        assert r.status_code == 403
-        body = r.json()
-        # Error responses use {error, message, request_id, timestamp} shape (OPS-01)
-        assert "Access denied" in body.get("message", body.get("error", body.get("detail", "")))
+        assert r.status_code == 404
 
     def test_cross_agent_read_private_not_404(self):
-        """Private memory returns 403 not 404 (prevents enumeration)."""
+        """Private memory returns 404 to prevent key existence enumeration (SEC-02)."""
         aid1, _, h1 = register_agent("owner-403")
         aid2, _, h2 = register_agent("requester-403")
         client.post("/v1/memory", json={"key": "secret_key", "value": "secret"}, headers=h1)
         r = client.get(f"/v1/agents/{aid1}/memory/secret_key", headers=h2)
-        assert r.status_code == 403, f"Must return 403 not {r.status_code}"
+        assert r.status_code == 404, f"Must return 404 (SEC-02) not {r.status_code}"
 
     def test_cross_agent_read_shared_in_list_returns_200(self):
         """GET /v1/agents/{target}/memory/{key} returns 200 when requester is in shared_agents."""
@@ -2851,7 +2851,7 @@ class TestMemoryVisibilitySchema:
         assert r.json()["value"] == "shared_val"
 
     def test_cross_agent_read_shared_not_in_list_returns_403(self):
-        """GET /v1/agents/{target}/memory/{key} returns 403 when requester NOT in shared_agents."""
+        """GET /v1/agents/{target}/memory/{key} returns 404 when requester NOT in shared_agents (SEC-02)."""
         aid1, _, h1 = register_agent("owner-shared-excl")
         aid2, _, h2 = register_agent("req-not-in-list")
         aid3, _, _ = register_agent("other-agent")
@@ -2861,7 +2861,7 @@ class TestMemoryVisibilitySchema:
             "shared_agents": [aid3]
         }, headers=h1)
         r = client.get(f"/v1/agents/{aid1}/memory/shared_excl", headers=h2)
-        assert r.status_code == 403
+        assert r.status_code == 404
 
     # ── GET /v1/memory/{key} (own-agent) is unaffected ───────────────────────
 
@@ -2961,14 +2961,14 @@ class TestMemoryVisibilityEndpoint:
         assert r.json()["visibility"] == "private", "Invalid visibility should coerce to 'private'"
 
     def test_patch_visibility_changes_cross_agent_access(self):
-        """Setting public -> cross-agent read returns 200; setting private -> 403."""
+        """Setting public -> cross-agent read returns 200; setting private -> 404 (SEC-02)."""
         aid1, _, h1 = register_agent("vis-owner-cross")
         _, _, h2 = register_agent("vis-requester-cross")
         # Store as private
         client.post("/v1/memory", json={"key": "crosskey", "value": "cval", "visibility": "private"}, headers=h1)
-        # Cross-agent read must return 403 initially
+        # Cross-agent read must return 404 initially (SEC-02: prevents enumeration)
         r_denied = client.get(f"/v1/agents/{aid1}/memory/crosskey", headers=h2)
-        assert r_denied.status_code == 403, f"Expected 403 for private key, got {r_denied.status_code}"
+        assert r_denied.status_code == 404, f"Expected 404 for private key, got {r_denied.status_code}"
         # PATCH to public
         client.patch(
             "/v1/memory/crosskey/visibility",
@@ -2985,9 +2985,9 @@ class TestMemoryVisibilityEndpoint:
             json={"namespace": "default", "key": "crosskey", "visibility": "private", "shared_agents": []},
             headers=h1,
         )
-        # Cross-agent read must return 403 again
+        # Cross-agent read must return 404 again (SEC-02: prevents enumeration)
         r_denied2 = client.get(f"/v1/agents/{aid1}/memory/crosskey", headers=h2)
-        assert r_denied2.status_code == 403, f"Expected 403 after setting private, got {r_denied2.status_code}"
+        assert r_denied2.status_code == 404, f"Expected 404 after setting private, got {r_denied2.status_code}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3067,12 +3067,12 @@ class TestMemoryAuditLog:
         assert row["actor_agent_id"] == aid2
 
     def test_unauthorized_cross_agent_read_logged_as_unauthorized(self):
-        """Denied GET /v1/agents/{target}/memory/{key} logs action='cross_agent_read', authorized=0."""
+        """Denied GET /v1/agents/{target}/memory/{key} returns 404 (SEC-02) and logs authorized=0."""
         aid1, _, h1 = register_agent("audit-denied-owner")
         aid2, _, h2 = register_agent("audit-denied-requester")
         client.post("/v1/memory", json={"key": "privkey", "value": "pv", "visibility": "private"}, headers=h1)
         r = client.get(f"/v1/agents/{aid1}/memory/privkey", headers=h2)
-        assert r.status_code == 403
+        assert r.status_code == 404
         rows = self._audit_rows(agent_id=aid1, action="cross_agent_read", key="privkey")
         assert len(rows) >= 1, "Expected cross_agent_read audit row for denied access"
         row = rows[0]
@@ -4744,8 +4744,8 @@ class TestTieredMemory:
         d = r.json()
         assert d["persisted"] is True
         assert d["note_key"] == "test_note_tiered"
-        # Verify the note exists in mid-term memory
-        r2 = client.get("/v1/memory/test_note_tiered?namespace=notes", headers=h)
+        # Verify the note exists in mid-term memory (SEC-01: stored under auto-scoped namespace)
+        r2 = client.get("/v1/memory/test_note_tiered", headers=h)
         assert r2.status_code == 200
         assert "important note" in r2.json()["value"]
 
@@ -5408,13 +5408,13 @@ class TestScopedMemoryCAS:
         assert r2.json()["namespace"] == f"agent:{agent_id}"
 
     def test_mem01_explicit_namespace_respected(self):
-        """MEM-01: Explicit non-default namespace is kept as-is."""
+        """MEM-01: SEC-01 auto-scopes namespace to agent:{id} regardless of user-supplied value."""
         _, _key, h = register_agent()
         r = client.post("/v1/memory", json={"key": "k", "value": "v", "namespace": "custom_ns"}, headers=h)
         assert r.status_code == 200
-        r2 = client.get("/v1/memory/k", params={"namespace": "custom_ns"}, headers=h)
+        # The namespace is always auto-scoped; read without namespace param uses the scoped namespace
+        r2 = client.get("/v1/memory/k", headers=h)
         assert r2.status_code == 200
-        assert r2.json()["namespace"] == "custom_ns"
 
     # ── MEM-02: Compare-and-swap ───────────────────────────────────────────────
 
