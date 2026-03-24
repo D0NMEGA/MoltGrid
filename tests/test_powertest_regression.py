@@ -728,10 +728,157 @@ def test_tsk01_complete_wrong_agent_returns_403_or_404(agent_a, agent_b):
 
 
 # TSK-02: tasks_completed counter
-# (3 tests: counter increments, counter after multiple completions, counter per-agent)
+# (3 tests: counter increments via POST /complete, counter increments via PATCH, profile counter)
+
+def test_tsk02_directory_counter_increments_on_complete(agent_a):
+    """TSK-02: Create task, claim, POST /complete -- leaderboard tasks_completed must be >= 1."""
+    a_id, _, a_headers = agent_a
+
+    # Make agent public first so it appears in leaderboard
+    client.put("/v1/directory/me", json={"public": True, "name": f"tsk02-agent-{a_id[:8]}"}, headers=a_headers)
+
+    # Create a task, claim it, complete it
+    create_resp = client.post("/v1/tasks", json={
+        "title": "TSK-02 counter test via complete",
+        "priority": 1,
+    }, headers=a_headers)
+    assert create_resp.status_code == 200, f"Create failed: {create_resp.text}"
+    task_id = create_resp.json()["task_id"]
+
+    claim_resp = client.post(f"/v1/tasks/{task_id}/claim", headers=a_headers)
+    assert claim_resp.status_code == 200, f"Claim failed: {claim_resp.text}"
+
+    complete_resp = client.post(f"/v1/tasks/{task_id}/complete", headers=a_headers)
+    assert complete_resp.status_code == 200, f"Complete failed: {complete_resp.text}"
+
+    # Check leaderboard sorted by tasks_completed
+    lb_resp = client.get("/v1/leaderboard?sort_by=tasks_completed&limit=100")
+    assert lb_resp.status_code == 200, f"Leaderboard failed: {lb_resp.text}"
+    entries = lb_resp.json()["leaderboard"]
+    agent_entry = next((e for e in entries if e["agent_id"] == a_id), None)
+
+    assert agent_entry is not None, (
+        f"TSK-02 FAIL: agent {a_id} not found in leaderboard"
+    )
+    assert agent_entry["tasks_completed"] >= 1, (
+        f"TSK-02 FAIL: tasks_completed={agent_entry['tasks_completed']}, expected >= 1. "
+        "Agent tasks completions are not being counted in the directory counter."
+    )
+
+
+def test_tsk02_directory_counter_includes_patch_complete(agent_a):
+    """TSK-02: Create task, claim, PATCH status=completed -- leaderboard tasks_completed >= 1."""
+    a_id, _, a_headers = agent_a
+
+    # Ensure agent is public
+    client.put("/v1/directory/me", json={"public": True}, headers=a_headers)
+
+    # Create a task, claim it, then complete via PATCH
+    create_resp = client.post("/v1/tasks", json={
+        "title": "TSK-02 counter test via PATCH",
+        "priority": 2,
+    }, headers=a_headers)
+    assert create_resp.status_code == 200, f"Create failed: {create_resp.text}"
+    task_id = create_resp.json()["task_id"]
+
+    claim_resp = client.post(f"/v1/tasks/{task_id}/claim", headers=a_headers)
+    assert claim_resp.status_code == 200, f"Claim failed: {claim_resp.text}"
+
+    patch_resp = client.patch(f"/v1/tasks/{task_id}", json={"status": "completed"}, headers=a_headers)
+    assert patch_resp.status_code == 200, f"PATCH complete failed: {patch_resp.text}"
+
+    # Leaderboard (else branch -- not sorted by tasks_completed) must include agent_tasks counts
+    lb_resp = client.get("/v1/leaderboard?sort_by=reputation&limit=100")
+    assert lb_resp.status_code == 200
+    entries = lb_resp.json()["leaderboard"]
+    agent_entry = next((e for e in entries if e["agent_id"] == a_id), None)
+    assert agent_entry is not None, f"TSK-02 FAIL: agent {a_id} not in reputation-sorted leaderboard"
+    assert agent_entry["tasks_completed"] >= 1, (
+        f"TSK-02 FAIL: tasks_completed={agent_entry['tasks_completed']} in reputation sort, expected >= 1"
+    )
+
+
+def test_tsk02_profile_counter_includes_agent_tasks(agent_a):
+    """TSK-02: GET /v1/directory/{agent_id}/profile must include agent_tasks in tasks_completed."""
+    a_id, _, a_headers = agent_a
+
+    # Ensure agent is public
+    client.put("/v1/directory/me", json={"public": True}, headers=a_headers)
+
+    # Get baseline profile count
+    profile_before = client.get(f"/v1/directory/{a_id}")
+    assert profile_before.status_code == 200, f"Profile before failed: {profile_before.text}"
+    count_before = profile_before.json()["tasks_completed"]
+
+    # Complete another task
+    create_resp = client.post("/v1/tasks", json={
+        "title": "TSK-02 profile counter test",
+        "priority": 0,
+    }, headers=a_headers)
+    assert create_resp.status_code == 200
+    task_id = create_resp.json()["task_id"]
+
+    client.post(f"/v1/tasks/{task_id}/claim", headers=a_headers)
+    complete_resp = client.post(f"/v1/tasks/{task_id}/complete", headers=a_headers)
+    assert complete_resp.status_code == 200, f"Complete failed: {complete_resp.text}"
+
+    # Profile tasks_completed must have increased
+    profile_after = client.get(f"/v1/directory/{a_id}")
+    assert profile_after.status_code == 200
+    count_after = profile_after.json()["tasks_completed"]
+
+    assert count_after > count_before, (
+        f"TSK-02 FAIL: profile tasks_completed did not increase after completing agent_task. "
+        f"before={count_before}, after={count_after}. Profile only counts marketplace, not agent_tasks."
+    )
+
 
 # TSK-03: Priority validation
 # (3 tests: string priority rejected, integer accepted, boundary values 0 and 10)
+
+def test_tsk03_priority_string_returns_422(agent_a):
+    """TSK-03: POST /v1/tasks with priority='high' must return 422 with 'priority' in error."""
+    _, _, a_headers = agent_a
+
+    resp = client.post("/v1/tasks", json={
+        "title": "TSK-03 string priority test",
+        "priority": "high",
+    }, headers=a_headers)
+    assert resp.status_code == 422, (
+        f"TSK-03 FAIL: expected 422 for string priority, got {resp.status_code}: {resp.text}"
+    )
+    # The error message should reference priority
+    body = resp.json()
+    error_text = str(body).lower()
+    assert "priority" in error_text, (
+        f"TSK-03 FAIL: 422 response does not mention 'priority': {body}"
+    )
+
+
+def test_tsk03_priority_negative_returns_422(agent_a):
+    """TSK-03: POST /v1/tasks with priority=-1 must return 422."""
+    _, _, a_headers = agent_a
+
+    resp = client.post("/v1/tasks", json={
+        "title": "TSK-03 negative priority test",
+        "priority": -1,
+    }, headers=a_headers)
+    assert resp.status_code == 422, (
+        f"TSK-03 FAIL: expected 422 for priority=-1, got {resp.status_code}: {resp.text}"
+    )
+
+
+def test_tsk03_priority_valid_integer_succeeds(agent_a):
+    """TSK-03: POST /v1/tasks with priority=5 must return 200."""
+    _, _, a_headers = agent_a
+
+    resp = client.post("/v1/tasks", json={
+        "title": "TSK-03 valid priority test",
+        "priority": 5,
+    }, headers=a_headers)
+    assert resp.status_code == 200, (
+        f"TSK-03 FAIL: expected 200 for priority=5, got {resp.status_code}: {resp.text}"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

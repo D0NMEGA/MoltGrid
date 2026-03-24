@@ -146,16 +146,16 @@ def leaderboard(request: Request,
         # Get total public agents count
         total_agents = db.execute("SELECT COUNT(*) as cnt FROM agents WHERE public=1").fetchone()["cnt"]
 
-        # For tasks_completed, we need to count marketplace tasks
+        # For tasks_completed, count both marketplace (delivered) and agent_tasks (completed)
         if sort_by == "tasks_completed":
             rows = db.execute(
                 """
                 SELECT a.agent_id, a.name, a.reputation, a.credits, a.request_count,
-                       COUNT(m.task_id) as tasks_completed
+                       (SELECT COUNT(*) FROM marketplace WHERE claimed_by = a.agent_id AND status = 'delivered')
+                       + (SELECT COUNT(*) FROM agent_tasks WHERE claimed_by = a.agent_id AND status = 'completed')
+                       as tasks_completed
                 FROM agents a
-                LEFT JOIN marketplace m ON m.claimed_by = a.agent_id AND m.status = 'delivered'
                 WHERE a.public = 1
-                GROUP BY a.agent_id
                 ORDER BY tasks_completed DESC, a.reputation DESC
                 LIMIT ?
                 """,
@@ -165,7 +165,9 @@ def leaderboard(request: Request,
             rows = db.execute(
                 f"""
                 SELECT agent_id, name, reputation, credits, request_count,
-                       (SELECT COUNT(*) FROM marketplace WHERE claimed_by=agents.agent_id AND status='delivered') as tasks_completed
+                       (SELECT COUNT(*) FROM marketplace WHERE claimed_by=agents.agent_id AND status='delivered')
+                       + (SELECT COUNT(*) FROM agent_tasks WHERE claimed_by=agents.agent_id AND status='completed')
+                       as tasks_completed
                 FROM agents
                 WHERE public=1
                 ORDER BY {sort_col} DESC, reputation DESC
@@ -673,6 +675,17 @@ def directory_profile(request: Request, agent_id: str):
             (agent_id,)
         ).fetchall()
 
+        # Count total completed tasks: marketplace delivered + agent_tasks completed
+        # Note: len(marketplace_activity) is capped at 5 (LIMIT 5), so we query the full count
+        mp_total = db.execute(
+            "SELECT COUNT(*) as cnt FROM marketplace WHERE claimed_by=? AND status='delivered'",
+            (agent_id,)
+        ).fetchone()["cnt"]
+        agent_task_count = db.execute(
+            "SELECT COUNT(*) as cnt FROM agent_tasks WHERE claimed_by=? AND status='completed'",
+            (agent_id,)
+        ).fetchone()["cnt"]
+
         # Calculate uptime percentage (simple: based on heartbeats in last 30 days)
         uptime_pct = 99.0  # Default for new agents
 
@@ -685,7 +698,7 @@ def directory_profile(request: Request, agent_id: str):
             "reputation": agent["reputation"] or 0.0,
             "reputation_count": agent["reputation_count"] or 0,
             "credits": agent["credits"] or 0,
-            "tasks_completed": len(marketplace_activity),
+            "tasks_completed": (mp_total or 0) + (agent_task_count or 0),
             "uptime_pct": uptime_pct,
             "member_since": agent["created_at"][:10] if agent["created_at"] else None,
             "heartbeat_status": agent["heartbeat_status"] or "unknown",
