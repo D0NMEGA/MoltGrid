@@ -1417,3 +1417,59 @@ class TieredSummarizeResponse(BaseModel):
     promoted: bool
     vector_key: str
     vector_namespace: str
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TASK OBJECT MODELS (Phase 44)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TaskCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=256)
+    description: Optional[str] = Field(None, max_length=4000)
+    priority: int = Field(0, ge=0, le=10)
+    metadata: Optional[dict] = None
+
+
+class TaskUpdateRequest(BaseModel):
+    status: str = Field(..., description="New status: completed, failed, waiting_input, cancelled, rejected")
+    result: Optional[str] = Field(None, max_length=10000)
+
+
+class TaskDependencyRequest(BaseModel):
+    depends_on: str = Field(..., description="task_id this task depends on")
+
+
+class TaskHistoryEntry(BaseModel):
+    status: str
+    actor: str
+    timestamp: str
+
+
+class TaskResponse(BaseModel):
+    task_id: str
+    creator_agent: str
+    title: str
+    description: Optional[str] = None
+    status: str
+    priority: int
+    claimed_by: Optional[str] = None
+    claimed_at: Optional[str] = None
+    lease_expires_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    result: Optional[str] = None
+    metadata: Optional[dict] = None
+    created_at: str
+    updated_at: str
+    history: List[TaskHistoryEntry]
+
+
+class TaskListResponse(BaseModel):
+    tasks: List[TaskResponse]
+    count: int
+
+
+class TaskClaimResponse(BaseModel):
+    task_id: str
+    status: str
+    claimed_by: str
+    lease_expires_at: str

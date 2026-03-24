@@ -861,6 +861,36 @@ def _init_db_sqlite(conn):
         );
         CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event_name, created_at);
 
+        CREATE TABLE IF NOT EXISTS agent_tasks (
+            task_id TEXT PRIMARY KEY,
+            creator_agent TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            priority INTEGER DEFAULT 0,
+            claimed_by TEXT,
+            claimed_at TEXT,
+            lease_expires_at TEXT,
+            completed_at TEXT,
+            result TEXT,
+            metadata TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            history TEXT NOT NULL DEFAULT '[]',
+            FOREIGN KEY (creator_agent) REFERENCES agents(agent_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status, priority DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_tasks_creator ON agent_tasks(creator_agent);
+        CREATE INDEX IF NOT EXISTS idx_agent_tasks_claimed ON agent_tasks(claimed_by);
+
+        CREATE TABLE IF NOT EXISTS task_dependencies (
+            task_id TEXT NOT NULL,
+            depends_on TEXT NOT NULL,
+            PRIMARY KEY (task_id, depends_on),
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id),
+            FOREIGN KEY (depends_on) REFERENCES agent_tasks(task_id)
+        );
+
     """)
 
     # Migrate existing agents table — add columns that older versions didn't have
@@ -1667,6 +1697,28 @@ def _init_db_postgres(conn):
             redeemed_by TEXT,
             FOREIGN KEY (redeemed_by) REFERENCES users(user_id)
         )""",
+        """CREATE TABLE IF NOT EXISTS agent_tasks (
+            task_id TEXT PRIMARY KEY,
+            creator_agent TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            priority INTEGER DEFAULT 0,
+            claimed_by TEXT,
+            claimed_at TEXT,
+            lease_expires_at TEXT,
+            completed_at TEXT,
+            result TEXT,
+            metadata TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            history TEXT NOT NULL DEFAULT '[]'
+        )""",
+        """CREATE TABLE IF NOT EXISTS task_dependencies (
+            task_id TEXT NOT NULL,
+            depends_on TEXT NOT NULL,
+            PRIMARY KEY (task_id, depends_on)
+        )""",
     ]
 
     for sql in tables_sql:
@@ -1711,6 +1763,9 @@ def _init_db_postgres(conn):
         "CREATE INDEX IF NOT EXISTS idx_promo_code ON promo_codes(code)",
         "CREATE INDEX IF NOT EXISTS idx_promo_redeemed ON promo_codes(redeemed_by)",
         "CREATE INDEX IF NOT EXISTS idx_promo_ip ON promo_codes(generated_ip, redeemed_at)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status, priority DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_tasks_creator ON agent_tasks(creator_agent)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_tasks_claimed ON agent_tasks(claimed_by)",
     ]
 
     for sql in indexes_sql:
