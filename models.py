@@ -1494,3 +1494,43 @@ class TaskClaimResponse(BaseModel):
     status: str
     claimed_by: str
     lease_expires_at: str
+
+
+# ─── Agent Registry / Discovery (Phase 46) ───────────────────────────────────
+
+class AgentRegisterRequest(BaseModel):
+    role: Optional[str] = Field(None, max_length=128)
+    capabilities: Optional[List[str]] = None
+    skills: Optional[List[str]] = None
+
+
+class AgentCardResponse(BaseModel):
+    agent_id: str
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    capabilities: Optional[List[str]] = None
+    skills: Optional[List[str]] = None
+    status: str
+    endpoint_url: str
+    created_at: str
+    last_seen: Optional[str] = None
+
+
+class AccountAgentsResponse(BaseModel):
+    agents: List[dict]
+    count: int
+
+
+class ActivityEntry(BaseModel):
+    activity_id: str
+    agent_id: str
+    action: str
+    details: Optional[str] = None
+    created_at: str
+
+
+class AccountActivityResponse(BaseModel):
+    activities: List[ActivityEntry]
+    count: int
+    next_cursor: Optional[str] = None

@@ -910,6 +910,8 @@ def _init_db_sqlite(conn):
         ("verified", "INTEGER DEFAULT 0"),
         ("skills", "TEXT"),
         ("interests", "TEXT"),
+        ("role", "TEXT"),
+        ("registered_at", "TEXT"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
@@ -986,6 +988,20 @@ def _init_db_sqlite(conn):
         if col not in m_existing:
             conn.execute(f'ALTER TABLE memory ADD COLUMN {col} {typedef}')
     conn.execute("UPDATE memory SET visibility='private' WHERE visibility IS NULL")
+
+    # Account activity table (DISC-06)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS account_activity (
+            activity_id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_account ON account_activity(account_id, created_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_agent ON account_activity(agent_id)")
 
     # Version history table (MEM-04 / MEM-06)
     conn.execute(
@@ -1324,7 +1340,9 @@ def _init_db_postgres(conn):
             verified INTEGER DEFAULT 0,
             skills TEXT,
             interests TEXT,
-            worker_status TEXT NOT NULL DEFAULT 'offline'
+            worker_status TEXT NOT NULL DEFAULT 'offline',
+            role TEXT,
+            registered_at TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS memory (
             agent_id TEXT NOT NULL,
@@ -1750,6 +1768,14 @@ def _init_db_postgres(conn):
             depends_on TEXT NOT NULL,
             PRIMARY KEY (task_id, depends_on)
         )""",
+        """CREATE TABLE IF NOT EXISTS account_activity (
+            activity_id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT,
+            created_at TEXT NOT NULL
+        )""",
     ]
 
     for sql in tables_sql:
@@ -1797,6 +1823,8 @@ def _init_db_postgres(conn):
         "CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status, priority DESC)",
         "CREATE INDEX IF NOT EXISTS idx_agent_tasks_creator ON agent_tasks(creator_agent)",
         "CREATE INDEX IF NOT EXISTS idx_agent_tasks_claimed ON agent_tasks(claimed_by)",
+        "CREATE INDEX IF NOT EXISTS idx_activity_account ON account_activity(account_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_activity_agent ON account_activity(agent_id)",
     ]
 
     for sql in indexes_sql:

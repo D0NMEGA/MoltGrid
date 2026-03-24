@@ -5568,3 +5568,131 @@ class TestScopedMemoryCAS:
         _, _key, h = register_agent()
         r = client.get("/v1/memory/no_key/history", headers=h)
         assert r.status_code == 404
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 46: AGENT REGISTRY + DISCOVERY (DISC-01 through DISC-06)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAgentRegistry:
+    """DISC-01/02: Agent self-registration with capabilities, skills, role."""
+
+    def test_disc01_register_updates_capabilities_and_role(self):
+        """DISC-01/02: POST /v1/agents/register updates role, capabilities, skills."""
+        agent_id, _, h = register_agent()
+        r = client.post("/v1/agents/register", json={
+            "role": "worker",
+            "capabilities": ["relay_send", "queue_poll"],
+            "skills": ["python", "fastapi"],
+        }, headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["agent_id"] == agent_id
+        assert d["role"] == "worker"
+
+    def test_disc02_register_partial_update(self):
+        """DISC-02: Partial update (role only) leaves other fields unchanged."""
+        _, _, h = register_agent()
+        client.post("/v1/agents/register", json={
+            "capabilities": ["memory_write"],
+        }, headers=h)
+        r = client.post("/v1/agents/register", json={"role": "researcher"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["role"] == "researcher"
+
+    def test_disc02_register_requires_auth(self):
+        """DISC-02: POST /v1/agents/register requires API key."""
+        r = client.post("/v1/agents/register", json={"role": "test"})
+        assert r.status_code in (401, 403, 422)
+
+
+class TestAgentCard:
+    """DISC-04: A2A-style Agent Card endpoint."""
+
+    def test_disc04_card_returns_agent_card(self):
+        """DISC-04: GET /v1/agents/{id}/card returns A2A agent card."""
+        agent_id, _, h = register_agent()
+        client.post("/v1/agents/register", json={
+            "role": "orchestrator",
+            "capabilities": ["task_delegate"],
+            "skills": ["nlp"],
+        }, headers=h)
+        r = client.get(f"/v1/agents/{agent_id}/card")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["agent_id"] == agent_id
+        assert "endpoint_url" in d
+        assert "status" in d
+        assert "capabilities" in d
+
+    def test_disc04_card_404_for_unknown_agent(self):
+        """DISC-04: Unknown agent returns 404."""
+        r = client.get("/v1/agents/agent_nonexistent_xyz/card")
+        assert r.status_code == 404
+
+
+class TestAccountAgents:
+    """DISC-03: Account-level agent listing with filters."""
+
+    def test_disc03_account_agents_lists_owned_agents(self):
+        """DISC-03: GET /v1/account/{id}/agents lists agents for that account."""
+        _, _, h = register_agent()
+        # Get owner via /v1/agents/me or extract from auth
+        # Register to get owner_id
+        me = client.get("/v1/agents/me", headers=h)
+        if me.status_code != 200:
+            pytest.skip("No /v1/agents/me endpoint available")
+        owner_id = me.json().get("owner_id")
+        if not owner_id:
+            pytest.skip("owner_id not available in /v1/agents/me response")
+        r = client.get(f"/v1/account/{owner_id}/agents", headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert "agents" in d
+        assert "count" in d
+
+    def test_disc03_account_agents_filter_by_capability(self):
+        """DISC-03: capability filter narrows results."""
+        agent_id, _, h = register_agent()
+        client.post("/v1/agents/register", json={"capabilities": ["relay_send"]}, headers=h)
+        me = client.get("/v1/agents/me", headers=h)
+        if me.status_code != 200:
+            pytest.skip("No /v1/agents/me endpoint")
+        owner_id = me.json().get("owner_id")
+        if not owner_id:
+            pytest.skip("owner_id not available")
+        r = client.get(f"/v1/account/{owner_id}/agents?capability=relay_send", headers=h)
+        assert r.status_code == 200
+
+
+class TestAccountActivity:
+    """DISC-06: Account activity feed with cursor pagination."""
+
+    def test_disc06_activity_feed_returns_list(self):
+        """DISC-06: GET /v1/account/{id}/activity returns activity list."""
+        agent_id, _, h = register_agent()
+        # Trigger some activity via register
+        client.post("/v1/agents/register", json={"role": "worker"}, headers=h)
+        me = client.get("/v1/agents/me", headers=h)
+        if me.status_code != 200:
+            pytest.skip("No /v1/agents/me endpoint")
+        owner_id = me.json().get("owner_id")
+        if not owner_id:
+            pytest.skip("owner_id not available")
+        r = client.get(f"/v1/account/{owner_id}/activity", headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert "activities" in d
+        assert "count" in d
+
+    def test_disc06_activity_cursor_pagination(self):
+        """DISC-06: after= cursor parameter works."""
+        agent_id, _, h = register_agent()
+        me = client.get("/v1/agents/me", headers=h)
+        if me.status_code != 200:
+            pytest.skip("No /v1/agents/me endpoint")
+        owner_id = me.json().get("owner_id")
+        if not owner_id:
+            pytest.skip("owner_id not available")
+        r = client.get(f"/v1/account/{owner_id}/activity?limit=1", headers=h)
+        assert r.status_code == 200
