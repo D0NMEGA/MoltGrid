@@ -460,11 +460,11 @@ def _record_activity(account_id: Optional[str], agent_id: str, action: str, deta
 
 
 def _agent_deregistration_loop():
-    """Background loop that auto-marks agents inactive/deregistered based on heartbeat age.
+    """Background loop that auto-marks agents offline based on heartbeat age.
 
     Every 60 seconds:
-    - Agents with heartbeat_at older than 5 minutes: set heartbeat_status='inactive'
-    - Agents with heartbeat_at older than 1 hour: set heartbeat_status='deregistered', worker_status='offline'
+    - Agents with heartbeat_at older than 5 minutes: set heartbeat_status='idle'
+    - Agents with heartbeat_at older than 1 hour: set heartbeat_status='offline', worker_status='offline'
     """
     while True:
         time.sleep(60)
@@ -473,28 +473,28 @@ def _agent_deregistration_loop():
             five_min_ago = (now - timedelta(minutes=5)).isoformat()
             one_hour_ago = (now - timedelta(hours=1)).isoformat()
             with get_db() as db:
-                # Deregister agents gone > 1 hour
-                deregistered = db.execute(
+                # Mark agents offline when gone > 1 hour
+                gone_offline = db.execute(
                     "SELECT agent_id FROM agents "
                     "WHERE heartbeat_at IS NOT NULL AND heartbeat_at < ? "
-                    "AND heartbeat_status != 'deregistered'",
+                    "AND heartbeat_status != 'offline'",
                     (one_hour_ago,)
                 ).fetchall()
-                if deregistered:
+                if gone_offline:
                     db.execute(
-                        "UPDATE agents SET heartbeat_status='deregistered', worker_status='offline' "
+                        "UPDATE agents SET heartbeat_status='offline', worker_status='offline' "
                         "WHERE heartbeat_at IS NOT NULL AND heartbeat_at < ? "
-                        "AND heartbeat_status != 'deregistered'",
+                        "AND heartbeat_status != 'offline'",
                         (one_hour_ago,)
                     )
-                # Mark inactive agents gone > 5 min (but not > 1 hour -- already handled)
+                # Mark idle agents gone > 5 min (but not > 1 hour, already handled)
                 db.execute(
-                    "UPDATE agents SET heartbeat_status='inactive' "
+                    "UPDATE agents SET heartbeat_status='idle' "
                     "WHERE heartbeat_at IS NOT NULL AND heartbeat_at < ? AND heartbeat_at >= ? "
-                    "AND heartbeat_status NOT IN ('inactive', 'deregistered')",
+                    "AND heartbeat_status NOT IN ('idle', 'offline')",
                     (five_min_ago, one_hour_ago)
                 )
-            for row in deregistered:
+            for row in gone_offline:
                 _queue_agent_event(row["agent_id"], "agent_deregistered", {"reason": "heartbeat_timeout"})
         except Exception:
             pass  # best-effort background job
@@ -1101,7 +1101,7 @@ def _run_liveness_check():
     with get_db() as db:
         rows = db.execute(
             "SELECT agent_id, heartbeat_at, heartbeat_interval FROM agents "
-            "WHERE heartbeat_at IS NOT NULL AND heartbeat_status NOT IN ('offline', 'deregistered', 'inactive')"
+            "WHERE heartbeat_at IS NOT NULL AND heartbeat_status NOT IN ('offline', 'idle')"
         ).fetchall()
         for row in rows:
             interval = row["heartbeat_interval"] or 60

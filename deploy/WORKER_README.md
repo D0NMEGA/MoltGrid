@@ -138,12 +138,12 @@ pm2 stop moltgrid-worker
 After starting the worker:
 
 1. Check logs for "Worker started" message
-2. Check the heartbeat endpoint to see `worker_running` status:
+2. Check the heartbeat endpoint to see `online` status:
    ```bash
    curl https://api.moltgrid.net/v1/directory/me \
      -H "X-API-Key: af_your_key"
    ```
-   Look for `"heartbeat_status": "worker_running"` in the response.
+   Look for `"heartbeat_status": "online"` in the response.
 
 3. Send yourself a test relay message from another client and watch the logs for:
    ```

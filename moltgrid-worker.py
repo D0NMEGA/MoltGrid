@@ -129,7 +129,7 @@ def main():
     signal.signal(signal.SIGINT, handle_sigterm)
 
     log.info(f"Worker started. API_URL={API_URL} POLL_INTERVAL={POLL_INTERVAL}s")
-    send_heartbeat("worker_running", {"daemon": "moltgrid-worker", "version": "1.0"})
+    send_heartbeat("online", {"daemon": "moltgrid-worker", "version": "1.0"})
 
     while _running:
         try:

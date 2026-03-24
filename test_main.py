@@ -2654,7 +2654,7 @@ class TestMemoryVisibilitySchema:
     - _check_memory_visibility() helper correctly enforces access rules
     - _log_memory_access() never raises
     - POST /v1/memory stores visibility and shared_agents
-    - GET /v1/agents/{target}/memory/{key} returns 403 for private keys
+    - GET /v1/agents/{target}/memory/{key} returns 404 for private keys (SEC-02)
     - GET /v1/agents/{target}/memory/{key} returns 200 for public keys
     - GET /v1/agents/{target}/memory/{key} returns 200 for shared keys (requester in list)
     - GET /v1/memory/{key} (own-agent) is unaffected by visibility
@@ -2874,7 +2874,7 @@ class TestMemoryVisibilitySchema:
         assert data["value"] == "hello"
         assert data["visibility"] == "public"
 
-    def test_cross_agent_read_private_returns_403(self):
+    def test_cross_agent_read_private_returns_404(self):
         """GET /v1/agents/{target}/memory/{key} returns 404 for private memory (SEC-02: prevents enumeration)."""
         aid1, _, h1 = register_agent("owner-cross-priv")
         aid2, _, h2 = register_agent("requester-cross-priv")
@@ -2903,7 +2903,7 @@ class TestMemoryVisibilitySchema:
         assert r.status_code == 200
         assert r.json()["value"] == "shared_val"
 
-    def test_cross_agent_read_shared_not_in_list_returns_403(self):
+    def test_cross_agent_read_shared_not_in_list_returns_404(self):
         """GET /v1/agents/{target}/memory/{key} returns 404 when requester NOT in shared_agents (SEC-02)."""
         aid1, _, h1 = register_agent("owner-shared-excl")
         aid2, _, h2 = register_agent("req-not-in-list")
@@ -2944,7 +2944,7 @@ class TestMemoryVisibilityEndpoint:
     - Returns 200 with {"status":"updated","key","visibility"} on success
     - Returns 404 for nonexistent key
     - Changing to public allows cross-agent reads (200)
-    - Changing to private blocks cross-agent reads (403)
+    - Changing to private blocks cross-agent reads (404 per SEC-02)
     - shared visibility with shared_agents list is stored and enforced
     - Invalid visibility value coerces to 'private'
     """

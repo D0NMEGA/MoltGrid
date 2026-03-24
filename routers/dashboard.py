@@ -114,7 +114,7 @@ def user_overview(request: Request, user_id: str = Depends(get_user_id)):
         ).fetchall()
         agent_ids = [r["agent_id"] for r in agents_rows]
         total_agents = len(agent_ids)
-        online_count = sum(1 for r in agents_rows if r["heartbeat_status"] in ("online", "busy", "worker_running"))
+        online_count = sum(1 for r in agents_rows if r["heartbeat_status"] in ("online", "busy", "idle"))
         agents = [dict(r) for r in agents_rows]
         if not agent_ids:
             return {

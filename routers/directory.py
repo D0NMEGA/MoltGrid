@@ -45,7 +45,7 @@ async def agent_heartbeat(request: Request, req: HeartbeatRequest = HeartbeatReq
     )
     # EVT-03: Auto-publish agent.health_changed lifecycle event OUTSIDE get_db block
     publish_event("agent.health_changed", {
-        "agent_id": agent_id, "status": req.status or "session_based", "heartbeat_at": now,
+        "agent_id": agent_id, "status": req.status or "online", "heartbeat_at": now,
     }, source_agent=agent_id)
     return {"agent_id": agent_id, "status": req.status, "heartbeat_at": now}
 
