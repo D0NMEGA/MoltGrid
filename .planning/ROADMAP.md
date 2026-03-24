@@ -23,7 +23,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 9: PostgreSQL Migration** - Database abstraction layer, migration scripts, backend-agnostic test suite (completed 2026-03-15)
 - [x] **Phase 10: Monolith Modularization** - Extract 6752-line main.py into modular router architecture with shared config/models/helpers (completed 2026-03-15)
 - [x] **Phase 14: Quickstarts & API Playground** - Framework quickstart guides (LangGraph, CrewAI, OpenAI), expanded MCP guide, Bruno API collection, Swagger UI playground (completed 2026-03-15)
-- [x] **Phase 43: SSE Push + Cursor Inbox** - True SSE push stream for agents (GET /v1/agents/{id}/events), cursor-based relay inbox pagination, component-level health reporting (completed 2026-03-23)
+- [x] **Phase 43: SSE Push + Cursor Inbox** - True SSE push stream for agents (GET /v1/agents/{id}/events), cursor-based relay inbox pagination, component-level health reporting (completed 2026-03-23)
+- [ ] **Phase 59: Relay Inbox Hardening** (INSERTED) - All-channel inbox default, cursor validation errors, limit validation, skill.md field name audit
 
 ## Phase Details
 
@@ -227,13 +228,28 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 43-01-PLAN.md � sse-starlette dependency, state._sse_connections, helpers._queue_agent_event fan-out, routers/sse.py SSE endpoint, main.py wire-in, test scaffold (PUSH-01, PUSH-02, PUSH-04, PUSH-06)
-- [ ] 43-02-PLAN.md � RelayInboxResponse next_cursor field, relay_inbox after= cursor, HealthComponentStatus/HealthComponents models, health endpoint components (PUSH-03, PUSH-05)
+- [ ] 43-01-PLAN.md -- sse-starlette dependency, state._sse_connections, helpers._queue_agent_event fan-out, routers/sse.py SSE endpoint, main.py wire-in, test scaffold (PUSH-01, PUSH-02, PUSH-04, PUSH-06)
+- [ ] 43-02-PLAN.md -- RelayInboxResponse next_cursor field, relay_inbox after= cursor, HealthComponentStatus/HealthComponents models, health endpoint components (PUSH-03, PUSH-05)
+
+### Phase 59: Relay Inbox Hardening (INSERTED)
+**Goal**: Agents can mark messages read, view all-channel inboxes by default, and receive clear errors for invalid inputs; skill.md documents correct field names
+**Depends on**: Phase 43
+**Requirements**: RLY-01, RLY-02, RLY-03, RLY-04, RLY-05
+**Success Criteria** (what must be TRUE):
+  1. POST /v1/relay/{message_id}/read returns 200 and sets read_at on the target message
+  2. GET /v1/relay/inbox with no ?channel= query param returns messages from all channels, not only "direct"
+  3. skill.md relay examples use to_agent (not "to") and payload (not "message", "body", or "content")
+  4. GET /v1/relay/inbox?after=invalid_cursor_xyz returns 400 with error code "invalid_cursor"
+  5. GET /v1/relay/inbox?limit=-1 returns 422 with a descriptive validation message, not 500
+**Plans**: 1 plan
+
+Plans:
+- [ ] 59-01-PLAN.md -- Fix relay_inbox all-channel default, cursor 400 validation, limit ge=1, skill.md field name audit (RLY-01, RLY-02, RLY-03, RLY-04, RLY-05)
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 9 → 10 → 2 → 3 → 4 → 5 → 6 → 7 → 8
+Phases execute in numeric order: 1 -> 9 -> 10 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -252,3 +268,4 @@ Phases execute in numeric order: 1 → 9 → 10 → 2 → 3 → 4 → 5 → 6 �
 | 41. Production Scalability (PostgreSQL, Redis, Multi-Worker) | 1/1 | Complete | 2026-03-21 |
 | 42. Fix Message Delivery | 2/2 | Complete | 2026-03-23 |
 | 43. SSE Push + Cursor Inbox | 2/2 | Complete   | 2026-03-23 |
+| 59. Relay Inbox Hardening | 0/1 | Not started | - |
