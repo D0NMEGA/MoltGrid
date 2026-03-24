@@ -2681,17 +2681,13 @@ class TestMemoryVisibilitySchema:
         # Store public memory
         r = client.post("/v1/memory", json={"key": "pub_key", "value": "pub_val", "visibility": "public"}, headers=h)
         assert r.status_code == 200
-        owner_id = client.get("/v1/memory/pub_key", headers=h).json()  # just to confirm it exists
-        # get owner agent_id from the registration
-        owner_agent_id = r.url  # need to fetch from DB
-        # Use get_db to check via helper
         with get_db() as db:
-            # We need to know the owner's agent_id — get it from registered agent
-            # Fetch the agent_id from the memory table
-            row = db.execute("SELECT agent_id FROM memory WHERE key='pub_key'").fetchone()
+            # Fetch the actual namespace the memory was stored under (auto-scoped)
+            row = db.execute("SELECT agent_id, namespace FROM memory WHERE key='pub_key'").fetchone()
             assert row is not None
             target_id = row["agent_id"]
-            result = _check_memory_visibility(db, target_id, "default", "pub_key", aid2)
+            actual_ns = row["namespace"]
+            result = _check_memory_visibility(db, target_id, actual_ns, "pub_key", aid2)
         assert result is True, "Public memory must be accessible by any agent"
 
     def test_check_visibility_private_other_agent(self):
@@ -2701,9 +2697,10 @@ class TestMemoryVisibilitySchema:
         aid2, _, _ = register_agent("requester-priv")
         client.post("/v1/memory", json={"key": "priv_key", "value": "secret", "visibility": "private"}, headers=h)
         with get_db() as db:
-            row = db.execute("SELECT agent_id FROM memory WHERE key='priv_key'").fetchone()
+            row = db.execute("SELECT agent_id, namespace FROM memory WHERE key='priv_key'").fetchone()
             target_id = row["agent_id"]
-            result = _check_memory_visibility(db, target_id, "default", "priv_key", aid2)
+            actual_ns = row["namespace"]
+            result = _check_memory_visibility(db, target_id, actual_ns, "priv_key", aid2)
         assert result is False, "Private memory must NOT be accessible by other agents"
 
     def test_check_visibility_shared_requester_in_list(self):
@@ -2717,9 +2714,10 @@ class TestMemoryVisibilitySchema:
             "shared_agents": [aid2]
         }, headers=h)
         with get_db() as db:
-            row = db.execute("SELECT agent_id FROM memory WHERE key='shared_key'").fetchone()
+            row = db.execute("SELECT agent_id, namespace FROM memory WHERE key='shared_key'").fetchone()
             target_id = row["agent_id"]
-            result = _check_memory_visibility(db, target_id, "default", "shared_key", aid2)
+            actual_ns = row["namespace"]
+            result = _check_memory_visibility(db, target_id, actual_ns, "shared_key", aid2)
         assert result is True, "Shared memory must be accessible by agents in the shared_agents list"
 
     def test_check_visibility_shared_requester_not_in_list(self):
@@ -2734,9 +2732,10 @@ class TestMemoryVisibilitySchema:
             "shared_agents": [aid3]  # aid2 is NOT in list
         }, headers=h)
         with get_db() as db:
-            row = db.execute("SELECT agent_id FROM memory WHERE key='shared_key2'").fetchone()
+            row = db.execute("SELECT agent_id, namespace FROM memory WHERE key='shared_key2'").fetchone()
             target_id = row["agent_id"]
-            result = _check_memory_visibility(db, target_id, "default", "shared_key2", aid2)
+            actual_ns = row["namespace"]
+            result = _check_memory_visibility(db, target_id, actual_ns, "shared_key2", aid2)
         assert result is False, "Agent not in shared_agents list must be denied"
 
     def test_check_visibility_nonexistent_key(self):
@@ -3182,7 +3181,7 @@ class TestMemoryDashboardEndpoints:
         assert r.status_code == 200
         d = r.json()
         assert d["key"] == "mykey"
-        assert d["namespace"] == "default"
+        assert d["namespace"] == f"agent:{agent_id}"  # auto-scoped from "default"
         assert d["value"] == "myvalue"
         assert d["visibility"] == "public"
         assert "shared_agents" in d
@@ -5385,7 +5384,7 @@ class TestScopedMemoryCAS:
 
     def test_mem01_auto_scope_default_namespace(self):
         """MEM-01: When namespace is 'default', memory is stored under agent:{agent_id}."""
-        _, agent_id, h = register_agent()
+        agent_id, _, h = register_agent()
         r = client.post("/v1/memory", json={"key": "scoped_key", "value": "scoped_val"}, headers=h)
         assert r.status_code == 200
         # Retrieve with auto-scoped namespace should work
@@ -5397,7 +5396,7 @@ class TestScopedMemoryCAS:
 
     def test_mem01_auto_scope_without_namespace(self):
         """MEM-01: When namespace is not provided, memory is stored under agent:{agent_id}."""
-        _, agent_id, h = register_agent()
+        agent_id, _, h = register_agent()
         r = client.post("/v1/memory", json={"key": "no_ns_key", "value": "no_ns_val"}, headers=h)
         assert r.status_code == 200
         r2 = client.get("/v1/memory/no_ns_key", headers=h)
@@ -5406,7 +5405,7 @@ class TestScopedMemoryCAS:
 
     def test_mem01_explicit_namespace_respected(self):
         """MEM-01: Explicit non-default namespace is kept as-is."""
-        _, agent_id, h = register_agent()
+        _, _key, h = register_agent()
         r = client.post("/v1/memory", json={"key": "k", "value": "v", "namespace": "custom_ns"}, headers=h)
         assert r.status_code == 200
         r2 = client.get("/v1/memory/k", params={"namespace": "custom_ns"}, headers=h)
@@ -5417,14 +5416,14 @@ class TestScopedMemoryCAS:
 
     def test_mem02_etag_returned_on_write(self):
         """MEM-02: POST /v1/memory returns ETag header with version."""
-        _, agent_id, h = register_agent()
+        _, _key, h = register_agent()
         r = client.post("/v1/memory", json={"key": "cas_key", "value": "v1"}, headers=h)
         assert r.status_code == 200
         assert "ETag" in r.headers
 
     def test_mem02_etag_returned_on_read(self):
         """MEM-02: GET /v1/memory/{key} returns ETag header."""
-        _, agent_id, h = register_agent()
+        _, _key, h = register_agent()
         client.post("/v1/memory", json={"key": "cas_key", "value": "v1"}, headers=h)
         r = client.get("/v1/memory/cas_key", headers=h)
         assert r.status_code == 200
@@ -5432,7 +5431,7 @@ class TestScopedMemoryCAS:
 
     def test_mem02_cas_409_on_stale_if_match(self):
         """MEM-02: If-Match with stale version returns 409 Conflict."""
-        _, agent_id, h = register_agent()
+        _, _key, h = register_agent()
         # Write version 1
         client.post("/v1/memory", json={"key": "cas_key", "value": "v1"}, headers=h)
         # Write version 2
@@ -5444,7 +5443,7 @@ class TestScopedMemoryCAS:
 
     def test_mem02_cas_succeeds_with_correct_version(self):
         """MEM-02: If-Match with current version succeeds."""
-        _, agent_id, h = register_agent()
+        _, _key, h = register_agent()
         r1 = client.post("/v1/memory", json={"key": "cas_key", "value": "v1"}, headers=h)
         etag = r1.headers.get("ETag", "1")
         h_cas = {**h, "If-Match": etag}
@@ -5453,7 +5452,7 @@ class TestScopedMemoryCAS:
 
     def test_mem02_version_increments_on_write(self):
         """MEM-02: Each write increments the version number."""
-        _, agent_id, h = register_agent()
+        _, _key, h = register_agent()
         r1 = client.post("/v1/memory", json={"key": "ver_key", "value": "v1"}, headers=h)
         r2 = client.post("/v1/memory", json={"key": "ver_key", "value": "v2"}, headers=h)
         etag1 = r1.headers.get("ETag", "1")
@@ -5483,13 +5482,14 @@ class TestScopedMemoryCAS:
         """MEM-03: TTL cleanup logic deletes expired memory entries."""
         from datetime import datetime, timezone, timedelta
         from db import get_db
-        _, agent_id, h = register_agent()
-        # Set a key with ttl
+        agent_id, _key, h = register_agent()
+        # Set a key with ttl (use auto-scoped namespace)
         client.post("/v1/memory", json={"key": "expire_me", "value": "gone", "ttl_seconds": 60}, headers=h)
         # Manually backdate the expires_at to the past
         past = (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat()
+        ns = f"agent:{agent_id}"
         with get_db() as db:
-            db.execute("UPDATE memory SET expires_at=? WHERE key=?", (past, "expire_me"))
+            db.execute("UPDATE memory SET expires_at=? WHERE agent_id=? AND namespace=? AND key=?", (past, agent_id, ns, "expire_me"))
         # Simulate cleanup
         now = datetime.now(timezone.utc).isoformat()
         with get_db() as db:
@@ -5503,7 +5503,7 @@ class TestScopedMemoryCAS:
     def test_mem04_write_appends_history(self):
         """MEM-04: Each write inserts a row into memory_history."""
         from db import get_db
-        _, agent_id, h = register_agent()
+        agent_id, _key, h = register_agent()
         client.post("/v1/memory", json={"key": "hist_key", "value": "v1"}, headers=h)
         client.post("/v1/memory", json={"key": "hist_key", "value": "v2"}, headers=h)
         with get_db() as db:
@@ -5517,7 +5517,7 @@ class TestScopedMemoryCAS:
 
     def test_mem05_meta_endpoint_returns_metadata(self):
         """MEM-05: GET /v1/memory/{key}/meta returns writer, version, timestamps, namespace."""
-        _, agent_id, h = register_agent()
+        agent_id, _key, h = register_agent()
         client.post("/v1/memory", json={"key": "meta_key", "value": "meta_val"}, headers=h)
         r = client.get("/v1/memory/meta_key/meta", headers=h)
         assert r.status_code == 200
@@ -5531,7 +5531,7 @@ class TestScopedMemoryCAS:
 
     def test_mem05_meta_404_for_missing_key(self):
         """MEM-05: GET /v1/memory/{key}/meta returns 404 for non-existent key."""
-        _, agent_id, h = register_agent()
+        _, _key, h = register_agent()
         r = client.get("/v1/memory/nonexistent/meta", headers=h)
         assert r.status_code == 404
 
@@ -5539,7 +5539,7 @@ class TestScopedMemoryCAS:
 
     def test_mem06_history_endpoint_returns_versions(self):
         """MEM-06: GET /v1/memory/{key}/history returns ordered version history."""
-        _, agent_id, h = register_agent()
+        _, _key, h = register_agent()
         client.post("/v1/memory", json={"key": "hist_key", "value": "first"}, headers=h)
         client.post("/v1/memory", json={"key": "hist_key", "value": "second"}, headers=h)
         client.post("/v1/memory", json={"key": "hist_key", "value": "third"}, headers=h)
@@ -5555,7 +5555,7 @@ class TestScopedMemoryCAS:
 
     def test_mem06_history_decrypts_values(self):
         """MEM-06: History endpoint returns decrypted values."""
-        _, agent_id, h = register_agent()
+        _, _key, h = register_agent()
         client.post("/v1/memory", json={"key": "hist_decrypt", "value": "plain_text"}, headers=h)
         r = client.get("/v1/memory/hist_decrypt/history", headers=h)
         assert r.status_code == 200
@@ -5565,6 +5565,6 @@ class TestScopedMemoryCAS:
 
     def test_mem06_history_404_for_missing_key(self):
         """MEM-06: GET /v1/memory/{key}/history returns 404 for non-existent key."""
-        _, agent_id, h = register_agent()
+        _, _key, h = register_agent()
         r = client.get("/v1/memory/no_key/history", headers=h)
         assert r.status_code == 404

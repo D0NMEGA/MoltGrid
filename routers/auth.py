@@ -27,7 +27,7 @@ from helpers import (
     _track_event, _log_audit, _log_memory_access,
     _should_send_notification, _get_user_notification_prefs,
     _get_client_ip, _encrypt, _decrypt,
-    _sanitize_text, _verify_agent_ownership,
+    _sanitize_text, _verify_agent_ownership, _resolve_namespace,
 )
 from models import (
     SignupRequest, LoginRequest,
@@ -672,9 +672,10 @@ def register_agent(req: RegisterRequest, request: Request, owner_id: Optional[st
                 "SELECT starter_code FROM templates WHERE template_id = ?", (req.template_id,)
             ).fetchone()
             if tmpl and tmpl["starter_code"]:
+                tmpl_ns = _resolve_namespace("default", agent_id)
                 db.execute(
                     "INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT (agent_id, namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
-                    (agent_id, "default", "template_starter_code", tmpl["starter_code"], now, now),
+                    (agent_id, tmpl_ns, "template_starter_code", tmpl["starter_code"], now, now),
                 )
 
                 # OpenClaw template special handling

@@ -15,7 +15,7 @@ from db import get_db
 from helpers import (
     get_user_id, _verify_agent_ownership,
     _log_memory_access, _log_audit, _decrypt, _encrypt,
-    _get_user_notification_prefs,
+    _get_user_notification_prefs, _resolve_namespace,
 )
 from models import (
     MemoryVisibilityRequest, MemoryBulkVisibilityRequest,
@@ -586,10 +586,11 @@ def user_memory_list(request: Request, agent_id: str, offset: int = 0, limit: in
 def user_memory_get(request: Request, agent_id: str, namespace: str = "default", key: str = "", user_id: str = Depends(get_user_id)):
     """Fetch a single memory entry including its value and visibility metadata."""
     if not key: raise HTTPException(400, "key is required")
+    resolved_ns = _resolve_namespace(namespace, agent_id)
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
-        row = db.execute("SELECT namespace, key, value, created_at, updated_at, expires_at, COALESCE(visibility,'private') as visibility, shared_agents FROM memory WHERE agent_id=? AND namespace=? AND key=? AND (expires_at IS NULL OR expires_at > ?)", (agent_id, namespace, key, now)).fetchone()
+        row = db.execute("SELECT namespace, key, value, created_at, updated_at, expires_at, COALESCE(visibility,'private') as visibility, shared_agents FROM memory WHERE agent_id=? AND namespace=? AND key=? AND (expires_at IS NULL OR expires_at > ?)", (agent_id, resolved_ns, key, now)).fetchone()
     if not row: raise HTTPException(404, "Memory key not found or expired")
     d = dict(row); d["value"] = _decrypt(d["value"]); d["shared_agents"] = json.loads(d["shared_agents"] or "[]")
     return d
@@ -600,13 +601,14 @@ def user_memory_get(request: Request, agent_id: str, namespace: str = "default",
 def user_memory_set_visibility(request: Request, agent_id: str, req: MemoryVisibilityRequest, user_id: str = Depends(get_user_id)):
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
+    resolved_ns = _resolve_namespace(req.namespace, agent_id)
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
-        old = db.execute("SELECT visibility FROM memory WHERE agent_id=? AND namespace=? AND key=?", (agent_id, req.namespace, req.key)).fetchone()
+        old = db.execute("SELECT visibility FROM memory WHERE agent_id=? AND namespace=? AND key=?", (agent_id, resolved_ns, req.key)).fetchone()
         if not old: raise HTTPException(404, "Memory key not found")
-        db.execute("UPDATE memory SET visibility=?, shared_agents=? WHERE agent_id=? AND namespace=? AND key=?", (vis, sa_json, agent_id, req.namespace, req.key))
-    _log_memory_access("visibility_changed", agent_id, req.namespace, req.key, actor_user_id=user_id, old_visibility=old["visibility"] or "private", new_visibility=vis)
-    return {"status": "updated", "key": req.key, "namespace": req.namespace, "visibility": vis}
+        db.execute("UPDATE memory SET visibility=?, shared_agents=? WHERE agent_id=? AND namespace=? AND key=?", (vis, sa_json, agent_id, resolved_ns, req.key))
+    _log_memory_access("visibility_changed", agent_id, resolved_ns, req.key, actor_user_id=user_id, old_visibility=old["visibility"] or "private", new_visibility=vis)
+    return {"status": "updated", "key": req.key, "namespace": resolved_ns, "visibility": vis}
 
 
 @router.post("/v1/user/agents/{agent_id}/memory-bulk-visibility", tags=["User Dashboard"])
@@ -618,7 +620,7 @@ def user_memory_bulk_visibility(request: Request, agent_id: str, req: MemoryBulk
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
         for entry in req.entries[:200]:
-            ns = entry.get("namespace", "default"); k = entry.get("key", "")
+            ns = _resolve_namespace(entry.get("namespace", "default"), agent_id); k = entry.get("key", "")
             if not k: continue
             old = db.execute("SELECT visibility FROM memory WHERE agent_id=? AND namespace=? AND key=?", (agent_id, ns, k)).fetchone()
             if not old: continue
@@ -647,11 +649,12 @@ def user_memory_access_log(request: Request, agent_id: str, namespace: str = "",
 @limiter.limit("120/minute")
 def user_memory_delete(request: Request, agent_id: str, namespace: str = "default", key: str = "", user_id: str = Depends(get_user_id)):
     if not key: raise HTTPException(400, "key is required")
+    resolved_ns = _resolve_namespace(namespace, agent_id)
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
-        deleted = db.execute("DELETE FROM memory WHERE agent_id=? AND namespace=? AND key=?", (agent_id, namespace, key)).rowcount
+        deleted = db.execute("DELETE FROM memory WHERE agent_id=? AND namespace=? AND key=?", (agent_id, resolved_ns, key)).rowcount
     if not deleted: raise HTTPException(404, "Memory key not found")
-    _log_memory_access("delete", agent_id, namespace, key, actor_user_id=user_id)
+    _log_memory_access("delete", agent_id, resolved_ns, key, actor_user_id=user_id)
     return {"status": "deleted"}
 
 

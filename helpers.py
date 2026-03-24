@@ -476,9 +476,31 @@ def _task_lease_expiry_loop():
             pass  # Best-effort background task
 
 
+def _memory_ttl_cleanup_loop():
+    """MEM-03: Delete memory entries whose expires_at has passed. Runs every 5 minutes."""
+    while True:
+        time.sleep(300)
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            with get_db() as db:
+                db.execute(
+                    "DELETE FROM memory WHERE expires_at IS NOT NULL AND expires_at < ?",
+                    (now,)
+                )
+        except Exception:
+            pass  # Best-effort background task
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MEMORY VISIBILITY
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def _resolve_namespace(namespace: str, agent_id: str) -> str:
+    """MEM-01: Auto-scope 'default' or empty namespace to agent:{agent_id}."""
+    if not namespace or namespace == "default":
+        return f"agent:{agent_id}"
+    return namespace
+
 
 def _check_memory_visibility(db, target_agent_id: str, namespace: str, key: str, requester_agent_id: str) -> bool:
     """Return True if requester_agent_id is allowed to read this memory entry."""
