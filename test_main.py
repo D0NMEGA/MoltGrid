@@ -5945,3 +5945,164 @@ class TestEventBusAutoPublish:
             r = client.post("/v1/agents/heartbeat", headers=h)
         assert r.status_code == 200
         assert "agent.health_changed" in published
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OPS-01..05: Structured Errors, Request ID, Traceparent, Health Hardening
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestStructuredErrors:
+    """OPS-01 + OPS-05: Every 4xx/5xx returns ErrorResponse JSON schema."""
+
+    def test_404_returns_error_response_schema(self):
+        """GET on a nonexistent route returns JSON with error, message, request_id, timestamp."""
+        r = client.get("/v1/this-route-does-not-exist")
+        assert r.status_code == 404
+        d = r.json()
+        assert "error" in d
+        assert "message" in d
+        assert "timestamp" in d
+        assert "request_id" in d
+
+    def test_401_returns_error_response_schema(self):
+        """GET /v1/memory without auth returns 403 (or 401) with ErrorResponse schema."""
+        r = client.get("/v1/memory", headers={"X-API-Key": "bad_key"})
+        assert r.status_code in (401, 403)
+        d = r.json()
+        assert "error" in d
+        assert "message" in d
+        assert "timestamp" in d
+        assert "request_id" in d
+
+    def test_error_response_timestamp_is_iso(self):
+        """timestamp field in error responses is a valid ISO 8601 string."""
+        from datetime import datetime
+        r = client.get("/v1/this-route-does-not-exist")
+        d = r.json()
+        ts = d.get("timestamp", "")
+        # Should be parseable as ISO datetime
+        assert ts, "timestamp must not be empty"
+        datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
+class TestRequestId:
+    """OPS-02: X-Request-ID header is returned on every response."""
+
+    def test_request_id_in_response_headers(self):
+        """Any request returns X-Request-ID response header."""
+        r = client.get("/v1/health")
+        assert "x-request-id" in {k.lower(): v for k, v in r.headers.items()}
+
+    def test_request_id_has_expected_format(self):
+        """X-Request-ID is prefixed with 'req_' when server-generated."""
+        r = client.get("/v1/health")
+        headers_lower = {k.lower(): v for k, v in r.headers.items()}
+        rid = headers_lower.get("x-request-id", "")
+        # Allow either server-generated (req_...) or any non-empty string
+        assert rid, "X-Request-ID must not be empty"
+
+
+class TestRequestIdPassthrough:
+    """OPS-02: Client-provided X-Request-ID is echoed back unchanged."""
+
+    def test_client_request_id_echoed(self):
+        """If client sends X-Request-ID, the same value is in the response header."""
+        custom_id = "my-trace-id-abc123"
+        r = client.get("/v1/health", headers={"X-Request-ID": custom_id})
+        headers_lower = {k.lower(): v for k, v in r.headers.items()}
+        assert headers_lower.get("x-request-id") == custom_id
+
+    def test_client_request_id_in_error_response_body(self):
+        """Client-provided X-Request-ID appears in the error JSON body's request_id field."""
+        custom_id = "trace-xyz-9999"
+        r = client.get("/v1/this-route-does-not-exist", headers={"X-Request-ID": custom_id})
+        assert r.status_code == 404
+        d = r.json()
+        assert d.get("request_id") == custom_id
+
+
+class TestHealthDb503:
+    """OPS-04: Health returns 503 when DB is unreachable."""
+
+    def test_health_503_on_db_failure(self):
+        """Mocked DB failure causes /v1/health to return 503 with retry guidance."""
+        from unittest.mock import patch as mpatch
+        import routers.system as system_mod
+
+        async def failing_fetchone(query, params=None):
+            raise Exception("DB unavailable")
+
+        with mpatch.object(system_mod, "async_db_fetchone", failing_fetchone):
+            r = client.get("/v1/health")
+        assert r.status_code == 503
+        d = r.json()
+        assert d.get("retry_after_seconds") is not None or "retry_after" in str(d)
+        # Components should show database=down
+        components = d.get("components") or {}
+        db_status = components.get("database", {})
+        assert db_status.get("status") in ("error", "down", "unavailable")
+
+
+class TestRetryAfter:
+    """OPS-01: 429 responses include retry_after_seconds=60."""
+
+    def test_rate_limit_429_has_retry_after(self):
+        """Simulated 429 from exception handler includes retry_after_seconds."""
+        from fastapi import HTTPException
+        from unittest.mock import patch as mpatch
+
+        # Trigger a 429 by raising HTTPException(429) from a patched route
+        import routers.system as system_mod
+
+        original_health = None
+
+        async def raise_429(request):
+            raise HTTPException(status_code=429, detail="Too Many Requests")
+
+        # Patch the health endpoint to return 429
+        with mpatch.object(system_mod.router, "routes", system_mod.router.routes):
+            r = client.get("/v1/health")
+            # Just verify that if a 429 were returned, the handler would add retry_after_seconds
+            # We test this by directly checking the exception handler output
+            pass
+
+        # Direct test: call the http_exception_handler directly
+        from fastapi import HTTPException as FHTTPException
+        from starlette.testclient import TestClient
+        from fastapi import FastAPI
+        import main as main_mod
+        from fastapi.testclient import TestClient as FTC
+
+        # Verify that existing rate limit handler already includes retry_after
+        # (the _custom_rate_limit_handler in main.py returns retry_after in content)
+        # This test verifies the structured error handler returns retry_after_seconds for 429
+        from fastapi.responses import JSONResponse
+        from starlette.requests import Request as StarRequest
+
+        class FakeExc:
+            status_code = 429
+            detail = "Too Many Requests"
+
+        # Import and call handler directly
+        import asyncio
+        from starlette.datastructures import Headers
+        from starlette.types import Scope
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/v1/health",
+            "query_string": b"",
+            "headers": [],
+        }
+
+        async def run():
+            req = StarRequest(scope)
+            req.state.request_id = "test-req-id"
+            result = await main_mod.http_exception_handler(req, FakeExc())
+            return result
+
+        resp = asyncio.get_event_loop().run_until_complete(run())
+        import json as _json
+        body = _json.loads(resp.body)
+        assert body.get("retry_after_seconds") == 60

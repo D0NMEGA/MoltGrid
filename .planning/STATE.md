@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 46-01-PLAN.md -- agent registry, A2A cards, account agents/activity, deregistration loop, 398 tests passing
-last_updated: "2026-03-24T01:51:02.967Z"
-last_activity: "2026-03-23 -- Plan 42-02 complete: relay dead-letter, status lifecycle, hop trace, 3 new endpoints"
+stopped_at: Completed 47-01-PLAN.md -- pubsub event bus, central publish_event, wildcard matching, lifecycle hooks, 410 tests passing
+last_updated: "2026-03-24T02:10:00.000Z"
+last_activity: "2026-03-24 -- Plan 47-01 complete: publish_event + wildcard + rate limits + lifecycle auto-publishing (EVT-01..05)"
 progress:
   total_phases: 12
   completed_phases: 5
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** OpenClaw running on MoltGrid and posting on MoltBook IS the product — every feature should ask "how does this serve the MoltGrid -> OpenClaw -> MoltBook loop?"
-**Current focus:** Phase 42 Plan 02 complete -- relay_send dead-letter refactor + status/trace/dead-letter endpoints
+**Current focus:** Phase 47 Plan 01 complete -- central publish_event, wildcard subscriptions, lifecycle auto-publishing from relay/tasks/memory/directory
 
 ## Current Position
 
-Phase: 42 (Fix Message Delivery)
-Plan: 02 of 02 in current phase (plan 02 complete)
-Status: TDD GREEN phase complete; 6/6 relay tests passing, 107/107 total tests passing
-Last activity: 2026-03-23 -- Plan 42-02 complete: relay dead-letter, status lifecycle, hop trace, 3 new endpoints
+Phase: 47 (PubSub Event Bus)
+Plan: 01 of 01 in current phase (plan 01 complete)
+Status: TDD GREEN phase complete; 12/12 EventBus tests passing, 410/410 total tests passing
+Last activity: 2026-03-24 -- Plan 47-01 complete: publish_event + wildcard + rate limits + lifecycle auto-publishing (EVT-01..05)
 
 Progress: [██████████] 100%
 
@@ -50,6 +50,7 @@ Progress: [██████████] 100%
 | 40-backend-scalability-load-hardening | 3/3 | 12min | 4min |
 | 41-production-scalability | 2/2 | 12min | 6min |
 | 42-fix-message-delivery | 2/2 | 27min | 14min |
+| 47-pubsub-event-bus | 1/1 | 18min | 18min |
 
 **Recent Trend:**
 - Last 5 plans: 1min, 3min, 3min, 7min, 12min
@@ -126,6 +127,11 @@ Recent decisions affecting current work:
 - [Phase 46-01]: GET /v1/agents/{agent_id}/card registered before /{agent_id} catch-all to avoid FastAPI route ambiguity
 - [Phase 46-01]: _record_activity called OUTSIDE get_db blocks (fire-and-forget own connection)
 - [Phase 46-01]: Agent card status computed from heartbeat_at age: active<5min, inactive<1h, deregistered>=1h
+- [Phase 47-01]: publish_event() uses fnmatch for wildcard matching (task.* matches task.status_changed)
+- [Phase 47-01]: publish_event uses get_standalone_conn() not get_db() -- fire-and-forget, OUTSIDE all get_db blocks
+- [Phase 47-01]: _pubsub_publish_counts dict in helpers.py -- in-memory sliding window, no DB overhead
+- [Phase 47-01]: patch routers.relay/tasks/memory/directory.publish_event in tests -- not helpers.publish_event -- routers import at module load
+- [Phase 47-01]: source_agent excluded from delivery -- agents do not receive their own published events
 
 ### Pending Todos
 
@@ -133,10 +139,10 @@ None yet.
 
 ### Blockers/Concerns
 
-None -- Phase 42 Plan 02 complete.
+None -- Phase 47 Plan 01 complete.
 
 ## Session Continuity
 
-Last session: 2026-03-24T01:50:54.907Z
-Stopped at: Completed 46-01-PLAN.md -- agent registry, A2A cards, account agents/activity, deregistration loop, 398 tests passing
+Last session: 2026-03-24T02:10:00.000Z
+Stopped at: Completed 47-01-PLAN.md -- pubsub event bus, central publish_event, wildcard matching, lifecycle hooks, 410 tests passing
 Resume file: None
