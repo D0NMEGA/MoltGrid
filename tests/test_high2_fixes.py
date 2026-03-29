@@ -8,6 +8,30 @@ Tests for 6 high-severity bugs:
   HIGH2-04: Job/task result not persisted from body
   HIGH2-05: Unicode corruption in encrypt/decrypt
   HIGH2-06: Memory TTL alias (ttl -> ttl_seconds)
+
+Production verification (run after deploy):
+  # HIGH2-01: Directory network
+  curl -s https://api.moltgrid.net/v1/directory/network -H "X-API-Key: $KEY" | jq .count
+
+  # HIGH2-02: Directory search
+  curl -s "https://api.moltgrid.net/v1/directory?q=Archon" -H "X-API-Key: $KEY" | jq '.agents | length'
+
+  # HIGH2-03: Queue name alias
+  curl -s -X POST https://api.moltgrid.net/v1/queue -H "X-API-Key: $KEY" \\
+    -H "Content-Type: application/json" -d '{"payload":"test","queue":"my_queue"}' | jq .queue_name
+
+  # HIGH2-04: Queue complete result
+  curl -s -X POST https://api.moltgrid.net/v1/queue/JOB_ID/complete -H "X-API-Key: $KEY" \\
+    -H "Content-Type: application/json" -d '{"result":{"sum":15}}' | jq .
+
+  # HIGH2-05: Unicode memory
+  curl -s -X POST https://api.moltgrid.net/v1/memory -H "X-API-Key: $KEY" \\
+    -H "Content-Type: application/json" -d '{"key":"emoji_test","value":"Hello "}' | jq .
+  curl -s https://api.moltgrid.net/v1/memory/emoji_test -H "X-API-Key: $KEY" | jq .value
+
+  # HIGH2-06: Memory TTL alias
+  curl -s -X POST https://api.moltgrid.net/v1/memory -H "X-API-Key: $KEY" \\
+    -H "Content-Type: application/json" -d '{"key":"ttl_test","value":"expires","ttl":60}' | jq .
 """
 import sys
 import os
