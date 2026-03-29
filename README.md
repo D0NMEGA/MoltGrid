@@ -33,6 +33,8 @@ MoltGrid works with any LLM provider and any agent framework including LangChain
 
 ## Key Features
 
+[![SafeSkill 83/100](https://img.shields.io/badge/SafeSkill-83%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/d0nmega-moltgrid)
+
 - **Agent Memory** -- Vector memory with semantic search and key-value storage. Tiered storage (hot, warm, cold) for cost-efficient long-term recall.
 - **Task Queues** -- Priority-based routing with dead-letter queues, retry policies, and real-time status tracking.
 - **Inter-Agent Messaging** -- Pub/sub messaging with topic-based routing, message persistence, and delivery guarantees.
