@@ -6772,3 +6772,250 @@ class TestMED212CollaborationsEndpoint:
         collabs = r.json()["collaborations"]
         assert len(collabs) >= 1
         assert any(c["partner_agent"] == aid2 for c in collabs)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 67: LOW SEVERITY + INFRASTRUCTURE FIXES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestLOW2_01_APIKeyWhitespace:
+    """LOW2-01: API key with leading/trailing whitespace should authenticate."""
+
+    def test_api_key_with_spaces_authenticates(self):
+        aid, key, h = register_agent()
+        # Key with leading/trailing spaces should still work
+        r = client.get("/v1/directory/me", headers={"X-API-Key": f"  {key}  "})
+        assert r.status_code == 200
+        assert r.json()["agent_id"] == aid
+
+    def test_api_key_with_tab_authenticates(self):
+        aid, key, h = register_agent()
+        r = client.get("/v1/directory/me", headers={"X-API-Key": f"\t{key}\t"})
+        assert r.status_code == 200
+
+
+class TestLOW2_02_URLExtractionPunctuation:
+    """LOW2-02: extract_urls/extract_emails should strip trailing punctuation."""
+
+    def test_extract_urls_strips_trailing_period(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/text/process", json={
+            "text": "Visit https://moltgrid.net.",
+            "operation": "extract_urls",
+        }, headers=h)
+        assert r.status_code == 200
+        urls = r.json()["result"]["urls"]
+        assert urls == ["https://moltgrid.net"]
+
+    def test_extract_urls_strips_trailing_comma(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/text/process", json={
+            "text": "See https://example.com, and more",
+            "operation": "extract_urls",
+        }, headers=h)
+        urls = r.json()["result"]["urls"]
+        assert urls == ["https://example.com"]
+
+    def test_extract_urls_strips_trailing_paren(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/text/process", json={
+            "text": "(https://example.com)",
+            "operation": "extract_urls",
+        }, headers=h)
+        urls = r.json()["result"]["urls"]
+        assert urls == ["https://example.com"]
+
+    def test_extract_emails_strips_trailing_period(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/text/process", json={
+            "text": "Contact admin@moltgrid.net.",
+            "operation": "extract_emails",
+        }, headers=h)
+        emails = r.json()["result"]["emails"]
+        assert emails == ["admin@moltgrid.net"]
+
+
+class TestLOW2_03_LimitGe1:
+    """LOW2-03: All limit params should reject values < 1 with 422."""
+
+    def test_events_limit_zero_rejected(self):
+        """Endpoints with limit params should reject limit=0."""
+        _, _, h = register_agent()
+        # Test a few key endpoints that had missing ge=1
+        r = client.get("/v1/pubsub/messages?limit=0", headers=h)
+        assert r.status_code == 422
+
+    def test_marketplace_limit_zero_rejected(self):
+        _, _, h = register_agent()
+        r = client.get("/v1/marketplace?limit=0", headers=h)
+        assert r.status_code == 422
+
+    def test_queue_limit_zero_rejected(self):
+        _, _, h = register_agent()
+        r = client.get("/v1/queue?limit=0", headers=h)
+        assert r.status_code == 422
+
+    def test_memory_limit_zero_rejected(self):
+        _, _, h = register_agent()
+        r = client.get("/v1/memory?limit=0", headers=h)
+        assert r.status_code == 422
+
+
+class TestLOW2_04_EventsEnvelope:
+    """LOW2-04: GET /v1/events should return {events: [...], count: N} envelope."""
+
+    def test_events_returns_envelope(self):
+        _, _, h = register_agent()
+        r = client.get("/v1/events", headers=h)
+        assert r.status_code == 200
+        data = r.json()
+        assert "events" in data
+        assert "count" in data
+        assert isinstance(data["events"], list)
+        assert data["count"] == len(data["events"])
+
+
+class TestLOW2_05_WebhookURLErrors:
+    """LOW2-05: Webhook URL validation returns specific error messages."""
+
+    def test_webhook_ftp_url_specific_error(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/webhooks", json={
+            "url": "ftp://evil.com/hook",
+            "event_types": ["message.received"],
+        }, headers=h)
+        assert r.status_code == 400
+        assert "http" in r.json()["detail"].lower() or "scheme" in r.json()["detail"].lower()
+
+    def test_webhook_localhost_specific_error(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/webhooks", json={
+            "url": "http://localhost:8080/hook",
+            "event_types": ["message.received"],
+        }, headers=h)
+        assert r.status_code == 400
+        assert "private" in r.json()["detail"].lower() or "internal" in r.json()["detail"].lower()
+
+
+class TestLOW2_06_DirectoryPublicFlag:
+    """LOW2-06: Directory update should only change public when explicitly provided."""
+
+    def test_update_without_public_preserves_existing(self):
+        _, _, h = register_agent()
+        # First, set public=True
+        r = client.put("/v1/directory/me", json={
+            "description": "Test agent",
+            "public": True,
+        }, headers=h)
+        assert r.status_code == 200
+
+        # Now update description only (no public field) -- public should stay True
+        r = client.put("/v1/directory/me", json={
+            "description": "Updated description",
+        }, headers=h)
+        assert r.status_code == 200
+
+        # Check that public is still True
+        r = client.get("/v1/directory/me", headers=h)
+        assert r.status_code == 200
+        assert r.json()["public"] is True
+
+
+class TestLOW2_07_ObstacleCourseValidation:
+    """LOW2-07: Obstacle course should reject invalid stage numbers."""
+
+    def test_invalid_stage_number_rejected(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/obstacle-course/submit", json={
+            "stages_completed": [1, 2, 11, 15],
+        }, headers=h)
+        assert r.status_code == 422
+
+    def test_negative_stage_number_rejected(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/obstacle-course/submit", json={
+            "stages_completed": [-1, 0, 1],
+        }, headers=h)
+        assert r.status_code == 422
+
+    def test_valid_stages_accepted(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/obstacle-course/submit", json={
+            "stages_completed": [1, 2, 3],
+        }, headers=h)
+        assert r.status_code == 200
+
+
+class TestLOW2_08_IdempotentUnsubscribe:
+    """LOW2-08: Unsubscribing from unsubscribed channel should return 200."""
+
+    def test_unsubscribe_not_subscribed_returns_200(self):
+        _, _, h = register_agent()
+        r = client.post("/v1/pubsub/unsubscribe", json={
+            "channel": "nonexistent.channel",
+        }, headers=h)
+        assert r.status_code == 200
+        assert r.json()["status"] == "not_subscribed"
+
+    def test_unsubscribe_twice_returns_200(self):
+        _, _, h = register_agent()
+        # Subscribe first
+        client.post("/v1/pubsub/subscribe", json={"channel": "test.ch"}, headers=h)
+        # Unsubscribe
+        r = client.post("/v1/pubsub/unsubscribe", json={"channel": "test.ch"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["status"] == "unsubscribed"
+        # Unsubscribe again -- idempotent
+        r = client.post("/v1/pubsub/unsubscribe", json={"channel": "test.ch"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["status"] == "not_subscribed"
+
+
+class TestR1_07_EventsCursor:
+    """R1-07 + R1-15: Events cursor validation."""
+
+    def test_invalid_cursor_returns_400(self):
+        _, _, h = register_agent()
+        r = client.get("/v1/events?after=totally_invalid_id", headers=h)
+        assert r.status_code == 400
+        assert "invalid_cursor" in str(r.json()).lower() or "cursor" in str(r.json()).lower()
+
+
+class TestR1_05_PubSubWildcard:
+    """R1-05: Verify pub/sub wildcard matching works (already fixed, regression test)."""
+
+    def test_wildcard_subscription_receives_message(self):
+        _, _, h1 = register_agent()
+        aid2, _, h2 = register_agent()
+        # Subscribe to wildcard pattern
+        r = client.post("/v1/pubsub/subscribe", json={"channel": "task.*"}, headers=h2)
+        assert r.status_code == 200
+        # Publish to matching channel
+        r = client.post("/v1/pubsub/publish", json={
+            "channel": "task.created",
+            "payload": {"task": "test"},
+        }, headers=h1)
+        assert r.status_code == 200
+        assert r.json()["subscribers_notified"] >= 1
+
+
+class TestR1_14_InboxAllChannels:
+    """R1-14: Verify inbox returns all channels by default (already fixed, regression test)."""
+
+    def test_inbox_no_channel_returns_all(self):
+        aid1, _, h1 = register_agent()
+        aid2, _, h2 = register_agent()
+        # Send messages on different channels
+        client.post("/v1/relay/send", json={
+            "to_agent": aid2, "channel": "alpha", "payload": {"msg": "a"},
+        }, headers=h1)
+        client.post("/v1/relay/send", json={
+            "to_agent": aid2, "channel": "beta", "payload": {"msg": "b"},
+        }, headers=h1)
+        # Inbox without channel filter should return both
+        r = client.get("/v1/relay/inbox", headers=h2)
+        assert r.status_code == 200
+        messages = r.json()["messages"]
+        channels = {m["channel"] for m in messages}
+        assert "alpha" in channels
+        assert "beta" in channels
