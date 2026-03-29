@@ -5,7 +5,7 @@ Extracted from main.py to serve as the shared models module for router modules.
 
 import re
 from typing import Optional, List, Dict, Union, Any, Literal
-from pydantic import BaseModel, ConfigDict, Field, validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, validator
 
 from config import MAX_MEMORY_VALUE_SIZE, MAX_QUEUE_PAYLOAD_SIZE
 
@@ -196,10 +196,10 @@ class HeartbeatRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class MemorySetRequest(BaseModel):
-    model_config = ConfigDict(extra='ignore')
+    model_config = ConfigDict(extra='ignore', populate_by_name=True)
     key: str = Field(..., min_length=1, max_length=256)
     value: str = Field(..., min_length=1, max_length=MAX_MEMORY_VALUE_SIZE)
-    ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000, description="Auto-expire after N seconds (60s-30d)")
+    ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000, validation_alias=AliasChoices("ttl_seconds", "ttl"), description="Auto-expire after N seconds (60s-30d)")
     visibility: str = Field("private", description="private | public | shared")
     shared_agents: List[str] = Field(default_factory=list)
 
@@ -317,8 +317,9 @@ class ScheduleListResponse(BaseModel):
     count: int
 
 class QueueSubmitRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     payload: Union[str, dict] = Field(..., description="Job payload (string or JSON object)")
-    queue_name: str = Field("default", max_length=64)
+    queue_name: str = Field("default", max_length=64, validation_alias=AliasChoices("queue_name", "queue"))
     priority: int = Field(0, ge=0, le=10, description="Higher = processed first")
     max_attempts: int = Field(1, ge=1, le=10, description="Max retry attempts before dead-lettering")
     retry_delay_seconds: int = Field(0, ge=0, le=3600, description="Seconds to wait before retrying")
@@ -335,6 +336,14 @@ class QueueJobResponse(BaseModel):
 
 class QueueFailRequest(BaseModel):
     reason: str = Field("", max_length=1000, description="Why the job failed")
+
+class QueueCompleteRequest(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    result: Optional[Union[str, dict]] = Field(None, description="Job completion result")
+
+class TaskCompleteRequest(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    result: Optional[Union[str, dict]] = Field(None, description="Task completion result")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

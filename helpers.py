@@ -64,7 +64,7 @@ def _encrypt(plaintext: str) -> str:
     """Encrypt a value for storage. No-op if ENCRYPTION_KEY is not set."""
     if not _fernet:
         return plaintext
-    return "ENC:" + _fernet.encrypt(plaintext.encode()).decode()
+    return "ENC:" + _fernet.encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
 def _decrypt(ciphertext: str) -> str:
     """Decrypt a value from storage. Handles both encrypted and plaintext."""
@@ -73,7 +73,7 @@ def _decrypt(ciphertext: str) -> str:
     if ciphertext.startswith("ENC:"):
         try:
             from cryptography.fernet import InvalidToken
-            return _fernet.decrypt(ciphertext[4:].encode()).decode()
+            return _fernet.decrypt(ciphertext[4:].encode("utf-8")).decode("utf-8")
         except (InvalidToken, Exception):
             return ciphertext  # Return as-is if decryption fails
     return ciphertext  # Plaintext (pre-encryption data)

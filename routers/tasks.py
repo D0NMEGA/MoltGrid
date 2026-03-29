@@ -19,6 +19,7 @@ from models import (
     TaskCreateRequest,
     TaskUpdateRequest,
     TaskDependencyRequest,
+    TaskCompleteRequest,
     TaskResponse,
     TaskListResponse,
     TaskClaimResponse,
@@ -146,13 +147,16 @@ def task_list(
 
 
 @router.post("/v1/tasks/{task_id}/complete", response_model=TaskResponse, tags=["Tasks"])
-def task_complete(task_id: str, result: Optional[str] = None, agent_id: str = Depends(get_agent_id)):
+def task_complete(task_id: str, body: Optional[TaskCompleteRequest] = None, agent_id: str = Depends(get_agent_id)):
     """Mark a running task as completed. Convenience endpoint (TSK-01).
 
     Only the agent that claimed the task (claimed_by) may call this.
     Returns 404 if task is not found, not in running state, or not owned by caller.
     _queue_agent_event and publish_event are called OUTSIDE the with get_db() block.
     """
+    result = None
+    if body and body.result is not None:
+        result = json.dumps(body.result) if isinstance(body.result, dict) else body.result
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         row = db.execute(

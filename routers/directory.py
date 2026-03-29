@@ -91,17 +91,27 @@ def directory_me(request: Request, agent_id: str = Depends(get_agent_id)):
 @router.get("/v1/directory", response_model=DirectoryListResponse, tags=["Directory"])
 @router.get("/v1/directory/agents", response_model=DirectoryListResponse, tags=["Directory"], include_in_schema=False)
 @limiter.limit("30/minute")
-async def directory_list(request: Request, 
+async def directory_list(request: Request,
     capability: Optional[str] = None,
+    q: Optional[str] = None,
     limit: int = Query(50, le=200),
 ):
     """Browse the public agent directory. No auth required. Cached for 30 seconds."""
-    cache_key = f"directory_list:{capability or ''}:{limit}"
+    cache_key = f"directory_list:{q or ''}:{capability or ''}:{limit}"
     cached = await response_cache.get(cache_key)
     if cached is not None:
         return cached
     cols = "agent_id, name, description, capabilities, skills, interests, available, reputation, credits, created_at, heartbeat_status, featured, verified"
-    if capability:
+    if q:
+        search_term = f"%{q}%"
+        rows = await async_db_fetchall(
+            f"SELECT {cols} FROM agents "
+            "WHERE public=1 AND (LOWER(name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?) "
+            "OR LOWER(capabilities) LIKE LOWER(?) OR LOWER(skills) LIKE LOWER(?)) "
+            "ORDER BY created_at DESC LIMIT ?",
+            (search_term, search_term, search_term, search_term, limit)
+        )
+    elif capability:
         rows = await async_db_fetchall(
             f"SELECT {cols} FROM agents "
             "WHERE public=1 AND capabilities LIKE ? ORDER BY created_at DESC LIMIT ?",
@@ -419,86 +429,100 @@ def directory_match(request: Request,
 def directory_network(request: Request):
     """Get network graph data for agent visualization. No auth required.
     Returns nodes (agents) and edges (collaborations/messages between them)."""
-    with get_db() as db:
-        agent_rows = db.execute(
-            "SELECT agent_id, name, description, capabilities, skills, interests, "
-            "reputation, reputation_count, credits, heartbeat_status, heartbeat_at, "
-            "available, featured, verified, created_at "
-            "FROM agents WHERE public=1 ORDER BY reputation DESC LIMIT 200"
-        ).fetchall()
 
-        nodes = []
-        agent_ids = set()
-        for r in agent_rows:
-            d = dict(r)
-            agent_ids.add(d["agent_id"])
-            nodes.append({
-                "id": d["agent_id"],
-                "name": d["name"],
-                "description": d["description"],
-                "skills": json.loads(d["skills"]) if d.get("skills") else [],
-                "interests": json.loads(d["interests"]) if d.get("interests") else [],
-                "capabilities": json.loads(d["capabilities"]) if d["capabilities"] else [],
-                "status": d["heartbeat_status"] or "unknown",
-                "reputation": d["reputation"] or 0.0,
-                "credits": d["credits"] or 0,
-                "available": bool(d.get("available", 1)),
-                "featured": bool(d.get("featured", 0)),
-                "verified": bool(d.get("verified", 0)),
-                "created_at": d["created_at"],
-            })
+    def _safe_json_list(val):
+        """Parse JSON string to list, returning empty list on failure."""
+        if not val:
+            return []
+        try:
+            result = json.loads(val)
+            return result if isinstance(result, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
 
-        collab_rows = db.execute(
-            "SELECT agent_id, partner_agent, COUNT(*) as weight, "
-            "AVG(rating) as avg_rating, MAX(created_at) as last_collab "
-            "FROM collaborations GROUP BY agent_id, partner_agent"
-        ).fetchall()
+    try:
+        with get_db() as db:
+            agent_rows = db.execute(
+                "SELECT agent_id, name, description, capabilities, skills, interests, "
+                "reputation, reputation_count, credits, heartbeat_status, heartbeat_at, "
+                "available, featured, verified, created_at "
+                "FROM agents WHERE public=1 ORDER BY reputation DESC LIMIT 200"
+            ).fetchall()
 
-        edges = []
-        for r in collab_rows:
-            d = dict(r)
-            if d["agent_id"] in agent_ids and d["partner_agent"] in agent_ids:
-                edges.append({
-                    "source": d["agent_id"], "target": d["partner_agent"],
-                    "type": "collaboration", "weight": d["weight"],
-                    "avg_rating": round(d["avg_rating"], 1) if d["avg_rating"] else 0,
-                    "last_activity": d["last_collab"],
+            nodes = []
+            agent_ids = set()
+            for r in agent_rows:
+                d = dict(r)
+                agent_ids.add(d["agent_id"])
+                nodes.append({
+                    "id": d["agent_id"],
+                    "name": d["name"],
+                    "description": d["description"],
+                    "skills": _safe_json_list(d.get("skills")),
+                    "interests": _safe_json_list(d.get("interests")),
+                    "capabilities": _safe_json_list(d.get("capabilities")),
+                    "status": d["heartbeat_status"] or "unknown",
+                    "reputation": d["reputation"] or 0.0,
+                    "credits": d["credits"] or 0,
+                    "available": bool(d.get("available", 1)),
+                    "featured": bool(d.get("featured", 0)),
+                    "verified": bool(d.get("verified", 0)),
+                    "created_at": d["created_at"],
                 })
 
-        msg_rows = db.execute(
-            "SELECT from_agent, to_agent, COUNT(*) as count, MAX(created_at) as last_msg "
-            "FROM relay GROUP BY from_agent, to_agent HAVING count > 0"
-        ).fetchall()
+            collab_rows = db.execute(
+                "SELECT agent_id, partner_agent, COUNT(*) as weight, "
+                "AVG(rating) as avg_rating, MAX(created_at) as last_collab "
+                "FROM collaborations GROUP BY agent_id, partner_agent"
+            ).fetchall()
 
-        for r in msg_rows:
-            d = dict(r)
-            if d["from_agent"] in agent_ids and d["to_agent"] in agent_ids:
-                edges.append({
-                    "source": d["from_agent"], "target": d["to_agent"],
-                    "type": "message", "weight": d["count"],
-                    "last_activity": d["last_msg"],
-                })
+            edges = []
+            for r in collab_rows:
+                d = dict(r)
+                if d["agent_id"] in agent_ids and d["partner_agent"] in agent_ids:
+                    edges.append({
+                        "source": d["agent_id"], "target": d["partner_agent"],
+                        "type": "collaboration", "weight": d["weight"],
+                        "avg_rating": round(d["avg_rating"], 1) if d["avg_rating"] else 0,
+                        "last_activity": d["last_collab"],
+                    })
 
-        task_rows = db.execute(
-            "SELECT creator_agent, claimed_by, COUNT(*) as count, MAX(created_at) as last_task "
-            "FROM marketplace WHERE claimed_by IS NOT NULL "
-            "GROUP BY creator_agent, claimed_by"
-        ).fetchall()
+            msg_rows = db.execute(
+                "SELECT from_agent, to_agent, COUNT(*) as count, MAX(created_at) as last_msg "
+                "FROM relay GROUP BY from_agent, to_agent HAVING count > 0"
+            ).fetchall()
 
-        for r in task_rows:
-            d = dict(r)
-            if d["creator_agent"] in agent_ids and d["claimed_by"] in agent_ids:
-                edges.append({
-                    "source": d["creator_agent"], "target": d["claimed_by"],
-                    "type": "marketplace", "weight": d["count"],
-                    "last_activity": d["last_task"],
-                })
+            for r in msg_rows:
+                d = dict(r)
+                if d["from_agent"] in agent_ids and d["to_agent"] in agent_ids:
+                    edges.append({
+                        "source": d["from_agent"], "target": d["to_agent"],
+                        "type": "message", "weight": d["count"],
+                        "last_activity": d["last_msg"],
+                    })
 
-    online_count = sum(1 for n in nodes if n["status"] == "online")
-    return {
-        "nodes": nodes, "edges": edges,
-        "stats": {"total_agents": len(nodes), "online_agents": online_count, "total_edges": len(edges)}
-    }
+            task_rows = db.execute(
+                "SELECT creator_agent, claimed_by, COUNT(*) as count, MAX(created_at) as last_task "
+                "FROM marketplace WHERE claimed_by IS NOT NULL "
+                "GROUP BY creator_agent, claimed_by"
+            ).fetchall()
+
+            for r in task_rows:
+                d = dict(r)
+                if d["creator_agent"] in agent_ids and d["claimed_by"] in agent_ids:
+                    edges.append({
+                        "source": d["creator_agent"], "target": d["claimed_by"],
+                        "type": "marketplace", "weight": d["count"],
+                        "last_activity": d["last_task"],
+                    })
+
+        online_count = sum(1 for n in nodes if n["status"] == "online")
+        return {
+            "nodes": nodes, "edges": edges,
+            "stats": {"total_agents": len(nodes), "online_agents": online_count, "total_edges": len(edges)}
+        }
+    except Exception:
+        return {"nodes": [], "edges": [], "stats": {"total_agents": 0, "online_agents": 0, "total_edges": 0}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # AGENT REGISTRY + DISCOVERY (Phase 46 -- DISC-01 through DISC-06)

@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from config import MAX_QUEUE_PAYLOAD_SIZE
 from db import get_db
 from helpers import get_agent_id, _encrypt, _decrypt, _track_event, _fire_webhooks, _queue_agent_event
-from models import QueueSubmitRequest, QueueJobResponse, QueueListResponse, QueueFailRequest
+from models import QueueSubmitRequest, QueueJobResponse, QueueListResponse, QueueFailRequest, QueueCompleteRequest
 
 from rate_limit import limiter
 
@@ -72,7 +72,10 @@ async def queue_claim(request: Request, queue_name: str = Query("default"), agen
 
 @router.post("/v1/queue/{job_id}/complete", tags=["Queue"])
 @limiter.limit("60/minute")
-def queue_complete(request: Request, job_id: str, result: str = "", agent_id: str = Depends(get_agent_id)):
+def queue_complete(request: Request, job_id: str, body: Optional[QueueCompleteRequest] = None, agent_id: str = Depends(get_agent_id)):
+    result = ""
+    if body and body.result is not None:
+        result = json.dumps(body.result) if isinstance(body.result, dict) else body.result
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         job_row = db.execute("SELECT agent_id, queue_name FROM queue WHERE job_id=? AND status='processing'", (job_id,)).fetchone()
