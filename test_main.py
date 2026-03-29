@@ -429,6 +429,106 @@ class TestRelay:
         r = client.get("/v1/relay/inbox?limit=0", headers=h)
         assert r.status_code == 422
 
+    def test_inbox_marks_delivered(self):
+        """Fetching inbox should mark messages as delivered (status + delivered_at)."""
+        id1, _, h1 = register_agent("del_sender")
+        id2, _, h2 = register_agent("del_receiver")
+
+        r = client.post("/v1/relay/send", json={"to_agent": id2, "payload": "delivery test"}, headers=h1)
+        msg_id = r.json()["message_id"]
+
+        # Before inbox fetch: status should be 'accepted'
+        status_r = client.get(f"/v1/messages/{msg_id}/status", headers=h1)
+        assert status_r.json()["status"] == "accepted"
+        assert status_r.json()["delivered_at"] is None
+
+        # Fetch inbox -- this should mark messages as delivered
+        inbox = client.get("/v1/relay/inbox", headers=h2)
+        assert inbox.json()["count"] == 1
+
+        # After inbox fetch: status should be 'delivered', delivered_at set
+        status_r2 = client.get(f"/v1/messages/{msg_id}/status", headers=h1)
+        assert status_r2.json()["status"] == "delivered"
+        assert status_r2.json()["delivered_at"] is not None
+
+    def test_inbox_delivery_idempotent(self):
+        """Fetching inbox twice should not change delivered_at timestamp."""
+        id1, _, h1 = register_agent("idem_sender")
+        id2, _, h2 = register_agent("idem_receiver")
+
+        client.post("/v1/relay/send", json={"to_agent": id2, "payload": "idem test"}, headers=h1)
+        msg_id = client.get("/v1/relay/inbox", headers=h2).json()["messages"][0]["message_id"]
+
+        # Get delivered_at after first fetch
+        ts1 = client.get(f"/v1/messages/{msg_id}/status", headers=h1).json()["delivered_at"]
+
+        # Fetch inbox again (unread_only=False to see delivered messages)
+        client.get("/v1/relay/inbox?unread_only=false", headers=h2)
+
+        # delivered_at should be unchanged
+        ts2 = client.get(f"/v1/messages/{msg_id}/status", headers=h1).json()["delivered_at"]
+        assert ts1 == ts2
+
+    def test_inbox_delivery_unread_still_works(self):
+        """After delivery marking, unread_only filter still works correctly."""
+        id1, _, h1 = register_agent("unread_sender")
+        id2, _, h2 = register_agent("unread_receiver")
+
+        client.post("/v1/relay/send", json={"to_agent": id2, "payload": "unread test"}, headers=h1)
+
+        # First fetch marks as delivered but NOT read
+        inbox1 = client.get("/v1/relay/inbox", headers=h2)
+        assert inbox1.json()["count"] == 1
+
+        # unread_only=True should STILL return the message (delivered != read)
+        inbox2 = client.get("/v1/relay/inbox?unread_only=true", headers=h2)
+        assert inbox2.json()["count"] == 1
+
+        # Mark as read
+        msg_id = inbox2.json()["messages"][0]["message_id"]
+        client.post(f"/v1/relay/{msg_id}/read", headers=h2)
+
+        # NOW unread_only should be empty
+        inbox3 = client.get("/v1/relay/inbox?unread_only=true", headers=h2)
+        assert inbox3.json()["count"] == 0
+
+    def test_inbox_delivery_fires_event(self):
+        """Delivery should fire a message.delivered lifecycle event."""
+        from unittest.mock import patch as mpatch
+        import routers.relay as relay_mod
+
+        id1, _, h1 = register_agent("evt_sender")
+        id2, _, h2 = register_agent("evt_receiver")
+
+        client.post("/v1/relay/send", json={"to_agent": id2, "payload": "event test"}, headers=h1)
+
+        published = []
+
+        def mock_publish(event_type, data, source_agent=None):
+            published.append(event_type)
+
+        with mpatch.object(relay_mod, "publish_event", mock_publish):
+            client.get("/v1/relay/inbox", headers=h2)
+
+        assert "message.delivered" in published
+
+    def test_inbox_delivery_records_hop(self):
+        """Delivery should record a hop in message_hops table."""
+        id1, _, h1 = register_agent("hop_sender")
+        id2, _, h2 = register_agent("hop_receiver")
+
+        r = client.post("/v1/relay/send", json={"to_agent": id2, "payload": "hop test"}, headers=h1)
+        msg_id = r.json()["message_id"]
+
+        # Fetch inbox to trigger delivery
+        client.get("/v1/relay/inbox", headers=h2)
+
+        # Check trace for delivered hop
+        trace = client.get(f"/v1/messages/{msg_id}/trace", headers=h1)
+        hops = trace.json()["hops"]
+        hop_types = [h["hop"] for h in hops]
+        assert "delivered" in hop_types
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TEXT UTILITIES

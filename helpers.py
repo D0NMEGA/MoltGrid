@@ -556,6 +556,37 @@ def _memory_ttl_cleanup_loop():
             pass  # Best-effort background task
 
 
+def _relay_cleanup_loop():
+    """MED2-07: Dead-letter relay messages stuck in 'accepted' for >30 days. Runs every hour."""
+    while True:
+        time.sleep(3600)
+        try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+            with get_db() as db:
+                stuck = db.execute(
+                    "SELECT message_id, from_agent, to_agent FROM relay "
+                    "WHERE status='accepted' AND created_at < ?",
+                    (cutoff,)
+                ).fetchall()
+                now = datetime.now(timezone.utc).isoformat()
+                for row in stuck:
+                    r = dict(row)
+                    # Move to dead_letter_messages
+                    dl_id = f"dl_{uuid.uuid4().hex[:16]}"
+                    db.execute(
+                        "INSERT INTO dead_letter_messages "
+                        "(dl_id, from_agent, to_agent, channel, payload, fail_reason, created_at) "
+                        "SELECT ?, from_agent, to_agent, channel, payload, 'delivery_timeout', ? "
+                        "FROM relay WHERE message_id=?",
+                        (dl_id, now, r["message_id"]),
+                    )
+                    db.execute("DELETE FROM relay WHERE message_id=?", (r["message_id"],))
+                if stuck:
+                    logger.info(f"[relay_cleanup] Dead-lettered {len(stuck)} messages stuck >30 days")
+        except Exception:
+            pass  # Best-effort background task
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MEMORY VISIBILITY
 # ═══════════════════════════════════════════════════════════════════════════════

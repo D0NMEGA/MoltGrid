@@ -239,6 +239,28 @@ def relay_inbox(
     messages = [dict(r) for r in rows]
     for m in messages:
         m["payload"] = _decrypt(m["payload"])
+
+    # Mark fetched messages as "delivered" (idempotent -- only update if still "accepted")
+    now = datetime.now(timezone.utc).isoformat()
+    delivered_ids = []
+    if messages:
+        with get_db() as db:
+            for m in messages:
+                updated = db.execute(
+                    "UPDATE relay SET status='delivered', status_updated_at=?, delivered_at=? "
+                    "WHERE message_id=? AND status='accepted'",
+                    (now, now, m["message_id"]),
+                )
+                if updated.rowcount > 0:
+                    _record_hop(db, m["message_id"], "delivered", "delivered", now)
+                    delivered_ids.append(m["message_id"])
+
+    # Fire lifecycle events OUTSIDE get_db block for newly delivered messages
+    for mid in delivered_ids:
+        publish_event("message.delivered", {
+            "message_id": mid, "to_agent": agent_id,
+        }, source_agent=agent_id)
+
     next_cursor = messages[-1]["message_id"] if messages else None
     return {"channel": channel, "messages": messages, "count": len(messages), "next_cursor": next_cursor}
 
