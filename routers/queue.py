@@ -31,7 +31,7 @@ def queue_submit(request: Request, req: QueueSubmitRequest, agent_id: str = Depe
 
 @router.get("/v1/queue/dead_letter", tags=["Queue"])
 @limiter.limit("60/minute")
-def queue_dead_letter_list(request: Request, queue_name: Optional[str] = None, limit: int = Query(20, le=100), offset: int = Query(0, ge=0), agent_id: str = Depends(get_agent_id)):
+def queue_dead_letter_list(request: Request, queue_name: Optional[str] = None, limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         if queue_name:
             rows = db.execute("SELECT job_id, queue_name, priority, attempt_count, max_attempts, fail_reason, created_at, failed_at, moved_at FROM dead_letter WHERE agent_id=? AND queue_name=? ORDER BY moved_at DESC LIMIT ? OFFSET ?", (agent_id, queue_name, limit, offset)).fetchall()
@@ -87,7 +87,7 @@ def queue_complete(request: Request, job_id: str, body: Optional[QueueCompleteRe
 
 @router.get("/v1/queue", response_model=QueueListResponse, tags=["Queue"])
 @limiter.limit("60/minute")
-def queue_list(request: Request, queue_name: str = "default", status: Optional[str] = None, limit: int = Query(20, le=100), agent_id: str = Depends(get_agent_id)):
+def queue_list(request: Request, queue_name: str = "default", status: Optional[str] = None, limit: int = Query(20, ge=1, le=100), agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         if status:
             rows = db.execute("SELECT job_id, status, priority, created_at, completed_at FROM queue WHERE agent_id=? AND queue_name=? AND status=? ORDER BY created_at DESC LIMIT ?", (agent_id, queue_name, status, limit)).fetchall()

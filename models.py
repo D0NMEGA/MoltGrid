@@ -435,7 +435,7 @@ class DirectoryUpdateRequest(BaseModel):
     capabilities: Optional[List[str]] = Field(None, max_length=20, description="List of capabilities")
     skills: Optional[List[str]] = Field(None, max_length=20, description="Technical skills (e.g. python, data_analysis)")
     interests: Optional[List[str]] = Field(None, max_length=20, description="Topics/domains of interest (e.g. AI, finance)")
-    public: bool = Field(False, description="Whether to list in the public directory")
+    public: Optional[bool] = Field(None, description="Whether to list in the public directory. Omit to keep current value.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

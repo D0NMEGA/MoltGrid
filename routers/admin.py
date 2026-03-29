@@ -201,7 +201,7 @@ def admin_dashboard(request: Request, _: bool = Depends(_verify_admin_session)):
 @router.get("/admin/api/messages", tags=["Admin"])
 @limiter.limit("60/minute")
 def admin_messages(request: Request, 
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     agent_id: Optional[str] = None,
     _: bool = Depends(_verify_admin_session),
@@ -229,7 +229,7 @@ def admin_messages(request: Request,
 @router.get("/admin/api/webhook-deliveries", tags=["Admin"])
 @limiter.limit("60/minute")
 def admin_webhook_deliveries(request: Request, 
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     status: Optional[str] = None,
     webhook_id: Optional[str] = None,
@@ -320,7 +320,7 @@ def admin_analytics(request: Request, _: bool = Depends(_verify_admin_session)):
 @router.get("/admin/api/memory", tags=["Admin"])
 @limiter.limit("60/minute")
 def admin_memory(request: Request, 
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     agent_id: Optional[str] = None,
     _: bool = Depends(_verify_admin_session),
@@ -346,7 +346,7 @@ def admin_memory(request: Request,
 @router.get("/admin/api/queue", tags=["Admin"])
 @limiter.limit("60/minute")
 def admin_queue(request: Request, 
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     status: Optional[str] = None,
     agent_id: Optional[str] = None,
@@ -397,7 +397,7 @@ def admin_schedules(request: Request, _: bool = Depends(_verify_admin_session)):
 @router.get("/admin/api/shared-memory", tags=["Admin"])
 @limiter.limit("60/minute")
 def admin_shared_memory(request: Request, 
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     namespace: Optional[str] = None,
     _: bool = Depends(_verify_admin_session),
@@ -540,7 +540,7 @@ def admin_delete_agent(request: Request, agent_id: str, _: bool = Depends(_verif
 @router.get("/admin/api/collaborations", tags=["Admin"])
 @limiter.limit("60/minute")
 def admin_collaborations(request: Request, 
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     agent_id: Optional[str] = None,
     _: bool = Depends(_verify_admin_session),
@@ -565,7 +565,7 @@ def admin_collaborations(request: Request,
 @router.get("/admin/api/marketplace", tags=["Admin"])
 @limiter.limit("60/minute")
 def admin_marketplace(request: Request, 
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     status: Optional[str] = None,
     _: bool = Depends(_verify_admin_session),
@@ -583,7 +583,7 @@ def admin_marketplace(request: Request,
 @router.get("/admin/api/scenarios", tags=["Admin"])
 @limiter.limit("60/minute")
 def admin_scenarios(request: Request, 
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     _: bool = Depends(_verify_admin_session),
 ):
@@ -604,7 +604,7 @@ def admin_scenarios(request: Request,
 @router.get("/admin/api/contact", tags=["Admin"])
 @limiter.limit("60/minute")
 def admin_contact(request: Request, 
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     _: bool = Depends(_verify_admin_session),
 ):

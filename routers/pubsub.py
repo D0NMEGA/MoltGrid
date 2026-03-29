@@ -67,14 +67,15 @@ def pubsub_subscribe(request: Request, req: PubSubSubscribeRequest, agent_id: st
 @router.post("/v1/pubsub/unsubscribe", tags=["Pub/Sub"], response_model=PubSubUnsubscribeResponse)
 @limiter.limit("60/minute")
 def pubsub_unsubscribe(request: Request, req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
-    """Unsubscribe from a broadcast channel."""
+    """Unsubscribe from a broadcast channel. Idempotent -- returns 200 even if not subscribed."""
     with get_db() as db:
         r = db.execute(
             "DELETE FROM pubsub_subscriptions WHERE agent_id=? AND channel=?",
             (agent_id, req.channel)
         )
+        # LOW2-08: Idempotent unsubscribe -- return 200 with "not_subscribed" instead of 404
         if r.rowcount == 0:
-            raise HTTPException(404, "Not subscribed to this channel")
+            return {"channel": req.channel, "status": "not_subscribed"}
     return {"channel": req.channel, "status": "unsubscribed"}
 
 @router.get("/v1/pubsub/subscriptions", tags=["Pub/Sub"], response_model=PubSubSubscriptionsResponse)

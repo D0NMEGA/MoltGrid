@@ -258,7 +258,7 @@ def memory_delete(request: Request, key: str, namespace: str = "default", agent_
 
 @router.get("/v1/memory", response_model=MemoryListResponse, tags=["Memory"])
 @limiter.limit("60/minute")
-def memory_list(request: Request, namespace: str = "default", prefix: str = "", limit: int = Query(50, le=200), agent_id: str = Depends(get_agent_id)):
+def memory_list(request: Request, namespace: str = "default", prefix: str = "", limit: int = Query(50, ge=1, le=200), agent_id: str = Depends(get_agent_id)):
     resolved_ns = _resolve_namespace(namespace, agent_id)
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:

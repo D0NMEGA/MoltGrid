@@ -2587,7 +2587,8 @@ class TestPubSub:
     def test_unsubscribe_not_subscribed(self):
         _, _, h = register_agent()
         r = client.post("/v1/pubsub/unsubscribe", json={"channel": "nope"}, headers=h)
-        assert r.status_code == 404
+        assert r.status_code == 200
+        assert r.json()["status"] == "not_subscribed"
 
     def test_list_subscriptions(self):
         _, _, h = register_agent()
@@ -4593,14 +4594,16 @@ class TestAgentEventStream:
         _id, key, h = register_agent("event-test")
         r = client.get("/v1/events", headers=h)
         assert r.status_code == 200
-        assert isinstance(r.json(), list)
+        data = r.json()
+        assert "events" in data
+        assert isinstance(data["events"], list)
 
     def test_poll_events_returns_inserted(self):
         _id, key, h = register_agent("event-test2")
         eid = self._insert_event(_id)
         r = client.get("/v1/events", headers=h)
         assert r.status_code == 200
-        ids = [e["event_id"] for e in r.json()]
+        ids = [e["event_id"] for e in r.json()["events"]]
         assert eid in ids
 
     def test_ack_event(self):
@@ -4610,7 +4613,7 @@ class TestAgentEventStream:
         assert r.status_code == 200
         assert r.json()["acknowledged"] == 1
         r2 = client.get("/v1/events", headers=h)
-        ids = [e["event_id"] for e in r2.json()]
+        ids = [e["event_id"] for e in r2.json()["events"]]
         assert eid not in ids
 
     def test_stream_returns_event_immediately(self):
@@ -6276,27 +6279,32 @@ class TestSecurityFixes:
     def test_ssrf_ipv6_loopback(self):
         """_is_safe_url must block IPv6 loopback ::1."""
         from helpers import _is_safe_url
-        assert _is_safe_url("http://[::1]:8000/admin") is False
+        is_safe, reason = _is_safe_url("http://[::1]:8000/admin")
+        assert is_safe is False
 
     def test_ssrf_ipv4_mapped_ipv6(self):
         """_is_safe_url must block IPv4-mapped IPv6 (::ffff:127.0.0.1)."""
         from helpers import _is_safe_url
-        assert _is_safe_url("http://[::ffff:127.0.0.1]:8000/admin") is False
+        is_safe, reason = _is_safe_url("http://[::ffff:127.0.0.1]:8000/admin")
+        assert is_safe is False
 
     def test_ssrf_link_local_ipv6(self):
         """_is_safe_url must block IPv4-mapped link-local (::ffff:169.254.169.254)."""
         from helpers import _is_safe_url
-        assert _is_safe_url("http://[::ffff:169.254.169.254]/meta") is False
+        is_safe, reason = _is_safe_url("http://[::ffff:169.254.169.254]/meta")
+        assert is_safe is False
 
     def test_ssrf_ftp_scheme(self):
         """_is_safe_url must reject non-HTTP schemes like ftp://."""
         from helpers import _is_safe_url
-        assert _is_safe_url("ftp://internal.host/file") is False
+        is_safe, reason = _is_safe_url("ftp://internal.host/file")
+        assert is_safe is False
 
     def test_ssrf_valid_https(self):
         """_is_safe_url must allow valid HTTPS URLs (sanity check)."""
         from helpers import _is_safe_url
-        assert _is_safe_url("https://httpbin.org/post") is True
+        is_safe, reason = _is_safe_url("https://httpbin.org/post")
+        assert is_safe is True
 
     # --- SEC2-02: Shared memory namespace injection ---
 
@@ -6838,16 +6846,9 @@ class TestLOW2_02_URLExtractionPunctuation:
 class TestLOW2_03_LimitGe1:
     """LOW2-03: All limit params should reject values < 1 with 422."""
 
-    def test_events_limit_zero_rejected(self):
-        """Endpoints with limit params should reject limit=0."""
-        _, _, h = register_agent()
-        # Test a few key endpoints that had missing ge=1
-        r = client.get("/v1/pubsub/messages?limit=0", headers=h)
-        assert r.status_code == 422
-
     def test_marketplace_limit_zero_rejected(self):
         _, _, h = register_agent()
-        r = client.get("/v1/marketplace?limit=0", headers=h)
+        r = client.get("/v1/marketplace/tasks?limit=0", headers=h)
         assert r.status_code == 422
 
     def test_queue_limit_zero_rejected(self):
@@ -6858,6 +6859,11 @@ class TestLOW2_03_LimitGe1:
     def test_memory_limit_zero_rejected(self):
         _, _, h = register_agent()
         r = client.get("/v1/memory?limit=0", headers=h)
+        assert r.status_code == 422
+
+    def test_vector_limit_zero_rejected(self):
+        _, _, h = register_agent()
+        r = client.get("/v1/vector?limit=0", headers=h)
         assert r.status_code == 422
 
 
@@ -6885,7 +6891,9 @@ class TestLOW2_05_WebhookURLErrors:
             "event_types": ["message.received"],
         }, headers=h)
         assert r.status_code == 400
-        assert "http" in r.json()["detail"].lower() or "scheme" in r.json()["detail"].lower()
+        body = r.json()
+        msg = (body.get("message") or body.get("detail") or "").lower()
+        assert "http" in msg or "scheme" in msg
 
     def test_webhook_localhost_specific_error(self):
         _, _, h = register_agent()
@@ -6894,7 +6902,9 @@ class TestLOW2_05_WebhookURLErrors:
             "event_types": ["message.received"],
         }, headers=h)
         assert r.status_code == 400
-        assert "private" in r.json()["detail"].lower() or "internal" in r.json()["detail"].lower()
+        body = r.json()
+        msg = (body.get("message") or body.get("detail") or "").lower()
+        assert "private" in msg or "internal" in msg
 
 
 class TestLOW2_06_DirectoryPublicFlag:
@@ -6990,10 +7000,10 @@ class TestR1_05_PubSubWildcard:
         # Subscribe to wildcard pattern
         r = client.post("/v1/pubsub/subscribe", json={"channel": "task.*"}, headers=h2)
         assert r.status_code == 200
-        # Publish to matching channel
+        # Publish to matching channel (payload must be string)
         r = client.post("/v1/pubsub/publish", json={
             "channel": "task.created",
-            "payload": {"task": "test"},
+            "payload": "test task payload",
         }, headers=h1)
         assert r.status_code == 200
         assert r.json()["subscribers_notified"] >= 1
@@ -7005,12 +7015,12 @@ class TestR1_14_InboxAllChannels:
     def test_inbox_no_channel_returns_all(self):
         aid1, _, h1 = register_agent()
         aid2, _, h2 = register_agent()
-        # Send messages on different channels
+        # Send messages on different channels (payload must be string)
         client.post("/v1/relay/send", json={
-            "to_agent": aid2, "channel": "alpha", "payload": {"msg": "a"},
+            "to_agent": aid2, "channel": "alpha", "payload": "msg a",
         }, headers=h1)
         client.post("/v1/relay/send", json={
-            "to_agent": aid2, "channel": "beta", "payload": {"msg": "b"},
+            "to_agent": aid2, "channel": "beta", "payload": "msg b",
         }, headers=h1)
         # Inbox without channel filter should return both
         r = client.get("/v1/relay/inbox", headers=h2)

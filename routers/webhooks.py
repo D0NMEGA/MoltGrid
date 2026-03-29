@@ -24,8 +24,9 @@ WEBHOOK_TIMEOUT = 5.0
 @limiter.limit("60/minute")
 def webhook_register(request: Request, req: WebhookRegisterRequest, agent_id: str = Depends(get_agent_id)):
     """Register a webhook callback URL for event notifications."""
-    if not _is_safe_url(req.url):
-        raise HTTPException(400, "Webhook URL points to a private/internal address")
+    is_safe, reason = _is_safe_url(req.url)
+    if not is_safe:
+        raise HTTPException(400, reason)
     for et in req.event_types:
         if et not in WEBHOOK_EVENT_TYPES:
             raise HTTPException(400, f"Invalid event type '{et}'. Valid: {sorted(WEBHOOK_EVENT_TYPES)}")

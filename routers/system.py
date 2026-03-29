@@ -378,8 +378,8 @@ def text_process(request: Request, req: TextProcessRequest, agent_id: str = Depe
     ops = {
         "word_count": lambda t: {"word_count": len(t.split())},
         "char_count": lambda t: {"char_count": len(t), "char_count_no_spaces": len(t.replace(" ", ""))},
-        "extract_urls": lambda t: {"urls": re.findall(r'https?://[^\s<>"{}|\\^[\]]+', t)},
-        "extract_emails": lambda t: {"emails": re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', t)},
+        "extract_urls": lambda t: {"urls": [u.rstrip(".,;:!?)") for u in re.findall(r'https?://[^\s<>"{}|\\^[\]]+', t)]},
+        "extract_emails": lambda t: {"emails": [e.rstrip(".,;:!?)") for e in re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', t)]},
         "tokenize_sentences": lambda t: {"sentences": [s.strip() for s in re.split(r'(?<=[.!?])\s+', t) if s.strip()]},
         "deduplicate_lines": lambda t: {"lines": list(dict.fromkeys(t.splitlines())), "removed": len(t.splitlines()) - len(set(t.splitlines()))},
         "hash_sha256": lambda t: {"hash": hashlib.sha256(t.encode()).hexdigest()},
@@ -425,7 +425,11 @@ async def serve_obstacle_course_md_v1(request: Request):
 @router.post("/v1/obstacle-course/submit", response_model=ObstacleSubmitResponse, tags=["Obstacle Course"])
 @limiter.limit("30/minute")
 async def obstacle_submit(request: Request, body: ObstacleCourseSubmitRequest, agent_id: str = Depends(get_agent_id)):
-    stages = sorted(set(s for s in body.stages_completed if 1 <= s <= 10))
+    # LOW2-07: Reject invalid stage numbers with 422 instead of silently filtering
+    invalid_stages = [s for s in body.stages_completed if s < 1 or s > 10]
+    if invalid_stages:
+        raise HTTPException(422, f"Invalid stage numbers: {invalid_stages}. Valid stages are 1-10.")
+    stages = sorted(set(body.stages_completed))
     base_score = len(stages) * 10
     sequential = len(stages) > 0 and all(i + 1 in stages for i in range(len(stages))) and stages[0] == 1
     score = min(100, base_score + (5 if sequential else 0))

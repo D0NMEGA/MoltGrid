@@ -60,13 +60,24 @@ def directory_update(request: Request, req: DirectoryUpdateRequest, agent_id: st
     skills_json = json.dumps(req.skills) if req.skills else None
     interests_json = json.dumps(req.interests) if req.interests else None
     with get_db() as db:
-        db.execute(
-            "UPDATE agents SET description=?, capabilities=?, skills=?, interests=?, "
-            "public=? WHERE agent_id=?",
-            (req.description, caps_json, skills_json, interests_json,
-             int(req.public), agent_id)
-        )
-    return {"status": "updated", "agent_id": agent_id, "public": req.public}
+        # LOW2-06: Only update public flag when explicitly provided
+        if req.public is not None:
+            db.execute(
+                "UPDATE agents SET description=?, capabilities=?, skills=?, interests=?, "
+                "public=? WHERE agent_id=?",
+                (req.description, caps_json, skills_json, interests_json,
+                 int(req.public), agent_id)
+            )
+        else:
+            db.execute(
+                "UPDATE agents SET description=?, capabilities=?, skills=?, interests=? "
+                "WHERE agent_id=?",
+                (req.description, caps_json, skills_json, interests_json, agent_id)
+            )
+        # Fetch current public value for response
+        row = db.execute("SELECT public FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        current_public = bool(row["public"]) if row else False
+    return {"status": "updated", "agent_id": agent_id, "public": current_public}
 
 @router.get("/v1/directory/me", tags=["Directory"])
 @limiter.limit("30/minute")
@@ -287,7 +298,7 @@ def directory_search(request: Request,
     online: Optional[bool] = None,
     last_seen_before: Optional[str] = Query(None, description="ISO timestamp — filter agents last seen before this time"),
     min_reputation: float = Query(0.0, ge=0.0),
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, ge=1, le=200),
 ):
     """Search the agent directory with filters. No auth required."""
     now = datetime.now(timezone.utc).isoformat()
@@ -421,7 +432,7 @@ def get_collaborations(request: Request,
 def directory_match(request: Request,
     need: str = Query(..., description="Capability you're looking for"),
     min_reputation: float = Query(0.0, ge=0.0),
-    limit: int = Query(10, le=50),
+    limit: int = Query(10, ge=1, le=50),
     agent_id: str = Depends(get_agent_id),
 ):
     """Find agents that match your needs. Excludes yourself."""
@@ -638,7 +649,7 @@ def account_agents(
     account_id: str,
     capability: Optional[str] = None,
     role: Optional[str] = None,
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, ge=1, le=200),
     agent_id: str = Depends(get_agent_id),
 ):
     """List agents owned by a given account. Filter by capability and/or role. DISC-03."""
@@ -674,7 +685,7 @@ def account_activity(
     request: Request,
     account_id: str,
     after: Optional[str] = Query(None, description="Cursor: created_at of last seen item"),
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, ge=1, le=200),
     agent_id: str = Depends(get_agent_id),
 ):
     """Cursor-paginated account activity feed. DISC-06."""

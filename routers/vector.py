@@ -161,7 +161,7 @@ def vector_delete(request: Request, key: str, namespace: str = "default", agent_
 
 @router.get("/v1/vector", response_model=VectorListResponse, tags=["Vector Memory"])
 @limiter.limit("60/minute")
-def vector_list(request: Request, namespace: str = "default", limit: int = Query(100, le=1000), agent_id: str = Depends(get_agent_id)):
+def vector_list(request: Request, namespace: str = "default", limit: int = Query(100, ge=1, le=1000), agent_id: str = Depends(get_agent_id)):
     """List all vector keys in a namespace (without embeddings for efficiency)."""
     with get_db() as db:
         rows = db.execute(
@@ -217,7 +217,7 @@ def shared_memory_set(request: Request, req: SharedMemorySetRequest, agent_id: s
 def shared_memory_list(request: Request, 
     namespace: str,
     prefix: str = "",
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, ge=1, le=200),
     agent_id: str = Depends(get_agent_id),
 ):
     """List keys in a shared namespace (readable by any agent)."""

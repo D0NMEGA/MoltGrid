@@ -55,13 +55,20 @@ async def events_poll(request: Request, after: str = Query(None), agent_id: str 
     """Return up to 20 unacknowledged events for agent. Use ?after=event_id for cursor-based pagination."""
     with get_db() as db:
         if after:
+            # R1-15: Validate cursor exists before using it
+            cursor_row = db.execute(
+                "SELECT rowid FROM agent_events WHERE event_id=?",
+                (after,)
+            ).fetchone()
+            if not cursor_row:
+                raise HTTPException(400, detail={"error": "invalid_cursor", "message": "Cursor event not found"})
             # EVT-01: cursor-based dedup. Return only events with rowid greater than the cursor event.
             rows = db.execute(
                 "SELECT event_id, event_type, payload, created_at FROM agent_events "
                 "WHERE agent_id=? AND acknowledged=0 "
-                "AND rowid > COALESCE((SELECT rowid FROM agent_events WHERE event_id=?), 0) "
+                "AND rowid > ? "
                 "ORDER BY rowid ASC LIMIT 20",
-                (agent_id, after)
+                (agent_id, cursor_row["rowid"])
             ).fetchall()
         else:
             rows = db.execute(
@@ -69,7 +76,8 @@ async def events_poll(request: Request, after: str = Query(None), agent_id: str 
                 "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 20",
                 (agent_id,)
             ).fetchall()
-    return [{"event_id": r["event_id"], "event_type": r["event_type"], "payload": json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"], "created_at": r["created_at"]} for r in rows]
+    events = [{"event_id": r["event_id"], "event_type": r["event_type"], "payload": json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"], "created_at": r["created_at"]} for r in rows]
+    return {"events": events, "count": len(events)}
 
 
 @router.post("/v1/events/ack", response_model=EventAckResponse, tags=["Events"])

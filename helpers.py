@@ -228,6 +228,9 @@ async def get_agent_id(request: Request) -> str:
     if not x_api_key:
         raise HTTPException(401, "Missing X-API-Key header")
 
+    # LOW2-01: Strip whitespace from API key before hashing
+    x_api_key = x_api_key.strip()
+
     with get_db() as db:
         row = db.execute(
             "SELECT agent_id FROM agents WHERE api_key_hash = ?",
@@ -808,40 +811,41 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("::/128"),         # IPv6 unspecified
 ]
 
-def _is_safe_url(url: str) -> bool:
-    """Validate that a webhook URL does not point to a private/internal address (SSRF prevention)."""
+def _is_safe_url(url: str) -> tuple:
+    """Validate that a webhook URL does not point to a private/internal address (SSRF prevention).
+    Returns (is_safe: bool, reason: str|None). LOW2-05: specific error messages."""
     try:
         parsed = urllib.parse.urlparse(url)
         # Scheme validation
         if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
-            return False
+            return (False, "URL must use http or https scheme")
         hostname = parsed.hostname
         if not hostname:
-            return False
+            return (False, "URL must have a valid hostname")
         # Block known dangerous hostnames
         if hostname.lower() in ("localhost", "0.0.0.0", "::1", "::ffff:127.0.0.1", "::ffff:169.254.169.254"):
-            return False
+            return (False, "URL points to a private/internal address")
         resolved_ips = socket.getaddrinfo(hostname, None)
         for _family, _type, _proto, _canonname, sockaddr in resolved_ips:
             ip = ipaddress.ip_address(sockaddr[0])
             # First-line defense: stdlib property checks
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
-                return False
+                return (False, "URL points to a private/internal address")
             # IPv4-mapped IPv6 normalization
             if hasattr(ip, 'ipv4_mapped') and ip.ipv4_mapped is not None:
                 mapped = ip.ipv4_mapped
                 if mapped.is_private or mapped.is_loopback or mapped.is_link_local or mapped.is_reserved or mapped.is_unspecified:
-                    return False
+                    return (False, "URL points to a private/internal address")
                 for net in _BLOCKED_NETWORKS:
                     if mapped in net:
-                        return False
+                        return (False, "URL points to a private/internal address")
             # Explicit blocklist check
             for net in _BLOCKED_NETWORKS:
                 if ip in net:
-                    return False
-        return True
+                    return (False, "URL points to a private/internal address")
+        return (True, None)
     except Exception:
-        return False
+        return (False, "URL could not be resolved")
 
 
 def _fire_webhooks(agent_id: str, event_type: str, data: dict):
@@ -1043,8 +1047,9 @@ def _run_webhook_delivery_tick():
 
             try:
                 # Re-validate URL at delivery time (DNS may have changed since registration)
-                if not _is_safe_url(row["url"]):
-                    raise ValueError("Webhook URL points to a private/internal address")
+                is_safe, reason = _is_safe_url(row["url"])
+                if not is_safe:
+                    raise ValueError(reason or "Webhook URL points to a private/internal address")
                 headers = {"Content-Type": "application/json", "X-MoltGrid-Event": row["event_type"]}
                 if row["secret"]:
                     decrypted_secret = _decrypt(row["secret"]) if row["secret"] else ""
