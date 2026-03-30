@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from config import MAX_QUEUE_PAYLOAD_SIZE
-from db import get_db
+from db import get_db, DB_BACKEND
 from helpers import get_agent_id, _encrypt, _decrypt, _track_event, _fire_webhooks, _queue_agent_event
 from models import QueueSubmitRequest, QueueJobResponse, QueueListResponse, QueueFailRequest, QueueCompleteRequest
 
@@ -65,10 +65,48 @@ async def queue_claim(request: Request, queue_name: str = Query("default"), agen
     now = datetime.now(timezone.utc).isoformat()
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=86400)).strftime("%Y-%m-%dT%H:%M:%S")
     with get_db() as db:
-        row = db.execute("SELECT job_id, payload, priority FROM queue WHERE queue_name=? AND status='pending' AND (next_retry_at IS NULL OR next_retry_at <= ?) AND created_at >= ? ORDER BY priority DESC, created_at ASC LIMIT 1", (queue_name, now, cutoff)).fetchone()
-        if not row: return {"status": "empty", "queue_name": queue_name}
-        db.execute("UPDATE queue SET status='processing', started_at=? WHERE job_id=?", (now, row["job_id"]))
-        return {"job_id": row["job_id"], "payload": _decrypt(row["payload"]), "priority": row["priority"]}
+        if DB_BACKEND in ("postgres", "dual"):
+            # PostgreSQL: atomic claim via FOR UPDATE SKIP LOCKED
+            row = db.execute(
+                "UPDATE queue SET status='processing', claimed_by=?, started_at=? "
+                "WHERE job_id = ("
+                "  SELECT job_id FROM queue "
+                "  WHERE queue_name=? AND status='pending' "
+                "  AND (next_retry_at IS NULL OR next_retry_at <= ?) "
+                "  AND created_at >= ? "
+                "  ORDER BY priority DESC, created_at ASC "
+                "  LIMIT 1 "
+                "  FOR UPDATE SKIP LOCKED"
+                ") RETURNING job_id, payload, priority",
+                (agent_id, now, queue_name, now, cutoff)
+            ).fetchone()
+        else:
+            # SQLite: atomic UPDATE WHERE status='pending' with rowcount check
+            row = db.execute(
+                "SELECT job_id, payload, priority FROM queue "
+                "WHERE queue_name=? AND status='pending' "
+                "AND (next_retry_at IS NULL OR next_retry_at <= ?) "
+                "AND created_at >= ? "
+                "ORDER BY priority DESC, created_at ASC LIMIT 1",
+                (queue_name, now, cutoff)
+            ).fetchone()
+            if row:
+                result = db.execute(
+                    "UPDATE queue SET status='processing', claimed_by=?, started_at=? "
+                    "WHERE job_id=? AND status='pending'",
+                    (agent_id, now, row["job_id"])
+                )
+                if result.rowcount == 0:
+                    row = None  # Lost the race -- another agent claimed it
+
+        if not row:
+            return {"status": "empty", "queue_name": queue_name}
+        return {
+            "job_id": row["job_id"],
+            "payload": _decrypt(row["payload"]),
+            "priority": row["priority"],
+            "claimed_by": agent_id,
+        }
 
 @router.post("/v1/queue/{job_id}/complete", tags=["Queue"])
 @limiter.limit("60/minute")
