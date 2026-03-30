@@ -7060,3 +7060,129 @@ class TestR1_14_InboxAllChannels:
         channels = {m["channel"] for m in messages}
         assert "alpha" in channels
         assert "beta" in channels
+
+
+class TestRateLimitUnification:
+    """Phase 70: Rate limit unification tests (RATE-01, RATE-02, RATE-03)."""
+
+    def test_tier_scaling_agent_read(self):
+        """RATE-01: agent_read scales with tier multiplier."""
+        from rate_limit import make_tier_limit
+        fn = make_tier_limit("agent_read")
+        assert fn("free:abc") == "120/minute"
+        assert fn("hobby:abc") == "300/minute"  # 120 * 2.5
+        assert fn("team:abc") == "600/minute"    # 120 * 5
+        assert fn("scale:abc") == "1200/minute"  # 120 * 10
+
+    def test_tier_scaling_agent_write(self):
+        """RATE-01: agent_write scales with tier multiplier."""
+        from rate_limit import make_tier_limit
+        fn = make_tier_limit("agent_write")
+        assert fn("free:abc") == "60/minute"
+        assert fn("scale:abc") == "600/minute"
+
+    def test_tier_scaling_auth_signup_explicit_limits(self):
+        """RATE-01: auth_signup uses TIER_AUTH_SIGNUP_LIMITS (explicit, NOT multipliers).
+
+        Per RATE-01 requirement: free=3/hr, hobby=10/hr, team=50/hr, scale=200/hr.
+        These do NOT follow TIER_MULTIPLIERS (which would give 3/7/15/30).
+        """
+        from rate_limit import make_tier_limit
+        fn = make_tier_limit("auth_signup")
+        assert fn("free:abc") == "3/hour"
+        assert fn("hobby:abc") == "10/hour"   # Explicit, NOT int(3 * 2.5) = 7
+        assert fn("team:abc") == "50/hour"    # Explicit, NOT int(3 * 5) = 15
+        assert fn("scale:abc") == "200/hour"  # Explicit, NOT int(3 * 10) = 30
+
+    def test_fixed_categories_not_scaled(self):
+        """RATE-02: admin and billing are fixed regardless of tier.
+        NOTE: dashboard is NOT a category -- dashboard endpoints use admin.
+        """
+        from rate_limit import make_tier_limit
+        for category in ("admin", "billing"):
+            fn = make_tier_limit(category)
+            from config import TIER_ENDPOINT_LIMITS
+            expected = TIER_ENDPOINT_LIMITS[category]
+            assert fn("free:x") == expected
+            assert fn("scale:x") == expected, f"{category} should not scale"
+
+    def test_no_dashboard_category(self):
+        """CONTEXT.md locks FIXED_CATEGORIES = {admin, billing}. No dashboard category."""
+        from config import FIXED_CATEGORIES, TIER_ENDPOINT_LIMITS
+        assert "dashboard" not in FIXED_CATEGORIES
+        assert "dashboard" not in TIER_ENDPOINT_LIMITS
+
+    def test_auth_signup_limits_match_rate01(self):
+        """TIER_AUTH_SIGNUP_LIMITS must match RATE-01 requirement values exactly."""
+        from config import TIER_AUTH_SIGNUP_LIMITS
+        assert TIER_AUTH_SIGNUP_LIMITS == {
+            "free": "3/hour",
+            "hobby": "10/hour",
+            "team": "50/hour",
+            "scale": "200/hour",
+        }
+
+    def test_no_dual_enforcement_in_get_agent_id(self):
+        """RATE-02: get_agent_id() no longer has rate limit enforcement."""
+        import inspect
+        from helpers import get_agent_id
+        source = inspect.getsource(get_agent_id)
+        assert "INSERT INTO rate_limits" not in source
+        assert "RATE_LIMIT_WINDOW" not in source
+        assert "rate_limit_max" not in source
+
+    def test_config_has_tier_endpoint_limits(self):
+        """All 8 endpoint categories defined in config (no dashboard)."""
+        from config import TIER_ENDPOINT_LIMITS, TIER_MULTIPLIERS, FIXED_CATEGORIES
+        assert len(TIER_ENDPOINT_LIMITS) == 8
+        assert "auth_signup" in TIER_ENDPOINT_LIMITS
+        assert "agent_read" in TIER_ENDPOINT_LIMITS
+        assert "agent_write" in TIER_ENDPOINT_LIMITS
+        assert "dashboard" not in TIER_ENDPOINT_LIMITS
+        assert TIER_MULTIPLIERS["scale"] == 10
+        assert FIXED_CATEGORIES == {"admin", "billing"}
+
+    @pytest.mark.asyncio
+    async def test_429_response_format(self):
+        """RATE-03: Verify 429 response body structure from slowapi handler."""
+        from unittest.mock import MagicMock
+        from main import _custom_rate_limit_handler
+
+        request = MagicMock()
+        request.state.subscription_tier = "free"
+        request.state.endpoint_category = "agent_read"
+        request.state.request_id = "req_test123"
+
+        exc = MagicMock()
+        exc.detail = "Rate limit exceeded: 120 per 1 minute"
+
+        response = await _custom_rate_limit_handler(request, exc)
+        assert response.status_code == 429
+        import json as _json
+        body = _json.loads(response.body)
+        assert body["error"] == "rate_limit_exceeded"
+        assert body["retry_after_seconds"] == 60
+        assert body["tier"] == "free"
+        assert body["endpoint_category"] == "agent_read"
+        assert "Retry-After" in response.headers
+        assert response.headers["Retry-After"] == "60"
+
+    @pytest.mark.asyncio
+    async def test_429_hourly_retry_after(self):
+        """RATE-03: Hourly windows get Retry-After: 3600."""
+        from unittest.mock import MagicMock
+        from main import _custom_rate_limit_handler
+
+        request = MagicMock()
+        request.state.subscription_tier = "free"
+        request.state.endpoint_category = "auth_signup"
+        request.state.request_id = None
+
+        exc = MagicMock()
+        exc.detail = "Rate limit exceeded: 3 per 1 hour"
+
+        response = await _custom_rate_limit_handler(request, exc)
+        import json as _json
+        body = _json.loads(response.body)
+        assert body["retry_after_seconds"] == 3600
+        assert response.headers["Retry-After"] == "3600"

@@ -18,3 +18,4 @@ slowapi==0.1.9
 asyncpg>=0.29.0
 redis[hiredis]>=5.0.0
 sse-starlette==3.3.3
+pytest-asyncio>=0.21.0
