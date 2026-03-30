@@ -327,6 +327,7 @@ class QueueSubmitRequest(BaseModel):
 class QueueJobResponse(BaseModel):
     job_id: str
     status: str
+    claimed_by: Optional[str] = None
     queue_name: str
     priority: int
     created_at: str

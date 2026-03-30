@@ -572,6 +572,7 @@ def _init_db_sqlite(conn):
             queue_name TEXT NOT NULL DEFAULT 'default',
             payload TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
+            claimed_by TEXT,
             priority INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             started_at TEXT,
@@ -974,6 +975,7 @@ def _init_db_sqlite(conn):
         ("max_attempts", "INTEGER DEFAULT 1"), ("attempt_count", "INTEGER DEFAULT 0"),
         ("retry_delay_seconds", "INTEGER DEFAULT 0"), ("next_retry_at", "TEXT"),
         ("failed_at", "TEXT"), ("fail_reason", "TEXT"),
+        ("claimed_by", "TEXT"),
     ]:
         if col not in q_existing:
             conn.execute(f"ALTER TABLE queue ADD COLUMN {col} {typedef}")
@@ -1388,6 +1390,7 @@ def _init_db_postgres(conn):
             queue_name TEXT NOT NULL DEFAULT 'default',
             payload TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
+            claimed_by TEXT,
             priority INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             started_at TEXT,
