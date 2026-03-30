@@ -22,6 +22,7 @@ from models import (
     MemoryVisibilityRequest, MemoryCrossAgentReadResponse,
     MemorySetResponse, MemoryDeleteResponse, MemoryVisibilityResponse,
     MemoryMetaResponse, MemoryHistoryEntry, MemoryHistoryResponse,
+    MemoryBatchRequest, MemoryBatchResponse, MemoryBatchResultItem,
 )
 
 import re as _re
@@ -215,6 +216,69 @@ def memory_set(request: Request, req: MemorySetRequest, if_match: Optional[str] 
     resp = JSONResponse(content=response_data, status_code=200)
     resp.headers["ETag"] = str(new_version)
     return resp
+
+
+@router.post("/v1/memory/batch", tags=["Memory"], response_model=MemoryBatchResponse)
+@limiter.limit(make_tier_limit("agent_write"))
+def memory_batch(request: Request, req: MemoryBatchRequest, agent_id: str = Depends(get_agent_id)):
+    results = []
+    succeeded = 0
+    failed = 0
+    log_items = []  # collect (namespace, key) for logging OUTSIDE get_db()
+
+    with get_db() as db:
+        for item in req.items:
+            try:
+                _validate_key(item.key)
+                if "\x00" in item.value:
+                    raise ValueError("Null bytes not allowed in values")
+                resolved_ns = _resolve_namespace("", agent_id)
+                now = datetime.now(timezone.utc)
+                expires = None
+                if item.ttl_seconds:
+                    expires = (now + timedelta(seconds=item.ttl_seconds)).isoformat()
+                enc_value = _encrypt(item.value)
+                vis = item.visibility if item.visibility in ("private", "public", "shared") else "private"
+                sa_json = json.dumps(item.shared_agents) if item.shared_agents else None
+
+                existing = db.execute(
+                    "SELECT version FROM memory WHERE agent_id=? AND namespace=? AND key=?",
+                    (agent_id, resolved_ns, item.key)
+                ).fetchone()
+                current_version = (existing["version"] or 1) if existing else 0
+                new_version = current_version + 1 if existing else 1
+
+                db.execute("""
+                    INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at, expires_at, visibility, shared_agents, version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(agent_id, namespace, key)
+                    DO UPDATE SET value=?, updated_at=?, expires_at=?, visibility=?, shared_agents=?, version=?
+                """, (agent_id, resolved_ns, item.key, enc_value, now.isoformat(), now.isoformat(), expires, vis, sa_json, new_version,
+                      enc_value, now.isoformat(), expires, vis, sa_json, new_version))
+
+                history_id = str(uuid.uuid4())
+                db.execute(
+                    "INSERT INTO memory_history (id, agent_id, namespace, key, value, version, changed_by, changed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (history_id, agent_id, resolved_ns, item.key, enc_value, new_version, agent_id, now.isoformat())
+                )
+
+                results.append(MemoryBatchResultItem(key=item.key, success=True, status="stored"))
+                log_items.append((resolved_ns, item.key, new_version))
+                succeeded += 1
+            except Exception as e:
+                results.append(MemoryBatchResultItem(key=item.key, success=False, status="error", error=str(e)))
+                failed += 1
+
+    # Log memory access OUTSIDE get_db() block per CLAUDE.md requirement
+    for ns, key, ver in log_items:
+        _log_memory_access("write", agent_id, ns, key, actor_agent_id=agent_id)
+        _queue_agent_event(agent_id, "memory_changed", {"key": key, "namespace": ns, "version": ver})
+        publish_event("memory.changed", {
+            "agent_id": agent_id, "namespace": ns, "key": key, "action": "write",
+        }, source_agent=agent_id)
+
+    return MemoryBatchResponse(results=results, total=len(req.items), succeeded=succeeded, failed=failed)
 
 
 @router.get("/v1/memory/{key}", response_model=MemoryGetResponse, tags=["Memory"])

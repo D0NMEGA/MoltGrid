@@ -917,6 +917,58 @@ class MemoryDeleteResponse(BaseModel):
     status: str
     key: str
 
+
+# ── BATCH MODELS ──────────────────────────────────────────────────────────────
+
+class MemoryBatchItem(BaseModel):
+    """Single item in a memory batch request."""
+    model_config = ConfigDict(extra='ignore', populate_by_name=True)
+    key: str = Field(..., min_length=1, max_length=256)
+    value: str = Field(..., min_length=1, max_length=MAX_MEMORY_VALUE_SIZE)
+    ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000)
+    visibility: str = Field("private")
+    shared_agents: List[str] = Field(default_factory=list)
+
+class MemoryBatchRequest(BaseModel):
+    items: List[MemoryBatchItem] = Field(..., min_length=1, max_length=100)
+
+class MemoryBatchResultItem(BaseModel):
+    key: str
+    success: bool
+    status: str  # "stored" or "error"
+    error: Optional[str] = None
+
+class MemoryBatchResponse(BaseModel):
+    results: List[MemoryBatchResultItem]
+    total: int
+    succeeded: int
+    failed: int
+
+class QueueBatchItem(BaseModel):
+    """Single item in a queue batch request."""
+    model_config = ConfigDict(populate_by_name=True)
+    payload: Union[str, dict] = Field(..., description="Job payload")
+    queue_name: str = Field("default", max_length=64)
+    priority: int = Field(0, ge=0, le=10)
+    max_attempts: int = Field(1, ge=1, le=10)
+    retry_delay_seconds: int = Field(0, ge=0, le=3600)
+
+class QueueBatchRequest(BaseModel):
+    items: List[QueueBatchItem] = Field(..., min_length=1, max_length=100)
+
+class QueueBatchResultItem(BaseModel):
+    job_id: Optional[str] = None
+    success: bool
+    status: str  # "pending" or "error"
+    queue_name: Optional[str] = None
+    error: Optional[str] = None
+
+class QueueBatchResponse(BaseModel):
+    results: List[QueueBatchResultItem]
+    total: int
+    succeeded: int
+    failed: int
+
 class MemoryMetaResponse(BaseModel):
     key: str
     namespace: str
