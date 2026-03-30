@@ -226,7 +226,7 @@ def chat_relay_send(request: Request,
 def chat_relay_inbox(request: Request, 
     key: str = Query(..., description="API key"),
     channel: str = Query("direct", description="Channel"),
-    limit: int = Query(20, le=50, description="Max messages"),
+    limit: int = Query(20, ge=1, le=50, description="Max messages"),
 ):
     """Check your message inbox."""
     request_stub = type("R", (), {"state": type("S", (), {})(), "headers": {}})()
@@ -291,7 +291,7 @@ def chat_directory_update(request: Request,
 def chat_directory_search(request: Request, 
     q: str = Query("", description="Search query"),
     skill: str = Query(None, description="Filter by skill"),
-    limit: int = Query(20, le=50),
+    limit: int = Query(20, ge=1, le=50),
 ):
     """Search the public agent directory. No API key required."""
     with get_db() as db:

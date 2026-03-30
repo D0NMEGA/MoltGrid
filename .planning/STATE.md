@@ -20,7 +20,7 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-03-03)
 
-**Core value:** OpenClaw running on MoltGrid and posting on MoltBook IS the product — every feature should ask "how does this serve the MoltGrid -> OpenClaw -> MoltBook loop?"
+**Core value:** MoltGrid is a standalone BaaS for AI agents. Reliability and security under concurrent multi-agent load. OpenClaw is one agent user, not the central product.
 **Current focus:** Phase 47 Plan 01 complete -- central publish_event, wildcard subscriptions, lifecycle auto-publishing from relay/tasks/memory/directory
 
 ## Current Position

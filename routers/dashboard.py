@@ -774,7 +774,8 @@ def user_webhooks_list(request: Request, agent_id: str, user_id: str = Depends(g
 @router.post("/v1/user/agents/{agent_id}/webhooks", tags=["User Dashboard"])
 @limiter.limit("120/minute")
 def user_webhook_create(request: Request, agent_id: str, req: WebhookRegisterRequest, user_id: str = Depends(get_user_id)):
-    if not _is_safe_url(req.url): raise HTTPException(400, "Webhook URL points to a private/internal address")
+    is_safe, reason = _is_safe_url(req.url)
+    if not is_safe: raise HTTPException(400, reason)
     for et in req.event_types:
         if et not in WEBHOOK_EVENT_TYPES: raise HTTPException(400, f"Invalid event type: {et}")
     webhook_id = f"wh_{uuid.uuid4().hex[:16]}"; now = datetime.now(timezone.utc).isoformat()
