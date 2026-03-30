@@ -116,8 +116,10 @@ def queue_complete(request: Request, job_id: str, body: Optional[QueueCompleteRe
         result = json.dumps(body.result) if isinstance(body.result, dict) else body.result
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
-        job_row = db.execute("SELECT agent_id, queue_name FROM queue WHERE job_id=? AND status='processing'", (job_id,)).fetchone()
+        job_row = db.execute("SELECT agent_id, queue_name, claimed_by FROM queue WHERE job_id=? AND status='processing'", (job_id,)).fetchone()
         if not job_row: raise HTTPException(404, "Job not found or not in processing state")
+        if job_row["claimed_by"] and job_row["claimed_by"] != agent_id:
+            raise HTTPException(403, "Not authorized -- job claimed by another agent")
         db.execute("UPDATE queue SET status='completed', completed_at=?, result=? WHERE job_id=?", (now, _encrypt(result) if result else result, job_id))
     _fire_webhooks(job_row["agent_id"], "job.completed", {"job_id": job_id, "queue_name": job_row["queue_name"], "result": result, "completed_at": now})
     _queue_agent_event(agent_id, "job_completed", {"job_id": job_id, "queue_name": job_row["queue_name"]})
@@ -140,6 +142,8 @@ def queue_fail(request: Request, job_id: str, req: QueueFailRequest, agent_id: s
     with get_db() as db:
         row = db.execute("SELECT * FROM queue WHERE job_id=? AND status='processing'", (job_id,)).fetchone()
         if not row: raise HTTPException(404, "Job not found or not in processing state")
+        if row["claimed_by"] and row["claimed_by"] != agent_id:
+            raise HTTPException(403, "Not authorized -- job claimed by another agent")
         attempt = (row["attempt_count"] or 0) + 1; max_att = row["max_attempts"] or 1; delay = row["retry_delay_seconds"] or 0
         if attempt >= max_att:
             db.execute("INSERT INTO dead_letter (job_id, agent_id, queue_name, payload, status, priority, created_at, started_at, completed_at, result, max_attempts, attempt_count, retry_delay_seconds, failed_at, fail_reason, moved_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (row["job_id"], row["agent_id"], row["queue_name"], row["payload"], "failed", row["priority"], row["created_at"], row["started_at"], row["completed_at"], row["result"], max_att, attempt, delay, now_iso, req.reason, now_iso))

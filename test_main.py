@@ -340,6 +340,48 @@ class TestQueue:
         assert len(claimed) == 1, f"Expected exactly 1 claim, got {len(claimed)}"
         assert len(empty) == 1, f"Expected exactly 1 empty, got {len(empty)}"
 
+    def test_complete_ownership_enforced(self):
+        """QUEUE-03: Agent B cannot complete Agent A's claimed job."""
+        _, _, h_a = register_agent()
+        _, _, h_b = register_agent()
+        r = client.post("/v1/queue/submit", json={"payload": "work"}, headers=h_a)
+        job_id = r.json()["job_id"]
+        client.post("/v1/queue/claim", headers=h_a)
+        resp = client.post(f"/v1/queue/{job_id}/complete", headers=h_b)
+        assert resp.status_code == 403
+        assert "Not authorized" in resp.json().get("message", resp.json().get("detail", ""))
+
+    def test_complete_owner_succeeds(self):
+        """QUEUE-03: The claiming agent can complete their own job."""
+        _, _, h = register_agent()
+        r = client.post("/v1/queue/submit", json={"payload": "work"}, headers=h)
+        job_id = r.json()["job_id"]
+        client.post("/v1/queue/claim", headers=h)
+        resp = client.post(f"/v1/queue/{job_id}/complete", json={"result": "done"}, headers=h)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "completed"
+
+    def test_fail_ownership_enforced(self):
+        """QUEUE-04: Agent B cannot fail Agent A's claimed job."""
+        _, _, h_a = register_agent()
+        _, _, h_b = register_agent()
+        r = client.post("/v1/queue/submit", json={"payload": "work"}, headers=h_a)
+        job_id = r.json()["job_id"]
+        client.post("/v1/queue/claim", headers=h_a)
+        resp = client.post(f"/v1/queue/{job_id}/fail", json={"reason": "test"}, headers=h_b)
+        assert resp.status_code == 403
+        assert "Not authorized" in resp.json().get("message", resp.json().get("detail", ""))
+
+    def test_fail_owner_succeeds(self):
+        """QUEUE-04: The claiming agent can fail their own job."""
+        _, _, h = register_agent()
+        r = client.post("/v1/queue/submit", json={"payload": "work"}, headers=h)
+        job_id = r.json()["job_id"]
+        client.post("/v1/queue/claim", headers=h)
+        resp = client.post(f"/v1/queue/{job_id}/fail", json={"reason": "test failure"}, headers=h)
+        assert resp.status_code == 200
+        assert resp.json()["status"] in ("pending_retry", "dead_lettered")
+
     def test_list_with_status_filter(self):
         _, _, h = register_agent()
         client.post("/v1/queue/submit", json={"payload": "a"}, headers=h)
