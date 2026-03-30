@@ -243,6 +243,13 @@ async def get_agent_id(request: Request) -> str:
         # Usage quota check (per owner's subscription tier)
         _check_usage_quota(db, row["agent_id"])
 
+        # Set subscription tier on request state for X-RateLimit-* headers
+        owner_row = db.execute(
+            "SELECT u.subscription_tier FROM users u JOIN agents a ON u.user_id = a.owner_id WHERE a.agent_id = ?",
+            (row["agent_id"],)
+        ).fetchone()
+        request.state.subscription_tier = (owner_row["subscription_tier"] if owner_row and owner_row["subscription_tier"] else "free")
+
         db.execute(
             "UPDATE agents SET last_seen = ?, request_count = request_count + 1 WHERE agent_id = ?",
             (now, row["agent_id"])
