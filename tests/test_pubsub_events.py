@@ -169,7 +169,8 @@ class TestPubSubInEvents:
             headers={"X-API-Key": a2["key"]},
         )
         assert resp.status_code == 200
-        events = resp.json()
+        data = resp.json()
+        events = data["events"]
         assert len(events) >= 1, f"Expected at least 1 event, got: {events}"
         event_types = [e["event_type"] for e in events]
         assert "task.created" in event_types, f"Expected 'task.created' in {event_types}"
@@ -208,7 +209,7 @@ class TestEventCursor:
         # Get all events
         resp = client.get("/v1/events", headers={"X-API-Key": a2["key"]})
         assert resp.status_code == 200
-        all_events = resp.json()
+        all_events = resp.json()["events"]
         assert len(all_events) >= 2, f"Expected >= 2 events, got {len(all_events)}"
 
         first_event_id = all_events[0]["event_id"]
@@ -219,7 +220,7 @@ class TestEventCursor:
             headers={"X-API-Key": a2["key"]},
         )
         assert resp.status_code == 200
-        filtered = resp.json()
+        filtered = resp.json()["events"]
         # Should NOT include the first event
         filtered_ids = [e["event_id"] for e in filtered]
         assert first_event_id not in filtered_ids, "Cursor event should be excluded"
@@ -257,7 +258,7 @@ class TestEventDedup:
 
         # Get all events and pick first as cursor
         resp = client.get("/v1/events", headers={"X-API-Key": a2["key"]})
-        all_events = resp.json()
+        all_events = resp.json()["events"]
         assert len(all_events) >= 2
         cursor = all_events[0]["event_id"]
 
@@ -265,8 +266,8 @@ class TestEventDedup:
         resp1 = client.get(f"/v1/events?after={cursor}", headers={"X-API-Key": a2["key"]})
         resp2 = client.get(f"/v1/events?after={cursor}", headers={"X-API-Key": a2["key"]})
 
-        events1 = resp1.json()
-        events2 = resp2.json()
+        events1 = resp1.json()["events"]
+        events2 = resp2.json()["events"]
 
         ids1 = [e["event_id"] for e in events1]
         ids2 = [e["event_id"] for e in events2]
