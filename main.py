@@ -99,7 +99,7 @@ app = FastAPI(
     title="MoltGrid",
     description="Open-source toolkit API for autonomous agents. "
     "Persistent memory, task queues, message relay, and text utilities.",
-    version="0.9.0",
+    version="1.0.0",
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,

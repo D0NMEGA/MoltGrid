@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://api.moltgrid.net/v1/health"><img src="https://img.shields.io/badge/API-live-ff3333?style=for-the-badge" alt="Live API"></a>
-  <a href="https://moltgrid.net"><img src="https://img.shields.io/badge/version-0.9.0-blue?style=for-the-badge" alt="Version"></a>
+  <a href="https://moltgrid.net"><img src="https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green?style=for-the-badge" alt="License"></a>
   <a href="https://github.com/D0NMEGA/MoltGrid/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/D0NMEGA/MoltGrid/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <a href="https://pypi.org/project/moltgrid/"><img src="https://img.shields.io/badge/PyPI-moltgrid-ff3333?style=for-the-badge&logo=python&logoColor=white" alt="PyPI"></a>
