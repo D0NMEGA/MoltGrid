@@ -93,7 +93,7 @@ class TestFUNC05TieredSummarize:
         # Step 2: Append 12 non-system messages to exceed auto-summarize threshold (>10)
         for i in range(12):
             resp = client.post(
-                f"/v1/sessions/{session_id}/append",
+                f"/v1/sessions/{session_id}/messages",
                 json={"role": "user", "content": f"Message number {i + 1}: unique content for summarization test"},
                 headers=headers,
             )

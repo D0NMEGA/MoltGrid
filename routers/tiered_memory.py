@@ -124,10 +124,12 @@ def tiered_recall(request: Request, req: TieredRecallRequest, agent_id: str = De
                         })
 
         # Tier 2: Mid-term memory fuzzy search
+        # SEC-01: namespace is scoped to 'agent:{agent_id}' -- must match how tiered_store_event persists
         if "mid" in req.tiers:
+            scoped_ns = f"agent:{agent_id}"
             mid_rows = db.execute(
-                "SELECT key, value FROM memory WHERE agent_id=? AND namespace IN ('default', 'notes')",
-                (agent_id,)
+                "SELECT key, value FROM memory WHERE agent_id=? AND namespace=?",
+                (agent_id, scoped_ns)
             ).fetchall()
 
             query_words = req.query.lower().split()

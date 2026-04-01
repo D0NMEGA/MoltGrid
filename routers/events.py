@@ -51,8 +51,8 @@ async def events_stream(request: Request, after: str = Query(None), agent_id: st
 
 @router.get("/v1/events", tags=["Events"])
 @limiter.limit(make_tier_limit("agent_read"))
-async def events_poll(request: Request, after: str = Query(None), agent_id: str = Depends(get_agent_id)):
-    """Return up to 20 unacknowledged events for agent. Use ?after=event_id for cursor-based pagination."""
+async def events_poll(request: Request, after: str = Query(None), event_type: str = Query(None), agent_id: str = Depends(get_agent_id)):
+    """Return up to 20 unacknowledged events for agent. Use ?after=event_id for cursor-based pagination. Optionally filter by ?event_type=task.created."""
     with get_db() as db:
         if after:
             # R1-15: Validate cursor exists before using it
@@ -63,19 +63,35 @@ async def events_poll(request: Request, after: str = Query(None), agent_id: str 
             if not cursor_row:
                 raise HTTPException(400, detail={"error": "invalid_cursor", "message": "Cursor event not found"})
             # EVT-01: cursor-based dedup. Return only events with rowid greater than the cursor event.
-            rows = db.execute(
-                "SELECT event_id, event_type, payload, created_at FROM agent_events "
-                "WHERE agent_id=? AND acknowledged=0 "
-                "AND rowid > ? "
-                "ORDER BY rowid ASC LIMIT 20",
-                (agent_id, cursor_row["rowid"])
-            ).fetchall()
+            if event_type:
+                rows = db.execute(
+                    "SELECT event_id, event_type, payload, created_at FROM agent_events "
+                    "WHERE agent_id=? AND acknowledged=0 AND rowid > ? AND event_type=? "
+                    "ORDER BY rowid ASC LIMIT 20",
+                    (agent_id, cursor_row["rowid"], event_type)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT event_id, event_type, payload, created_at FROM agent_events "
+                    "WHERE agent_id=? AND acknowledged=0 "
+                    "AND rowid > ? "
+                    "ORDER BY rowid ASC LIMIT 20",
+                    (agent_id, cursor_row["rowid"])
+                ).fetchall()
         else:
-            rows = db.execute(
-                "SELECT event_id, event_type, payload, created_at FROM agent_events "
-                "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 20",
-                (agent_id,)
-            ).fetchall()
+            if event_type:
+                rows = db.execute(
+                    "SELECT event_id, event_type, payload, created_at FROM agent_events "
+                    "WHERE agent_id=? AND acknowledged=0 AND event_type=? "
+                    "ORDER BY created_at ASC LIMIT 20",
+                    (agent_id, event_type)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT event_id, event_type, payload, created_at FROM agent_events "
+                    "WHERE agent_id=? AND acknowledged=0 ORDER BY created_at ASC LIMIT 20",
+                    (agent_id,)
+                ).fetchall()
     events = [{"event_id": r["event_id"], "event_type": r["event_type"], "payload": json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"], "created_at": r["created_at"]} for r in rows]
     return {"events": events, "count": len(events)}
 
