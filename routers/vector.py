@@ -202,6 +202,13 @@ def shared_memory_set(request: Request, req: SharedMemorySetRequest, agent_id: s
 
     enc_value = _encrypt(req.value)
     with get_db() as db:
+        # SEC-04: Namespace ownership -- first writer owns the namespace
+        first_owner = db.execute(
+            "SELECT owner_agent FROM shared_memory WHERE namespace=? LIMIT 1",
+            (req.namespace,)
+        ).fetchone()
+        if first_owner and first_owner["owner_agent"] != agent_id:
+            raise HTTPException(403, "Namespace owned by another agent")
         db.execute("""
             INSERT INTO shared_memory (owner_agent, namespace, key, value, description, created_at, updated_at, expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)

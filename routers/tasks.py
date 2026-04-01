@@ -204,9 +204,21 @@ def task_claim(task_id: str, agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         # Verify task exists first
         existing = db.execute(
-            "SELECT task_id, status FROM agent_tasks WHERE task_id=?", (task_id,)
+            "SELECT task_id, status, creator_agent FROM agent_tasks WHERE task_id=?", (task_id,)
         ).fetchone()
         if not existing:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        # SEC-03: Cross-account task claim returns 404 to avoid leaking task existence
+        task_owner = db.execute(
+            "SELECT owner_id FROM agents WHERE agent_id=?",
+            (existing["creator_agent"],)
+        ).fetchone()
+        caller_owner = db.execute(
+            "SELECT owner_id FROM agents WHERE agent_id=?",
+            (agent_id,)
+        ).fetchone()
+        if task_owner and caller_owner and task_owner["owner_id"] != caller_owner["owner_id"]:
             raise HTTPException(status_code=404, detail="Task not found")
 
         # Check all dependencies are completed before allowing claim
