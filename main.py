@@ -566,9 +566,6 @@ async def add_response_headers(request: Request, call_next):
     # OPS-02: Use client-provided X-Request-ID or generate one
     request_id = request.headers.get("X-Request-ID") or f"req_{uuid.uuid4().hex[:16]}"
     request.state.request_id = request_id
-    request.state.rate_limit_remaining = None
-    request.state.rate_limit_reset = None
-    request.state.rate_limit_max = None
 
     # OPS-03: Parse W3C traceparent header (00-{trace_id}-{parent_id}-{flags})
     traceparent = request.headers.get("traceparent")
@@ -587,25 +584,43 @@ async def add_response_headers(request: Request, call_next):
     response.headers["X-Request-ID"] = request_id
     response.headers["X-MoltGrid-Version"] = app.version
 
-    # Rate limit response headers -- use tier-aware values from slowapi or sensible defaults
+    # Rate limit response headers -- read actual window stats from slowapi (RATE-01, RATE-05)
     from config import DEFAULT_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW, TIER_RATE_LIMITS
+    from rate_limit import limiter as _limiter
     tier = getattr(request.state, "subscription_tier", "free")
     tier_max = TIER_RATE_LIMITS.get(tier, DEFAULT_RATE_LIMIT_MAX)
 
-    rate_limit_max = getattr(request.state, "rate_limit_max", None)
-    response.headers["X-RateLimit-Limit"] = str(rate_limit_max if rate_limit_max is not None else tier_max)
+    # slowapi sets request.state.view_rate_limit = (RateLimitItem, [identifiers])
+    # after @limiter.limit() decorator runs on the matched endpoint
+    view_rate_limit = getattr(request.state, "view_rate_limit", None)
+    endpoint_limit = None
+    remaining = None
+    reset_time = None
 
-    # Always include remaining and reset headers
-    if getattr(request.state, "rate_limit_remaining", None) is not None:
-        response.headers["X-RateLimit-Remaining"] = str(request.state.rate_limit_remaining)
-    else:
-        # Unauthenticated or no state set: show tier limit as remaining
-        response.headers["X-RateLimit-Remaining"] = str(rate_limit_max if rate_limit_max is not None else tier_max)
+    if view_rate_limit is not None:
+        try:
+            limit_item, identifiers = view_rate_limit
+            window_stats = _limiter.limiter.get_window_stats(limit_item, *identifiers)
+            endpoint_limit = limit_item.amount
+            remaining = window_stats.remaining
+            reset_time = int(window_stats.reset_time)
+        except Exception:
+            pass  # fall through to static fallback
 
-    if getattr(request.state, "rate_limit_reset", None) is not None:
-        response.headers["X-RateLimit-Reset"] = str(request.state.rate_limit_reset)
+    # X-RateLimit-Limit: per-endpoint limit if available (RATE-05), else tier max
+    response.headers["X-RateLimit-Limit"] = str(
+        endpoint_limit if endpoint_limit is not None else tier_max
+    )
+
+    # X-RateLimit-Remaining: actual counter if available (RATE-01), else tier max
+    response.headers["X-RateLimit-Remaining"] = str(
+        remaining if remaining is not None else tier_max
+    )
+
+    # X-RateLimit-Reset: actual window boundary if available, else calculated
+    if reset_time is not None:
+        response.headers["X-RateLimit-Reset"] = str(reset_time)
     else:
-        # Calculate next window boundary
         import time as _time
         _window = (int(_time.time()) // RATE_LIMIT_WINDOW + 1) * RATE_LIMIT_WINDOW
         response.headers["X-RateLimit-Reset"] = str(_window)
