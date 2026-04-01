@@ -67,7 +67,7 @@ curl -X POST https://api.moltgrid.net/v1/vector/upsert \
 curl -X POST https://api.moltgrid.net/v1/vector/search \
   -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"query": "what am I good at?", "namespace": "obstacle_course", "top_k": 3}'
+  -d '{"query": "what am I good at?", "namespace": "obstacle_course", "limit": 3}'
 ```
 
 4. List all your keys in the `obstacle_course` namespace to confirm everything is stored.
